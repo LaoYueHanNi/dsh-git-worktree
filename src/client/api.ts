@@ -1,0 +1,90 @@
+/**
+ * Browser-side fetch client for the plugin's host routes. Plain fetch against
+ * same-origin paths; every failure resolves to `{ error }` so callers can
+ * branch without try/catch.
+ */
+
+import type {
+  CreateWorktreeResult, RepoStatus, RouteError, SettingsBody, SwitchResult,
+} from '../wire.ts'
+import { ROUTE_SETTINGS, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
+
+/** One route call outcome: the parsed body, or the error envelope text. */
+type Call<T> = (T & { ok: true }) | { ok: false; error: string }
+
+/** POST one JSON body and parse the uniform envelope. */
+async function post<T>(url: string, body: unknown): Promise<Call<T>> {
+  return send<T>('POST', url, body)
+}
+
+/** Send one JSON body with any method and parse the uniform envelope. */
+async function send<T>(method: string, url: string, body: unknown): Promise<Call<T>> {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const payload: unknown = await response.json()
+    if (!response.ok) {
+      const error = payload as RouteError
+      return { ok: false, error: error.error ?? `HTTP ${String(response.status)}` }
+    }
+    return { ...(payload as T), ok: true }
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/**
+ * Repository status for one directory.
+ * @param path - absolute workspace directory.
+ */
+export async function fetchStatus(path: string): Promise<Call<RepoStatus>> {
+  try {
+    const response = await fetch(`${ROUTE_STATUS}?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
+    if (!response.ok) return { ok: false, error: `HTTP ${String(response.status)}` }
+    return { ...(await response.json() as RepoStatus), ok: true }
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/**
+ * Create or reuse the worktree for a branch.
+ * @param repoPath - absolute directory inside the repository.
+ * @param branch - branch display name.
+ */
+export function requestWorktree(repoPath: string, branch: string): Promise<Call<CreateWorktreeResult>> {
+  return post<CreateWorktreeResult>(ROUTE_WORKTREE, { repoPath, branch })
+}
+
+/**
+ * Read the plugin's persisted settings.
+ */
+export async function fetchSettings(): Promise<Call<SettingsBody>> {
+  try {
+    const response = await fetch(ROUTE_SETTINGS, { cache: 'no-store' })
+    if (!response.ok) return { ok: false, error: `HTTP ${String(response.status)}` }
+    return { ...(await response.json() as SettingsBody), ok: true }
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/**
+ * Persist new settings.
+ * @param value - the complete document to store.
+ */
+export function putSettings(value: SettingsBody): Promise<Call<SettingsBody>> {
+  return send<SettingsBody>('PUT', ROUTE_SETTINGS, value)
+}
+
+/**
+ * Switch the main checkout in place.
+ * @param repoPath - absolute directory inside the main worktree.
+ * @param branch - branch display name.
+ */
+export function requestSwitch(repoPath: string, branch: string): Promise<Call<SwitchResult>> {
+  return post<SwitchResult>(ROUTE_SWITCH, { repoPath, branch })
+}

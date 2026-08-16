@@ -1,0 +1,195 @@
+/* Branch chip row inside the composer tool row (conversation.input.left,
+ * right of the mode chips). Modeled as a single rounded-rectangle
+ * segmented control: the branch picker and the worktree toggle share one
+ * container with a thin divider between them, so they read as one
+ * affordance instead of two loose buttons.
+ *
+ * Geometry mirrors the composer trigger chips in the DSH base (see
+ * PermissionSelect / ModelSelect): 28px height, 13/20 medium-secondary
+ * label, transparent fill, no outline 鈥?the dock stays at the same
+ * visual weight as the surrounding chips (dsh-worktree select, standard
+ * mode select, Workspace Write, MiniMax-M3 High). The corners stop short
+ * of the base's full pill (24px) so the silhouette stays a chip rather
+ * than a capsule, per the design brief. */
+
+/* Shared trigger geometry 鈥?copied 1:1 from the base composer triggers
+ * (PermissionSelect .trigger / ModelSelect .trigger). Centralizing here
+ * keeps the two segments visually fused so the divider reads as part of
+ * one component, not two loose buttons. */
+.dock {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #81858c);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  min-height: 28px;
+  overflow: hidden;
+}
+
+/* Vertical separator between the two segments. Uses the secondary label
+ * color so it stays in the same tonal family as the surrounding trigger
+ * outlines and chevrons. */
+.divider {
+  width: 1px;
+  margin: 6px 0;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  flex-shrink: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 8px 0 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* The leftmost segment rounds only its left corners so it tucks into the dock. */
+.chip:first-child {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+/* Started sessions drop the worktree segment: the lone chip rounds all
+ * corners and reads as a plain button, not a broken-off half control. */
+.chip:only-child {
+  border-radius: 6px;
+}
+
+.branch {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check,
+.checkOn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 4px 0 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.check:hover,
+.checkOn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* The rightmost segment rounds only its right corners. */
+.check:last-child,
+.checkOn:last-child {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 4px;
+}
+
+/* Selected worktree: only the checkbox itself turns bluish and fills 鈥?the
+ * surrounding button stays transparent so the label keeps the same
+ * secondary tone. Mirrors the Claude Code toggle treatment. The inner
+ * check rides the bluish fill with an inverted foreground token so the
+ * glyph stays legible. */
+.checkOn .box {
+  border-color: var(--dsw-alias-label-primary-bluish, #4186f0);
+  background: var(--dsw-alias-label-primary-bluish, #4186f0);
+  color: var(--dsw-alias-label-primary-foreground, #ffffff);
+}
+
+.checkLabel {
+  white-space: nowrap;
+}
+
+/* Confirmation bubble: the branch Menu's own card chrome (r12, inverted
+ * hairline, shadow-lv3, --dsw-specific-menu) so the confirm step reads as
+ * the menu's second page; one ask line and a compact button pair. */
+.popCard {
+  position: fixed;
+  z-index: 1000;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 12px;
+  background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  box-shadow: var(--dsw-shadow-lv3);
+  min-width: 200px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popAsk {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 20px;
+  color: inherit;
+}
+
+.popActions {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+/* Menu-row-like buttons: transparent fill, hover tint, same 13px type. */
+.popActions button {
+  flex: 1 1 0;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.popActions button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.popActions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.popActions button:last-child {
+  color: var(--dsw-alias-label-primary-bluish, #4186f0);
+  font-weight: 500;
+}
