@@ -162,6 +162,27 @@ export function BranchMenu({
     if (open) setQuery('')
   }, [open])
 
+  // Land the current-branch row mid-viewport on open and whenever the
+  // filter clears back to the full list — with dozens of branches the row
+  // otherwise drowns somewhere off-screen and "where am I?" becomes a
+  // scroll hunt (the trailing check alone is invisible from afar; the
+  // .menuRowSelected tint marks it once visible). Manual scrollTo on the
+  // rows container — scrollIntoView would also drag scrollable ancestors.
+  useEffect(() => {
+    if (!open || query.trim() !== '') return
+    const card = cardRef.current
+    if (card === null) return
+    const row = [...card.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')]
+      .find(b => (b.textContent ?? '').trim() === currentBranch)
+    // The row's parent is .menuRows — the only scroll container involved.
+    const viewport = row?.parentElement
+    if (row === undefined || viewport === null) return
+    const rowRect = row.getBoundingClientRect()
+    const vpRect = viewport.getBoundingClientRect()
+    const target = viewport.scrollTop + (rowRect.top - vpRect.top) - (viewport.clientHeight - rowRect.height) / 2
+    viewport.scrollTo({ top: Math.max(0, target) })
+  }, [open, currentBranch, query])
+
   // Flyout lifecycle: horizontally anchored to the card's right edge (so
   // it never overlaps the branch list), vertically centered on the picked
   // row, clamped into the viewport. Width is content-driven: place()
@@ -294,7 +315,7 @@ export function BranchMenu({
                 key={row.name}
                 type="button"
                 role="menuitem"
-                className={css.menuRow}
+                className={row.name === currentBranch ? `${css.menuRow} ${css.menuRowSelected}` : css.menuRow}
                 disabled={row.disabled}
                 onClick={(event) => { pick(event.currentTarget, row.name) }}
               >

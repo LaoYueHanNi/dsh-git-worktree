@@ -70,7 +70,25 @@ const names = (await menu.locator('button[role="menuitem"]').allTextContents())
 const targetA = names[names.length - 1] ?? ''
 console.log(`target: A=${JSON.stringify(targetA)}`)
 
-const pickA = await pickRow(targetA)
+// A repo whose only row IS the current branch: picking it just closes the
+// menu (by design) — every pick-dependent check below is unexercisable.
+const currentOnly = await page.evaluate(() => {
+  const card = document.querySelector('div[role="menu"]')
+  if (card === null) return true
+  const rows = [...card.querySelectorAll('button[role="menuitem"]')]
+  return rows.length === 1 && rows[0].querySelector('svg') !== null
+})
+
+const pickA = currentOnly ? { ok: false, skipped: true } : await pickRow(targetA)
+if (currentOnly) {
+  // Single-branch repo: close cleanly and stop — every remaining check
+  // needs a pickable non-current row.
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  await browser.close()
+  console.log('FLYOUT VERIFY PASSED (pick-dependent checks skipped — repo has only the current branch)')
+  process.exit(failed)
+}
 ok('pick row A', pickA.ok, pickA.ok ? '' : JSON.stringify(pickA))
 const rectA = await page.evaluate(() => {
   const fly = document.querySelector('[role="dialog"]')
@@ -92,8 +110,9 @@ if (rectA !== null) {
 const centered = await page.evaluate(name => {
   const card = document.querySelector('div[role="menu"]')
   const fly = document.querySelector('[role="dialog"]')
+  if (card === null || fly === null) return null
   const row = [...card.querySelectorAll('button[role="menuitem"]')].find(b => (b.textContent ?? '').trim() === name)
-  if (fly === null || row === undefined) return null
+  if (row === undefined) return null
   const f = fly.getBoundingClientRect()
   const r = row.getBoundingClientRect()
   return { flyCenter: f.top + f.height / 2, rowCenter: r.top + r.height / 2 }

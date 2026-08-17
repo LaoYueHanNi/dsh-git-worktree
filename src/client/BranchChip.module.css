@@ -291,6 +291,15 @@
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
+/* The checked-out branch: a persistent tint a step above the resting rows
+ * so it reads as "you are here" the moment the list scrolls it into view
+ * (BranchMenu centers it on open) — the trailing check alone is easy to
+ * miss from a distance. */
+.menuRowSelected,
+.menuRowSelected:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
 /* Occupied-worktree branches: dimmed, not clickable. */
 .menuRow:disabled {
   opacity: 0.45;
