@@ -14,14 +14,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Button, IconBranchOutline16, Menu, Toast,
-  type MenuEntry, type MenuItem,
+  Button, IconBranchOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
 import { fetchStatus, requestSwitch, requestWorktree } from './api.ts'
-import { ConfirmPop } from './ConfirmPop.tsx'
+import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
 
@@ -103,29 +102,26 @@ function displayBranch(branch: string): string {
 }
 
 /**
- * Assemble the branch menu: local branches only (remote branches are not
- * offered). A branch already checked out by a live worktree is disabled
- * while the worktree toggle is off (git refuses such a switch); with the
- * toggle on it is the reuse path, so it stays selectable. The selected row's
- * trailing check is the Menu's own selectedId affordance — no leading icon.
+ * Build the branch rows for the picker: local branches only (remote
+ * branches are not offered). A branch already checked out by a live
+ * worktree is disabled while the worktree toggle is off (git refuses such
+ * a switch); with the toggle on it is the reuse path, so it stays
+ * selectable. The selected row's trailing check is BranchMenu's own
+ * affordance — no leading icon.
  */
-function buildMenuEntries(
+function buildBranchRows(
   branches: readonly BranchEntry[],
   worktrees: readonly WorktreeEntry[],
   currentBranch: string,
   worktreeMode: boolean,
-  t: PropsLocale<'git-worktree'>['t'],
-): MenuEntry[] {
+): BranchRow[] {
   const occupied = new Set(worktrees.flatMap(w => w.branch === undefined ? [] : [w.branch]))
-  const item = (branch: BranchEntry): MenuItem => ({
-    id: branch.name,
-    label: branch.name,
-    disabled: branch.name !== currentBranch && !worktreeMode && occupied.has(localBranchName(branch.name)),
-  })
-  const local = branches.filter(b => b.kind === 'local')
-  const entries: MenuEntry[] = [{ type: 'label', id: 'local', text: t('menuLocalBranches') }]
-  entries.push(...local.map(item))
-  return entries
+  return branches
+    .filter(b => b.kind === 'local')
+    .map(branch => ({
+      name: branch.name,
+      disabled: branch.name !== currentBranch && !worktreeMode && occupied.has(localBranchName(branch.name)),
+    }))
 }
 
 /** The tool-row entry registered into conversation.input.left. */
@@ -154,6 +150,31 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     // during the blank phase must not survive into branch switching.
     if (!session.blank) setWorktreeMode(false)
   }, [session.blank])
+
+  // External branch changes (terminal, other tools) never reach this chip
+  // on their own — the status fetch runs on mount, on cwd change, and after
+  // our own switches. Two cheap pull points cover the real workflow:
+  // regaining window focus (the user returns from the terminal where the
+  // branches moved; refreshes the chip label) and opening the menu (fresh
+  // rows exactly at decision time, see the chip's onClick). A push channel
+  // (host-side fs.watch on .git/refs + SSE) was considered and skipped:
+  // these pulls hide all but the menu-open-while-branches-change race, at
+  // none of that complexity.
+  useEffect(() => {
+    const refreshIfIdle = (): void => {
+      if (busyRef.current) return
+      void refresh()
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') refreshIfIdle()
+    }
+    window.addEventListener('focus', refreshIfIdle)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', refreshIfIdle)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [refresh])
 
   const showError = useCallback((message: string) => {
     setToast({ seq: Date.now(), text: t('errorGeneric', { message }) })
@@ -198,9 +219,9 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
   }), [adoptWorktree, cwd, runGuarded])
 
   const facts = repo.facts
-  const entries = useMemo(
-    () => facts === null ? [] : buildMenuEntries(facts.branches, facts.worktrees, facts.currentBranch, worktreeMode, t),
-    [facts, worktreeMode, t],
+  const rows = useMemo(
+    () => facts === null ? [] : buildBranchRows(facts.branches, facts.worktrees, facts.currentBranch, worktreeMode),
+    [facts, worktreeMode],
   )
 
   // Non-repo and still-loading directories render nothing at all.
@@ -218,7 +239,16 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
           ref={chipRef}
           type="button"
           className={css.chip}
-          onClick={() => { setMenuOpen(open => !open) }}
+          onClick={() => {
+            // Toggling always unwinds any half-open confirm first.
+            setConfirm(null)
+            const opening = !menuOpen
+            setMenuOpen(opening)
+            // Fresh rows at decision time: branches may have moved outside
+            // (terminal, other tools) since the last fetch. Non-blocking —
+            // the menu opens on current data and re-renders when it lands.
+            if (opening && !busyRef.current) void refresh()
+          }}
         >
           <IconBranchOutline16 size={12} />
           <span className={css.branch}>{displayBranch(facts.currentBranch)}</span>
@@ -241,38 +271,37 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
           </>
         )}
       </span>
-      <Menu
+      <BranchMenu
         open={menuOpen}
-        anchor={null}
-        portal
-        getAnchorRect={() => chipRef.current?.getBoundingClientRect() ?? null}
-        items={entries}
-        selectedId={facts.currentBranch}
-        onClose={() => { setMenuOpen(false) }}
-        onSelect={(id) => {
-          setMenuOpen(false)
-          if (id === facts.currentBranch) return
-          setConfirm({ kind: worktreeMode ? 'worktree' : 'switch', branch: id })
-        }}
-      />
-      <ConfirmPop
-        open={confirm !== null}
         anchorRef={chipRef}
-        ask={confirm?.kind === 'worktree'
-          ? t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName })
-          : t('switchAsk', { branch: confirm?.branch ?? '' })}
-        confirmLabel={busy
-          ? (confirm?.kind === 'worktree' ? t('worktreeBusy') : t('switchBusy'))
-          : t('actionConfirm')}
-        cancelLabel={t('actionCancel')}
-        busy={busy}
-        onConfirm={() => {
-          if (confirm === null) return
-          if (confirm.kind === 'worktree') void doWorktree(confirm.branch)
-          else void doSwitch(confirm.branch)
+        rows={rows}
+        currentBranch={facts.currentBranch}
+        confirm={confirm === null ? null : {
+          ask: confirm.kind === 'worktree'
+            ? t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName })
+            : t('switchAsk', { branch: confirm.branch }),
+          confirmLabel: busy
+            ? (confirm.kind === 'worktree' ? t('worktreeBusy') : t('switchBusy'))
+            : t('actionConfirm'),
+          cancelLabel: t('actionCancel'),
+          busy,
+          onConfirm: () => {
+            if (confirm.kind === 'worktree') void doWorktree(confirm.branch)
+            else void doSwitch(confirm.branch)
+          },
+          onCancel: () => { if (!busy) setConfirm(null) },
         }}
-        onCancel={() => { if (!busy) setConfirm(null) }}
-        classes={{ card: css.popCard, ask: css.popAsk, actions: css.popActions }}
+        onSelect={(branch) => {
+          // Re-selecting the current branch is a plain close; any other
+          // pick stages the confirm flyout beside that row (menu stays open).
+          if (branch === facts.currentBranch) {
+            setMenuOpen(false)
+            return
+          }
+          setConfirm({ kind: worktreeMode ? 'worktree' : 'switch', branch })
+        }}
+        onClose={() => { setMenuOpen(false) }}
+        t={t}
       />
       {toast !== null && <Toast key={toast.seq} text={toast.text} onDone={() => { setToast(null) }} />}
     </>
