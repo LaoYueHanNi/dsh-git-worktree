@@ -80,6 +80,24 @@ if (geom !== null) {
   }
   ok('search pinned at card bottom', geom.lastIsSearch)
   ok('search input autofocused', geom.focusedIsInput)
+  // Current branch must be visible (centered) on open — with many branches
+  // it used to drown off-screen. Only meaningful when the list overflows.
+  if (geom.rowCount >= 20) {
+    const centered = await page.evaluate(() => {
+      const card = document.querySelector('div[role="menu"]')
+      const row = [...card.querySelectorAll('button[role="menuitem"]')]
+        .find(b => b.querySelector('svg') !== null)
+      const viewport = row?.parentElement
+      if (row === undefined || viewport == null) return null
+      const rr = row.getBoundingClientRect()
+      const vr = viewport.getBoundingClientRect()
+      return { rowTop: rr.top, rowBottom: rr.bottom, vpTop: vr.top, vpBottom: vr.bottom }
+    })
+    ok('current branch visible on open', centered !== null && centered.rowTop >= centered.vpTop - 1 && centered.rowBottom <= centered.vpBottom + 1,
+      centered === null ? 'current row not found' : `row=[${centered.rowTop.toFixed(0)},${centered.rowBottom.toFixed(0)}] viewport=[${centered.vpTop.toFixed(0)},${centered.vpBottom.toFixed(0)}]`)
+  } else {
+    console.log(`skip centering assertion (only ${geom.rowCount} rows)`)
+  }
 }
 
 // 4. Typing filters; Enter commits the first match (confirm flyout shows).
@@ -87,56 +105,69 @@ if (geom !== null) {
 // session sits in (stress branches like perf/branch-* may not exist).
 const targets = await page.evaluate(() => {
   const card = document.querySelector('div[role="menu"]')
+  if (card === null) return []
   const rows = [...card.querySelectorAll('button[role="menuitem"]:not([disabled])')]
   return rows.map(r => (r.textContent ?? '').trim()).filter(n => n !== '')
 })
 const target = targets[targets.length - 1] ?? ''
-ok('pickable row exists', target !== '', `candidates=${targets.length}`)
-console.log('target row:', JSON.stringify(target))
-
-const input = page.locator('div[role="menu"] input')
-await input.fill(target.slice(-12))
-await page.waitForTimeout(300)
-const filtered = await page.evaluate(() => {
+// A repo whose only row IS the current branch: picking it just closes the
+// menu (by design), so the pick/commit path can't be exercised here.
+const isCurrentOnly = await page.evaluate(() => {
   const card = document.querySelector('div[role="menu"]')
-  const rows = [...card.querySelectorAll('button[role="menuitem"]:not([disabled])')]
-  return { count: rows.length, text: rows[0]?.textContent?.trim() ?? '' }
+  if (card === null) return true
+  const rows = [...card.querySelectorAll('button[role="menuitem"]')]
+  return rows.length === 1 && rows[0].querySelector('svg') !== null
 })
-ok('search filters to the match', filtered.count >= 1 && filtered.text === target,
-  `count=${filtered.count} first=${JSON.stringify(filtered.text)}`)
-await page.screenshot({ path: 'scripts/verify-2-search.png' })
+if (isCurrentOnly) {
+  console.log('skip pick/commit checks (single-branch repo, only the current branch)')
+} else {
+  ok('pickable row exists', target !== '', `candidates=${targets.length}`)
+  console.log('target row:', JSON.stringify(target))
+  const input = page.locator('div[role="menu"] input')
+  await input.fill(target.slice(-12))
+  await page.waitForTimeout(300)
+  const filtered = await page.evaluate(() => {
+    const card = document.querySelector('div[role="menu"]')
+    if (card === null) return { count: 0, text: '' }
+    const rows = [...card.querySelectorAll('button[role="menuitem"]:not([disabled])')]
+    return { count: rows.length, text: rows[0]?.textContent?.trim() ?? '' }
+  })
+  ok('search filters to the match', filtered.count >= 1 && filtered.text === target,
+    `count=${filtered.count} first=${JSON.stringify(filtered.text)}`)
+  await page.screenshot({ path: 'scripts/verify-2-search.png' })
 
-await input.fill('zzz-no-such-branch')
-await page.waitForTimeout(300)
-const empty = await page.evaluate(() => {
-  const card = document.querySelector('div[role="menu"]')
-  return card?.textContent?.includes('没有匹配的分支') || card?.textContent?.includes('No matching branches') || false
-})
-ok('empty state on no match', empty)
+  await input.fill('zzz-no-such-branch')
+  await page.waitForTimeout(300)
+  const empty = await page.evaluate(() => {
+    const card = document.querySelector('div[role="menu"]')
+    return card?.textContent?.includes('没有匹配的分支') || card?.textContent?.includes('No matching branches') || false
+  })
+  ok('empty state on no match', empty)
 
-await input.fill(target.slice(-12))
-await page.waitForTimeout(200)
-await input.press('Enter')
-await page.waitForTimeout(700)
-await page.screenshot({ path: 'scripts/verify-3-confirm.png' })
-const confirmShown = await page.evaluate(name => {
-  const dialogs = [...document.querySelectorAll('[role="dialog"]')]
-  return dialogs.some(d => (d.textContent ?? '').includes(name))
-}, target)
-ok('Enter commits first match (confirm flyout)', confirmShown)
+  await input.fill(target.slice(-12))
+  await page.waitForTimeout(200)
+  await input.press('Enter')
+  await page.waitForTimeout(700)
+  await page.screenshot({ path: 'scripts/verify-3-confirm.png' })
+  const confirmShown = await page.evaluate(name => {
+    const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+    return dialogs.some(d => (d.textContent ?? '').includes(name))
+  }, target)
+  ok('Enter commits first match (confirm flyout)', confirmShown)
 
-// 5. Escape unwinds tier by tier: first the confirm flyout, then the menu.
-await page.keyboard.press('Escape')
-await page.waitForTimeout(300)
-const afterEsc1 = await page.evaluate(() => ({
-  fly: document.querySelector('[role="dialog"]') !== null,
-  menu: document.querySelector('div[role="menu"]') !== null,
-}))
-ok('Escape cancels confirm only', afterEsc1.fly === false && afterEsc1.menu === true, JSON.stringify(afterEsc1))
-await page.keyboard.press('Escape')
-await page.waitForTimeout(300)
-const closed = await page.evaluate(() => document.querySelector('div[role="menu"]') === null)
-ok('second Escape closes the popup', closed)
+  // 5. Escape unwinds tier by tier: first the confirm flyout, then the menu.
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  const afterEsc1 = await page.evaluate(() => ({
+    fly: document.querySelector('[role="dialog"]') !== null,
+    menu: document.querySelector('div[role="menu"]') !== null,
+  }))
+  ok('Escape cancels confirm only', afterEsc1.fly === false && afterEsc1.menu === true, JSON.stringify(afterEsc1))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  const closed = await page.evaluate(() => document.querySelector('div[role="menu"]') === null)
+  ok('second Escape closes the popup', closed)
+}
 
 if (errors.length > 0) {
   console.log('--- page errors ---')
