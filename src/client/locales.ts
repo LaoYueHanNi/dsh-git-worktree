@@ -9,6 +9,8 @@ export type GitWorktreeKey =
   | 'chipWorktree'
   | 'worktreeToggle'
   | 'menuLocalBranches'
+  | 'menuSearchPlaceholder'
+  | 'menuNoMatches'
   | 'switchAsk'
   | 'switchBusy'
   | 'worktreeAskNew'
@@ -32,6 +34,8 @@ export const en: Record<GitWorktreeKey, string> = {
   chipWorktree: 'Worktree',
   worktreeToggle: 'Create an isolated worktree',
   menuLocalBranches: 'Local branches',
+  menuSearchPlaceholder: 'Search branches',
+  menuNoMatches: 'No matching branches',
   switchAsk: 'Switch to {branch}?',
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
@@ -56,6 +60,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   chipWorktree: '工作树',
   worktreeToggle: '创建隔离工作树',
   menuLocalBranches: '本地分支',
+  menuSearchPlaceholder: '搜索分支',
+  menuNoMatches: '没有匹配的分支',
   switchAsk: '是否切到 {branch}？',
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',

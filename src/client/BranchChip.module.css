@@ -135,19 +135,26 @@
   white-space: nowrap;
 }
 
-/* Confirmation bubble: the branch Menu's own card chrome (r12, inverted
- * hairline, shadow-lv3, --dsw-specific-menu) so the confirm step reads as
- * the menu's second page; one ask line and a compact button pair. */
+/* Confirm flyout: the second-level panel opening right of the branch
+ * card (the base Menu's submenu posture: r12, inverted hairline,
+ * shadow-lv3, --dsw-specific-menu). Width is content-driven — it follows
+ * the branch name in the ask line — floored at 124px (a bit above the
+ * Cancel/Confirm pair's own minimum, so short names stay tight instead of
+ * riding the old 200px floor) and capped at 400px; BranchMenu also clamps
+ * it inline to the room right of the card. Beyond the cap the ask wraps.
+ * border-box so every width arm includes the card chrome. */
 .popCard {
+  box-sizing: border-box;
   position: fixed;
   z-index: 1000;
+  width: max-content;
+  min-width: 124px;
+  max-width: min(400px, 80vw);
   padding: 4px;
   border: 1px solid var(--dsw-alias-border-inverted);
   border-radius: 12px;
   background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
   box-shadow: var(--dsw-shadow-lv3);
-  min-width: 200px;
-  max-width: 340px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -159,6 +166,9 @@
   font-size: 13px;
   line-height: 20px;
   color: inherit;
+  /* Branch names are long unbroken tokens — plain wrapping would let them
+   * overflow the capped card instead of breaking. */
+  overflow-wrap: anywhere;
 }
 
 .popActions {
@@ -192,4 +202,149 @@
 .popActions button:last-child {
   color: var(--dsw-alias-label-primary-bluish, #4186f0);
   font-weight: 500;
+}
+
+/* ── Branch picker popup (BranchMenu) ──────────────────────────────
+ * Upward-opening card pinned above the chip, in the Menu's card chrome
+ * (r12, inverted hairline, shadow-lv3, --dsw-specific-menu — same family
+ * as .popCard). Three owner requirements shape the geometry:
+ *
+ *   1. height cap: min(420px, 60vh) on the card, only the rows area
+ *      scrolls (.menuRows) — heading and search stay pinned;
+ *   2. the search field sits pinned at the card's bottom edge, directly
+ *      above the chip, with the scrolling rows above it;
+ *   3. the card is CSS-`bottom`-pinned ~6px above the chip's top and so
+ *      grows entirely upward — it can never cover the composer or fill
+ *      the viewport, whatever the branch count.
+ *
+ * The inline `left`/`bottom` come from BranchMenu's placement pass; the
+ * width is fixed here (design 320px, viewport-capped) so horizontal
+ * clamping stays deterministic without measuring the card. */
+
+/* The portal lands directly under document.body, outside the shell's
+ * box-sizing reset — content-box default would add padding/border on top
+ * of the declared width (320 became 330, and the width:100% children
+ * padded 16px past the card's right clip, shearing off their rounded
+ * corners). Every width-declared box in this popup opts back into
+ * border-box: the card, the rows, and the search input. */
+.menuCard {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, 60vh);
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 12px;
+  background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  box-shadow: var(--dsw-shadow-lv3);
+}
+
+/* Non-interactive group heading — the Menu label row's posture. */
+.menuHeading {
+  padding: 6px 8px 4px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary, #81858c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+/* The only scrollable region: shrinks within the capped card so the
+ * heading above and the search below stay visible while rows scroll. */
+.menuRows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Menu-row-like buttons: transparent fill, hover tint, same 13px type.
+ * Weight 500 mirrors the chip's branch label (the portal escapes the
+ * composer's font context, so the match must be explicit — the inherited
+ * body weight is 400 and reads visibly lighter than the chip beside it). */
+.menuRow {
+  box-sizing: border-box; /* width:100% + padding must stay inside .menuRows */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuRow:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* Occupied-worktree branches: dimmed, not clickable. */
+.menuRow:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menuRowLabel {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Zero-search-hit state: centered secondary line inside the rows area. */
+.menuEmpty {
+  padding: 10px 8px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary, #81858c);
+  text-align: center;
+}
+
+/* Bottom-pinned search field, separated from the rows by a hairline.
+ * Borderless so it reads as part of the card, focus shown as the
+ * standard hover tint rather than an outline. */
+.menuSearchWrap {
+  flex-shrink: 0;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.menuSearch {
+  box-sizing: border-box; /* width:100% + padding must stay inside the wrap */
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  /* Weight 500 mirrors the chip's branch label (see .menuRow) — the portal
+   * escapes the composer's font context and would inherit body's 400. */
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.menuSearch::placeholder {
+  color: var(--dsw-alias-label-secondary, #81858c);
+}
+
+.menuSearch:focus {
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
