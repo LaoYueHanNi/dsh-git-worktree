@@ -30,7 +30,7 @@
  * first enabled visible row.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconCheckOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -162,26 +162,38 @@ export function BranchMenu({
     if (open) setQuery('')
   }, [open])
 
-  // Land the current-branch row mid-viewport on open and whenever the
-  // filter clears back to the full list — with dozens of branches the row
-  // otherwise drowns somewhere off-screen and "where am I?" becomes a
-  // scroll hunt (the trailing check alone is invisible from afar; the
-  // .menuRowSelected tint marks it once visible). Manual scrollTo on the
-  // rows container — scrollIntoView would also drag scrollable ancestors.
-  useEffect(() => {
-    if (!open || query.trim() !== '') return
-    const card = cardRef.current
-    if (card === null) return
-    const row = [...card.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')]
+  // Land the current-branch row mid-viewport when the list shows. With
+  // dozens of branches the row otherwise drowns off-screen and "where am
+  // I?" becomes a scroll hunt. Two trigger paths, both required:
+  //
+  //   - rows MOUNT: the card mounts in two stages (open flips, pos
+  //     resolves a render later), so an [open]-keyed effect runs while
+  //     nothing is mounted and never re-fires once rows appear — the
+  //     stable mount-signal ref below fires exactly at mount instead;
+  //   - filter CLEARS back to the full list: the rows container is
+  //     long-mounted by then, so a plain [query] effect reaches it.
+  //
+  // Manual scrollTo on the rows container — scrollIntoView would also drag
+  // scrollable ancestors. Re-renders must NOT re-center (it would yank the
+  // user's scroll during picks), hence the stable useCallback identity.
+  const rowsRef = useRef<HTMLElement | null>(null)
+  const centerCurrentRow = useCallback((viewport: HTMLElement): void => {
+    const row = [...viewport.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')]
       .find(b => (b.textContent ?? '').trim() === currentBranch)
-    // The row's parent is .menuRows — the only scroll container involved.
-    const viewport = row?.parentElement
-    if (row === undefined || viewport === null) return
+    if (row === undefined) return
     const rowRect = row.getBoundingClientRect()
     const vpRect = viewport.getBoundingClientRect()
     const target = viewport.scrollTop + (rowRect.top - vpRect.top) - (viewport.clientHeight - rowRect.height) / 2
     viewport.scrollTo({ top: Math.max(0, target) })
-  }, [open, currentBranch, query])
+  }, [currentBranch])
+  const holdRowsCenter = useCallback((el: HTMLElement | null): void => {
+    rowsRef.current = el
+    if (el !== null) centerCurrentRow(el)
+  }, [centerCurrentRow])
+  useEffect(() => {
+    if (!open || query.trim() !== '') return
+    if (rowsRef.current !== null) centerCurrentRow(rowsRef.current)
+  }, [open, query, centerCurrentRow])
 
   // Flyout lifecycle: horizontally anchored to the card's right edge (so
   // it never overlaps the branch list), vertically centered on the picked
@@ -309,7 +321,7 @@ export function BranchMenu({
           aria-label={t('menuLocalBranches')}
         >
           <div className={css.menuHeading}>{t('menuLocalBranches')}</div>
-          <div className={css.menuRows} role="presentation">
+          <div className={css.menuRows} role="presentation" ref={holdRowsCenter}>
             {visible.map(row => (
               <button
                 key={row.name}
