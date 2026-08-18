@@ -4,15 +4,26 @@
  * so with many branches its portal list fills the viewport — this popup
  * replaces it with an owner-styled card: Menu's card chrome (r12, inverted
  * hairline, shadow-lv3, --dsw-specific-menu, see .menuCard) on a
- * portal-fixed posture, with three owner requirements baked in:
+ * portal-fixed posture, with owner requirements baked in:
  *
  *   1. the card is capped at min(420px, 60vh) and only the branch rows
- *      scroll (heading and search stay pinned);
+ *      scroll (heading, search, and the toolbar stay pinned);
  *   2. a search field is pinned at the card's bottom edge — the row list
- *      scrolls above it — filtering rows by case-insensitive substring;
+ *      scrolls above it — filtering rows by case-insensitive substring
+ *      while KEEPING the matching branches' ancestor folders (IDEA-style
+ *      prune) and highlighting the hit substring;
  *   3. the card opens entirely above the chip: the CSS `bottom` pins its
  *      bottom edge ~6px above the chip's top, so it grows upward and can
  *      never cover the composer, whatever the branch count.
+ *
+ * Layout (IDEA branch-panel posture at popup scale): a narrow tool strip
+ * on the left (locate-current + expand/collapse-all), then a main column
+ * of heading / tree / search. Selection model borrowed from IDEA: a
+ * single click SELECTS a row (blue); double-click or Enter then OPENS the
+ * right-side confirm flyout for that row — the switch itself always goes
+ * through the confirmation step, never straight away. While the confirm
+ * flyout is open, clicking another row re-anchors it (the old one-click
+ * pick flow).
  *
  * The confirm step is a second-level flyout opening to the RIGHT of the
  * branch card (the base Menu's submenu posture): the chip sits in the
@@ -20,19 +31,32 @@
  * The flyout is a separate portal (not clipped by the card's
  * overflow:hidden), horizontally anchored to the card's right edge — it
  * can never overlap the branch list — and vertically centered on the
- * picked row. Its width is content-driven (it follows the branch name in
- * the ask line), capped in CSS, wrapping beyond the cap. Picking a
- * different row while the flyout is open re-anchors it beside that row.
+ * picked row. Its width is content-driven, capped in CSS, wrapping.
  *
  * Close semantics: outside pointerdown (card, flyout, and chip excluded)
- * cancels the confirm and closes the menu; Escape cancels tier by tier —
- * first the confirm, then the menu; Enter in the search field commits the
- * first enabled visible row.
+ * cancels the confirm and closes the menu; Escape unwinds tier by tier —
+ * confirm, then search text, then selection, then the menu; Enter in the
+ * search field commits the first enabled visible row.
+ *
+ * Long names and many branches: a clipped label shows the full name on
+ * hover via the native title (gated to actually-clipped rows only). When
+ * the list grows past TREE_MIN_ROWS it renders as a full-depth '/' prefix
+ * tree instead: folder-header rows (chevron + count) toggle; under an
+ * expanded folder, child rows show only their own segment (indentation
+ * carries the hierarchy — no repeated path, no color distinction); linear
+ * chains compress into one row; the checked-out branch's chain opens by
+ * default (centering still lands it mid-viewport).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IconCheckOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconCheckOutline16,
+  IconChevronDownOutline14,
+  IconChevronRightOutline14,
+  IconChevronUpOutline14,
+  IconGoalOutline16,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './BranchChip.module.css'
 
@@ -66,15 +90,16 @@ export interface BranchMenuProps {
   anchorRef: React.RefObject<HTMLElement | null>
   /** Every local branch as a row (occupancy-disabled rows included). */
   rows: readonly BranchRow[]
-  /** The branch currently checked out (trailing check, re-select closes). */
+  /** The branch currently checked out (trailing check, HEAD tint). */
   currentBranch: string
   /** Non-null while a picked branch awaits confirmation. */
   confirm: BranchConfirmFly | null
-  /** Row click / Enter-in-search commit (current branch re-select closes). */
+  /** Stage a pick (starts the confirm flyout beside that row). Current
+   * branch re-select closes the menu. */
   onSelect: (branch: string) => void
-  /** Dismiss the menu (outside click, Escape with no confirm open). */
+  /** Dismiss the menu (outside click, Escape with nothing open). */
   onClose: () => void
-  /** Bound locale translate (placeholder, empty state, heading). */
+  /** Bound locale translate (placeholder, empty state, heading, toolbar). */
   t: PropsLocale<'git-worktree'>['t']
 }
 
@@ -83,12 +108,120 @@ const MARGIN = 12
 /** Gap kept between the chip's top edge and the card's bottom edge. */
 const GAP = 6
 /** Design card width — the CSS width's px arm; used for horizontal clamping. */
-const CARD_WIDTH = 320
+const CARD_WIDTH = 360
 /** Design flyout width cap — matches .popCard's max-width arm. */
 const FLY_MAX_WIDTH = 400
+/** After a folder toggle, clicks arriving within this window are swallowed
+ * (double-click misfire guard — see shiftGuardUntil in the component). */
+const CLICK_GUARD_MS = 250
 /** Unplaced flyout: hidden but laid out at a fixed origin so offsetWidth/
  * offsetHeight are real for the measure-then-place pass (base Menu trick). */
 const FLY_MEASURE: Partial<CSSStyleDeclaration> = { left: '-9999px', top: '0px', visibility: 'hidden' }
+
+/** Below this many rows the picker stays a flat list: in small repos a
+ * tree would hide real branches behind one-entry folders, buying nothing. */
+const TREE_MIN_ROWS = 8
+
+/** One node of the '/' prefix tree built from the row list: every segment
+ * boundary is a folder level, so `feature/x/y` nests under `feature` and
+ * `x`, and the leaves (rows) sit at the terminal nodes. */
+interface TreeNode {
+  /** This node's own segment (the label text). */
+  segment: string
+  /** Full path: segments joined by '/'. Empty only at the root list. */
+  path: string
+  /** Depth from the root (root children are depth 0). */
+  depth: number
+  /** The branch named exactly `path`, if any — may coexist with children
+   * (`feature` plus `feature/x` are both legal git branch names). */
+  leaf: BranchRow | null
+  /** Children, sorted folders-first then by segment. */
+  children: TreeNode[]
+  /** Leaf branches under this node, including its own leaf. */
+  total: number
+}
+
+const segCmp = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+
+/** Build the prefix tree of the rows (see TreeNode). */
+function buildTree(rows: readonly BranchRow[]): TreeNode[] {
+  /** Mutable builder node — same shape as TreeNode but built incrementally
+   * (find-by-segment walks), sorted and totalled at the end. */
+  interface M {
+    segment: string
+    path: string
+    depth: number
+    leaf: BranchRow | null
+    children: M[]
+    total: number
+  }
+  const root: M[] = []
+  const find = (level: M[], segment: string): M | undefined =>
+    level.find(n => n.segment === segment)
+  for (const row of rows) {
+    const segs = row.name.split('/').filter(s => s !== '')
+    let level = root
+    let path = ''
+    for (let i = 0; i < segs.length; i += 1) {
+      path = path === '' ? segs[i] : `${path}/${segs[i]}`
+      let node = find(level, segs[i])
+      if (node === undefined) {
+        node = { segment: segs[i], path, depth: i, leaf: null, children: [], total: 0 }
+        level.push(node)
+      }
+      if (i === segs.length - 1) node.leaf = row
+      level = node.children
+    }
+  }
+  const finish = (nodes: M[]): void => {
+    for (const node of nodes) finish(node.children)
+    nodes.sort((a, b) => {
+      const af = a.children.length > 0 ? 0 : 1
+      const bf = b.children.length > 0 ? 0 : 1
+      return af !== bf ? af - bf : segCmp(a.segment, b.segment)
+    })
+  }
+  finish(root)
+  const count = (nodes: M[]): void => {
+    for (const node of nodes) {
+      count(node.children)
+      node.total = (node.leaf === null ? 0 : 1)
+        + node.children.reduce((sum, c) => sum + c.total, 0)
+    }
+  }
+  count(root)
+  return root as unknown as TreeNode[]
+}
+
+/** The folders that must start expanded so the checked-out branch is
+ * immediately visible in the tree: every proper ancestor of its path. */
+function chainExpanded(branch: string): Set<string> {
+  const segs = branch.split('/').filter(s => s !== '')
+  const set = new Set<string>()
+  let path = ''
+  for (let i = 0; i < segs.length - 1; i += 1) {
+    path = path === '' ? segs[i] : `${path}/${segs[i]}`
+    set.add(path)
+  }
+  return set
+}
+
+/** Hover tooltip: set the native `title` ONLY when the label is actually
+ * clipped (scrollWidth > clientWidth) — fitted names show no tooltip, and
+ * long ones expose their full path without a custom bubble. The target is
+ * the label span (first span child), the clipped element. */
+const gateTooltip = (button: HTMLButtonElement, name: string): void => {
+  const label = button.querySelector<HTMLElement>(':scope > span')
+  if (label !== null) label.title = label.scrollWidth > label.clientWidth ? name : ''
+}
+
+/** Leaving a row drops its tooltip so a recycled DOM node (search refilter)
+ * can never show a stale title for another branch. */
+const clearTooltip = (button: HTMLButtonElement): void => {
+  const label = button.querySelector<HTMLElement>(':scope > span')
+  if (label !== null) label.title = ''
+}
 
 /**
  * Render the upward branch picker with its right-side confirm flyout.
@@ -122,12 +255,111 @@ export function BranchMenu({
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
   const [flyPos, setFlyPos] = useState<{ left: number; top: number } | null>(null)
   const [query, setQuery] = useState('')
+  /** Expanded folder set, keyed by node path. Re-seeded on every open so
+   * the current branch's chain is visible without re-expanding by hand. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  /** IDEA-style selection: clicked row (blue). Zero or one at a time. */
+  const [selected, setSelected] = useState<string | null>(null)
 
-  // Latest confirm bundle for stable-effect listeners (the parent rebuilds
-  // the object each render; the ref keeps handler deps from churning).
+  // Latest values for stable-effect listeners (the parent rebuilds the
+  // confirm object each render; refs keep the document-level keydown and
+  // outside-click handlers from going stale on the closure they captured).
   const confirmRef = useRef(confirm)
   confirmRef.current = confirm
+  const queryRef = useRef(query)
+  queryRef.current = query
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  /** Always-fresh pick for the stale-safe document keydown listener. */
+  const pickRef = useRef<(el: HTMLElement | null, name: string) => void>(() => {})
   const confirmOpen = confirm !== null
+
+  /**
+   * Double-click misfire guard: toggling a folder shifts the layout — the
+   * second click of a double-click can land on a row that slid under the
+   * cursor (a branch!), which would select it or pop the switch flyout.
+   * After a folder toggle, every click swallowed for CLICK_GUARD_MS, so a
+   * double-click on a folder expands it exactly once and never bleeds into
+   * a branch click. Branch-row clicks do not arm the guard (selecting does
+   * not move anything), so row double-clicks keep working instantly.
+   */
+  const shiftGuardUntil = useRef(0)
+  const guardActive = (): boolean => Date.now() < shiftGuardUntil.current
+  const armShiftGuard = (): void => { shiftGuardUntil.current = Date.now() + CLICK_GUARD_MS }
+
+  /** Stage a pick: remember the row element (the flyout anchors beside
+   * it), then hand the branch to the owner. All pick paths — search Enter,
+   * keyboard Enter on a selected row — funnel through here. */
+  const pick = (el: HTMLElement | null, name: string): void => {
+    if (el !== null) pendingRef.current = { name, el }
+    setPendingName(name)
+    onSelect(name)
+  }
+  pickRef.current = pick
+
+  /** Prefix tree when the list is big enough to need one; null (flat list)
+   * below TREE_MIN_ROWS. Built once per rows change. */
+  const tree = useMemo(
+    () => (rows.length > TREE_MIN_ROWS ? buildTree(rows) : null),
+    [rows],
+  )
+
+  /** Every folder path that renders a header — the expand/collapse-all
+   * button's scope. */
+  const folderPaths = useMemo(() => {
+    const out: string[] = []
+    const walk = (nodes: TreeNode[]): void => {
+      for (const node of nodes) {
+        if (node.children.length > 0) out.push(node.path)
+        walk(node.children)
+      }
+    }
+    if (tree !== null) walk(tree)
+    return out
+  }, [tree])
+  const allExpanded = folderPaths.length > 0 && folderPaths.every(p => expanded.has(p))
+  const toggleAll = (): void => {
+    setExpanded(allExpanded ? new Set() : new Set(folderPaths))
+  }
+  const locateCurrent = (): void => {
+    // Locate, don't restructure: only ADD the current branch's ancestor
+    // folders if they happen to be closed (the row must exist to scroll
+    // to it) — folders the user expanded/collapsed stay untouched. Then
+    // center the row one frame later, once the re-render has committed.
+    setExpanded(prev => {
+      const next = new Set(prev)
+      for (const p of chainExpanded(currentBranch)) next.add(p)
+      return next
+    })
+    requestAnimationFrame(() => {
+      if (rowsRef.current !== null) centerCurrentRow(rowsRef.current)
+    })
+  }
+
+  // Every open starts from a clean filter, selection, and tree — only the
+  // current branch's folder chain open.
+  useEffect(() => {
+    if (!open) return
+    setQuery('')
+    setSelected(null)
+    setExpanded(chainExpanded(currentBranch))
+  }, [open, currentBranch])
+
+  // A selection that no longer exists in the rows (worktree toggle, refresh)
+  // must not linger as a phantom Enter target.
+  useEffect(() => {
+    if (selected !== null && !rows.some(r => r.name === selected)) setSelected(null)
+  }, [rows, selected])
+
+  /** Toggle one folder header. */
+  const toggle = (path: string): void => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
 
   // Pin above the chip on open and on viewport movement while open. CSS
   // `bottom` pinning means the card grows upward from that edge without
@@ -156,12 +388,6 @@ export function BranchMenu({
     }
   }, [open, anchorRef])
 
-  // Every open starts from a clean filter (focus rides the input's mount
-  // via holdSearchFocus — see there for why not here).
-  useEffect(() => {
-    if (open) setQuery('')
-  }, [open])
-
   // Land the current-branch row mid-viewport when the list shows. With
   // dozens of branches the row otherwise drowns off-screen and "where am
   // I?" becomes a scroll hunt. Two trigger paths, both required:
@@ -178,8 +404,8 @@ export function BranchMenu({
   // user's scroll during picks), hence the stable useCallback identity.
   const rowsRef = useRef<HTMLElement | null>(null)
   const centerCurrentRow = useCallback((viewport: HTMLElement): void => {
-    const row = [...viewport.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')]
-      .find(b => (b.textContent ?? '').trim() === currentBranch)
+    const row = [...viewport.querySelectorAll<HTMLButtonElement>('button[role="menuitem"][data-branch]')]
+      .find(b => (b.dataset.branch ?? '') === currentBranch)
     if (row === undefined) return
     const rowRect = row.getBoundingClientRect()
     const vpRect = viewport.getBoundingClientRect()
@@ -194,6 +420,20 @@ export function BranchMenu({
     if (!open || query.trim() !== '') return
     if (rowsRef.current !== null) centerCurrentRow(rowsRef.current)
   }, [open, query, centerCurrentRow])
+
+  // After an open re-seeds the folder chain (see the reset effect above),
+  // its re-render commits one render AFTER the rows mount — centering in
+  // that window would no-op because the current row's folder is still
+  // closed. One frame later the chain is committed and the row exists, so
+  // run the centering again then. User folder toggles never re-center:
+  // this effect fires only on open / branch change.
+  useEffect(() => {
+    if (!open) return
+    const raf = requestAnimationFrame(() => {
+      if (rowsRef.current !== null) centerCurrentRow(rowsRef.current)
+    })
+    return () => { cancelAnimationFrame(raf) }
+  }, [open, centerCurrentRow])
 
   // Flyout lifecycle: horizontally anchored to the card's right edge (so
   // it never overlaps the branch list), vertically centered on the picked
@@ -258,9 +498,12 @@ export function BranchMenu({
     }
   }, [confirmOpen, pendingName])
 
-  // Outside pointer / Escape dismiss. Outside clicks cancel the confirm and
-  // close the menu in one go; Escape unwinds tier by tier (confirm first,
-  // menu second) like closing a submenu before its parent.
+  // Outside pointer / keyboard dismiss. Outside clicks cancel the confirm
+  // and close the menu in one go. Escape unwinds tier by tier — confirm,
+  // then search text, then selection, then the menu. Arrow keys move the
+  // selection over the visible leaf rows and Enter stages the confirm,
+  // but only while focus sits on a card button: the search input keeps
+  // its own caret handling and Enter-commit.
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: PointerEvent): void => {
@@ -271,9 +514,37 @@ export function BranchMenu({
       onClose()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      if (confirmRef.current !== null) confirmRef.current.onCancel()
-      else onClose()
+      const key = event.key
+      if (key === 'Escape') {
+        if (confirmRef.current !== null) { confirmRef.current.onCancel(); return }
+        if (queryRef.current.trim() !== '') { setQuery(''); return }
+        if (selectedRef.current !== null) { setSelected(null); return }
+        onClose()
+        return
+      }
+      const card = cardRef.current
+      const active = document.activeElement
+      if (card === null || active === null || !card.contains(active)) return
+      const input = card.querySelector('input')
+      if (active === input) return
+      const leaves = [...card.querySelectorAll<HTMLButtonElement>('button[role="menuitem"][data-branch]')]
+      if (key === 'ArrowDown' || key === 'ArrowUp') {
+        event.preventDefault()
+        if (leaves.length === 0) return
+        const idx = leaves.findIndex(b => (b.dataset.branch ?? '') === selectedRef.current)
+        let next = idx
+        if (key === 'ArrowDown') next = idx < 0 ? 0 : Math.min(leaves.length - 1, idx + 1)
+        else next = idx <= 0 ? leaves.length - 1 : idx - 1
+        const target = leaves[next]
+        const name = target.dataset.branch ?? null
+        if (name !== null) setSelected(name)
+        target.focus()
+        target.scrollIntoView({ block: 'nearest' })
+      } else if (key === 'Enter' && selectedRef.current !== null) {
+        event.preventDefault()
+        const el = leaves.find(b => (b.dataset.branch ?? '') === selectedRef.current) ?? null
+        pickRef.current(el, selectedRef.current)
+      }
     }
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('keydown', onKeyDown)
@@ -290,25 +561,219 @@ export function BranchMenu({
     ? rows
     : rows.filter(row => row.name.toLowerCase().includes(needle))
 
-  /** Stage a pick: remember the row element (the flyout anchors beside
-   * it), then hand the branch to the owner. Both entry paths — row click
-   * and Enter-in-search — funnel through here so the flyout always has a
-   * live anchor. */
-  const pick = (el: HTMLElement | null, name: string): void => {
-    if (el !== null) pendingRef.current = { name, el }
-    setPendingName(name)
-    onSelect(name)
-  }
-
   /** Enter in the search field: commit the first enabled visible row
-   * (its rendered button is the anchor — found by exact name match). */
+   * (its rendered button is the anchor — found by its data-branch key; the
+   * label text alone can't identify a row inside a tree). */
   const commitFirst = (): void => {
     const first = visible.find(row => !row.disabled)
     if (first === undefined) return
-    const buttons = cardRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? []
-    const el = [...buttons].find(b => (b.textContent ?? '').trim() === first.name) ?? null
+    const card = cardRef.current
+    if (card === null) return
+    const el = card.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(first.name)}"]`)
     pick(el, first.name)
   }
+
+  /** Row class composition: base + HEAD tint + selection (selection wins). */
+  const rowClass = (name: string): string => {
+    let cls = css.menuRow
+    if (name === currentBranch) cls += ` ${css.menuRowSelected}`
+    if (name === selected) cls += ` ${css.menuRowPicked}`
+    return cls
+  }
+
+  /** A row's click behavior: with the confirm flyout open, clicking a row
+   * re-picks it (the old one-click flow — the flyout re-anchors); without
+   * one it just selects (IDEA model — double-click or Enter opens the
+   * confirm flyout for the selected row). */
+  const rowClick = (el: HTMLButtonElement, name: string): void => {
+    if (confirmOpen) pick(el, name)
+    else setSelected(name)
+  }
+
+  /** Wrap every case-insensitive occurrence of `needle` in `text` with the
+   * search-mark span (IDEA-style hit highlight). */
+  const renderLabel = (text: string): React.ReactNode => {
+    if (needle === '') return text
+    const out: React.ReactNode[] = []
+    let rest = text
+    let key = 0
+    for (;;) {
+      const idx = rest.toLowerCase().indexOf(needle)
+      if (idx === -1) { out.push(rest); break }
+      if (idx > 0) out.push(rest.slice(0, idx))
+      out.push(<span key={key} className={css.menuSearchMark}>{rest.slice(idx, idx + needle.length)}</span>)
+      key += 1
+      rest = rest.slice(idx + needle.length)
+    }
+    return out
+  }
+
+  /** Does any leaf under these nodes match the needle? */
+  const subtreeMatches = (nodes: TreeNode[]): boolean => {
+    for (const node of nodes) {
+      if (node.leaf !== null && node.leaf.name.toLowerCase().includes(needle)) return true
+      if (subtreeMatches(node.children)) return true
+    }
+    return false
+  }
+
+  /** One tree group-header row: its own segment (a compressed chain's
+   * walked segments join the label), a count badge, and a chevron that
+   * turns for expansion. Clicking toggles. One color throughout — the
+   * folder path is not color-distinguished from the name. */
+  const renderHeader = (node: TreeNode, label: string, depth: number): React.ReactNode => {
+    const isOpen = expanded.has(node.path)
+    return (
+      <button
+        key={`group:${node.path}`}
+        type="button"
+        className={css.menuGroup}
+        data-group={node.path}
+        style={{ paddingLeft: 8 + depth * 12 }}
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (guardActive()) return
+          toggle(node.path)
+          armShiftGuard()
+        }}
+      >
+        <IconChevronRightOutline14
+          size={12}
+          className={isOpen ? `${css.menuGroupChevron} ${css.menuGroupChevronOpen}` : css.menuGroupChevron}
+        />
+        <span className={css.menuGroupLabel}>{label}</span>
+        <span className={css.menuGroupCount}>({node.total})</span>
+      </button>
+    )
+  }
+
+  /** One tree leaf row: under an expanded folder it shows only its own
+   * segment (indentation carries the hierarchy — no repeated full path);
+   * a compressed linear chain keeps its walked segments in the label so
+   * the context survives without a pointless one-entry folder. */
+  const renderLeaf = (node: TreeNode, label: string, depth: number): React.ReactNode => (
+    <button
+      key={node.path}
+      type="button"
+      role="menuitem"
+      data-branch={node.path}
+      className={rowClass(node.path)}
+      disabled={node.leaf?.disabled ?? false}
+      style={{ paddingLeft: 8 + depth * 12 }}
+      onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
+      onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
+      onMouseEnter={(event) => { gateTooltip(event.currentTarget, node.path) }}
+      onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+    >
+      <span className={css.menuRowLabel}>{label}</span>
+      {node.path === currentBranch && <IconCheckOutline16 size={14} />}
+    </button>
+  )
+
+  /** Recursive tree renderer. Linear chains — nodes that are neither a
+   * branch nor a real fork — compress into the next row's label, so
+   * `feature/优化` stays a single flat row instead of a pointless one-entry
+   * folder, while a real fork (`a/deep/tree` holding leaf1+leaf2) gets a
+   * header whose children show only their own segments. */
+  const renderTree = (nodes: TreeNode[], depth: number): React.ReactNode[] => {
+    const out: React.ReactNode[] = []
+    for (const node of nodes) {
+      let cur = node
+      const parts: string[] = []
+      while (cur.leaf === null && cur.children.length === 1) {
+        parts.push(cur.segment)
+        cur = cur.children[0]
+      }
+      const label = parts.length === 0 ? cur.segment : `${parts.join('/')}/${cur.segment}`
+      if (cur.leaf !== null) {
+        out.push(renderLeaf(cur, label, depth))
+        // A branch that is also a folder path (`feature` next to
+        // `feature/x`): keep the pickable row and fold the children under
+        // a second, toggle-only header of the same name (rare coexistence).
+        if (cur.children.length > 0) {
+          out.push(renderHeader(cur, label, depth))
+          if (expanded.has(cur.path)) out.push(...renderTree(cur.children, depth + 1))
+        }
+      } else {
+        out.push(renderHeader(cur, label, depth))
+        if (expanded.has(cur.path)) out.push(...renderTree(cur.children, depth + 1))
+      }
+    }
+    return out
+  }
+
+  /** Search view: keep matching leaves AND their ancestor folders (IDEA's
+   * filter keeps the path), hide non-matching siblings, force every kept
+   * folder open, and highlight the hit substring. No chain compression —
+   * the full ancestor path is exactly the context the search is for. */
+  const renderSearch = (nodes: TreeNode[], depth: number): React.ReactNode[] => {
+    const out: React.ReactNode[] = []
+    for (const node of nodes) {
+      const leafHit = node.leaf !== null && node.leaf.name.toLowerCase().includes(needle)
+      const childHit = subtreeMatches(node.children)
+      if (leafHit) {
+        out.push(
+          <button
+            key={node.path}
+            type="button"
+            role="menuitem"
+            data-branch={node.path}
+            className={rowClass(node.path)}
+            disabled={node.leaf?.disabled ?? false}
+            style={{ paddingLeft: 8 + depth * 12 }}
+            onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
+            onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
+            onMouseEnter={(event) => { gateTooltip(event.currentTarget, node.path) }}
+            onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+          >
+            <span className={css.menuRowLabel}>{renderLabel(node.segment)}</span>
+            {node.path === currentBranch && <IconCheckOutline16 size={14} />}
+          </button>,
+        )
+      }
+      if (childHit) {
+        out.push(
+          <div
+            key={`search:${node.path}`}
+            role="presentation"
+            className={css.menuGroup}
+            data-group={node.path}
+            style={{ paddingLeft: 8 + depth * 12 }}
+          >
+            <IconChevronDownOutline14 size={12} className={css.menuGroupChevron} />
+            <span className={css.menuGroupLabel}>{renderLabel(node.segment)}</span>
+            <span className={css.menuGroupCount}>({node.total})</span>
+          </div>,
+        )
+        out.push(...renderSearch(node.children, depth + 1))
+      }
+    }
+    return out
+  }
+
+  /** The rendered button for a branch name (flyout anchor on click-select
+   * paths, where the handler only has the name at hand). */
+  const buttonOf = (name: string): HTMLButtonElement | null =>
+    cardRef.current?.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(name)}"]`) ?? null
+
+  /** One flat row (small repos, and search results there). */
+  const renderRow = (row: BranchRow, highlight: boolean): React.ReactNode => (
+    <button
+      key={row.name}
+      type="button"
+      role="menuitem"
+      data-branch={row.name}
+      className={rowClass(row.name)}
+      disabled={row.disabled}
+      onClick={() => { if (guardActive()) return; rowClick(buttonOf(row.name), row.name) }}
+      onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, row.name) }}
+      onMouseEnter={(event) => { gateTooltip(event.currentTarget, row.name) }}
+      onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+    >
+      <span className={css.menuRowLabel}>{highlight ? renderLabel(row.name) : row.name}</span>
+      {row.name === currentBranch && <IconCheckOutline16 size={14} />}
+    </button>
+  )
 
   return (
     <>
@@ -320,40 +785,53 @@ export function BranchMenu({
           role="menu"
           aria-label={t('menuLocalBranches')}
         >
-          <div className={css.menuHeading}>{t('menuLocalBranches')}</div>
-          <div className={css.menuRows} role="presentation" ref={holdRowsCenter}>
-            {visible.map(row => (
-              <button
-                key={row.name}
-                type="button"
-                role="menuitem"
-                className={row.name === currentBranch ? `${css.menuRow} ${css.menuRowSelected}` : css.menuRow}
-                disabled={row.disabled}
-                onClick={(event) => { pick(event.currentTarget, row.name) }}
-              >
-                <span className={css.menuRowLabel}>{row.name}</span>
-                {row.name === currentBranch && <IconCheckOutline16 size={14} />}
-              </button>
-            ))}
-            {visible.length === 0 && <div className={css.menuEmpty}>{t('menuNoMatches')}</div>}
+          <div className={css.menuToolbar} role="toolbar" aria-label={t('menuLocalBranches')}>
+            <button
+              type="button"
+              className={css.menuToolButton}
+              title={t('menuLocate')}
+              aria-label={t('menuLocate')}
+              onClick={locateCurrent}
+            >
+              <IconGoalOutline16 size={16} />
+            </button>
+            <button
+              type="button"
+              className={css.menuToolButton}
+              title={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
+              aria-label={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
+              disabled={tree === null || folderPaths.length === 0}
+              onClick={toggleAll}
+            >
+              {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
+            </button>
           </div>
-          <div className={css.menuSearchWrap}>
-            <input
-              ref={holdSearchFocus}
-              className={css.menuSearch}
-              type="text"
-              value={query}
-              placeholder={t('menuSearchPlaceholder')}
-              aria-label={t('menuSearchPlaceholder')}
-              spellCheck={false}
-              onChange={event => { setQuery(event.target.value) }}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  commitFirst()
-                }
-              }}
-            />
+          <div className={css.menuMain}>
+            <div className={css.menuHeading}>{t('menuLocalBranches')}</div>
+            <div className={css.menuRows} role="presentation" ref={holdRowsCenter}>
+              {tree === null
+                ? (needle === '' ? rows : visible).map(row => renderRow(row, needle !== ''))
+                : (needle === '' ? renderTree(tree, 0) : renderSearch(tree, 0))}
+              {visible.length === 0 && <div className={css.menuEmpty}>{t('menuNoMatches')}</div>}
+            </div>
+            <div className={css.menuSearchWrap}>
+              <input
+                ref={holdSearchFocus}
+                className={css.menuSearch}
+                type="text"
+                value={query}
+                placeholder={t('menuSearchPlaceholder')}
+                aria-label={t('menuSearchPlaceholder')}
+                spellCheck={false}
+                onChange={event => { setQuery(event.target.value) }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    commitFirst()
+                  }
+                }}
+              />
+            </div>
           </div>
         </div>,
         document.body,

@@ -50,22 +50,30 @@ ok('row weight 500 (chip-matched)', fonts.row === '500', fonts.row ?? '')
 ok('search weight 500 (req 1)', fonts.search === '500', fonts.search ?? '')
 ok('heading weight 400 (req 2, untouched)', fonts.heading === '400', fonts.heading ?? '')
 
-// ── Row pick helper: search a unique tail, click the exact row ─────────
+// ── Row pick helper: search the full name, select + Enter to stage the
+// confirm flyout (IDEA model: a click selects, Enter checks out) ───────
 const pickRow = async (name) => {
-  await menu.locator('input').fill(name.slice(-12))
-  await page.waitForTimeout(250)
-  const row = menu.locator('button[role="menuitem"]:not([disabled])').first()
-  const seen = (await row.textContent())?.trim() ?? ''
-  if (seen !== name) return { ok: false, seen }
+  await menu.locator('input').fill(name)
+  await page.waitForTimeout(300)
+  const row = menu.locator(`button[data-branch="${CSS.escape(name)}"]`)
+  if (await row.count() === 0) return { ok: false, seen: 'no matching row' }
   await row.click()
+  await page.waitForTimeout(150)
+  await row.press('Enter')
   await page.waitForTimeout(600)
   return { ok: true }
 }
 
-// Pick the primary target: the last distinct row of whatever repo the
-// session sits in (adaptive — stress branches may not exist).
-const names = (await menu.locator('button[role="menuitem"]').allTextContents())
-  .map(s => s.trim())
+// Pick the primary target: the last distinct NON-CURRENT row of whatever
+// repo the session sits in (adaptive — stress branches may not exist).
+// The current row is excluded: it renders first in tree mode (its chain
+// opens by default) and picking it closes the menu by design.
+const rowsInfo = await menu.locator('button[role="menuitem"]')
+  .evaluateAll(nodes => nodes.map(n => ({
+    name: n.dataset.branch ?? (n.textContent ?? '').trim(),
+    current: n.querySelector('svg') !== null,
+  })))
+const names = rowsInfo.filter(r => !r.current).map(r => r.name)
   .filter((n, i, a) => a.indexOf(n) === i)
 const targetA = names[names.length - 1] ?? ''
 console.log(`target: A=${JSON.stringify(targetA)}`)
@@ -111,7 +119,7 @@ const centered = await page.evaluate(name => {
   const card = document.querySelector('div[role="menu"]')
   const fly = document.querySelector('[role="dialog"]')
   if (card === null || fly === null) return null
-  const row = [...card.querySelectorAll('button[role="menuitem"]')].find(b => (b.textContent ?? '').trim() === name)
+  const row = [...card.querySelectorAll('button[role="menuitem"][data-branch]')].find(b => b.dataset.branch === name)
   if (row === undefined) return null
   const f = fly.getBoundingClientRect()
   const r = row.getBoundingClientRect()
@@ -127,13 +135,21 @@ ok('flyout vertically centered on row', centered !== null && Math.abs(centered.f
 // repos (single branch besides the current) can't exercise re-anchoring.
 await menu.locator('input').fill('')
 await page.waitForTimeout(300)
-const pickables = (await menu.locator('button[role="menuitem"]:not([disabled])').allTextContents())
-  .map(s => s.trim())
+const pickables = (await menu.locator('button[role="menuitem"]:not([disabled])')
+  .evaluateAll(nodes => nodes.map(n => ({
+    name: n.dataset.branch ?? (n.textContent ?? '').trim(),
+    current: n.querySelector('svg') !== null,
+  }))))
+  .filter(r => !r.current)
+  .map(r => r.name)
   .filter(n => n !== targetA)
 let rectB = null
 let otherName = ''
 if (pickables.length > 0) {
-  const otherRow = menu.locator('button[role="menuitem"]:not([disabled])', { hasText: pickables[0] }).first()
+  // The confirm flyout is open here, so a click re-picks (re-anchors) —
+  // no Enter needed: the click handler stages the pick while a confirm is
+  // showing (the old one-click flow), per the menu's interaction model.
+  const otherRow = menu.locator(`button[data-branch="${CSS.escape(pickables[0])}"]`)
   otherName = pickables[0]
   await otherRow.scrollIntoViewIfNeeded()
   await otherRow.click()
@@ -157,7 +173,7 @@ if (rectB !== null) {
   const centeredB = await page.evaluate(name => {
     const card = document.querySelector('div[role="menu"]')
     const fly = document.querySelector('[role="dialog"]')
-    const row = [...card.querySelectorAll('button[role="menuitem"]')].find(b => (b.textContent ?? '').trim() === name)
+    const row = [...card.querySelectorAll('button[role="menuitem"][data-branch]')].find(b => b.dataset.branch === name)
     if (fly === null || row === undefined) return null
     const f = fly.getBoundingClientRect()
     const r = row.getBoundingClientRect()
