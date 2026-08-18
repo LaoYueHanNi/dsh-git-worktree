@@ -138,9 +138,9 @@
 /* Confirm flyout: the second-level panel opening right of the branch
  * card (the base Menu's submenu posture: r12, inverted hairline,
  * shadow-lv3, --dsw-specific-menu). Width is content-driven — it follows
- * the branch name in the ask line — floored at 124px (a bit above the
- * Cancel/Confirm pair's own minimum, so short names stay tight instead of
- * riding the old 200px floor) and capped at 400px; BranchMenu also clamps
+ * the branch name in the ask line — floored at 168px (the Cancel/Confirm
+ * pair plus padding: short branch names must not squeeze the buttons into
+ * wrapping "切换中…" mid-word) and capped at 400px; BranchMenu also clamps
  * it inline to the room right of the card. Beyond the cap the ask wraps.
  * border-box so every width arm includes the card chrome. */
 .popCard {
@@ -148,7 +148,7 @@
   position: fixed;
   z-index: 1000;
   width: max-content;
-  min-width: 124px;
+  min-width: 168px;
   max-width: min(400px, 80vw);
   padding: 4px;
   border: 1px solid var(--dsw-alias-border-inverted);
@@ -177,7 +177,9 @@
   padding: 2px;
 }
 
-/* Menu-row-like buttons: transparent fill, hover tint, same 13px type. */
+/* Menu-row-like buttons: transparent fill, hover tint, same 13px type.
+ * nowrap keeps labels like 切换中… from splitting mid-word when the flyout
+ * is pinned to its minimum width by a short branch name. */
 .popActions button {
   flex: 1 1 0;
   height: 28px;
@@ -187,6 +189,7 @@
   color: inherit;
   font: inherit;
   font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -218,22 +221,23 @@
  *      the viewport, whatever the branch count.
  *
  * The inline `left`/`bottom` come from BranchMenu's placement pass; the
- * width is fixed here (design 320px, viewport-capped) so horizontal
- * clamping stays deterministic without measuring the card. */
+ * width is fixed here (design 360px — 320 tree + 40 tool strip — and
+ * viewport-capped) so horizontal clamping stays deterministic without
+ * measuring the card. */
 
 /* The portal lands directly under document.body, outside the shell's
  * box-sizing reset — content-box default would add padding/border on top
- * of the declared width (320 became 330, and the width:100% children
+ * of the declared width (360 became 370, and the width:100% children
  * padded 16px past the card's right clip, shearing off their rounded
  * corners). Every width-declared box in this popup opts back into
- * border-box: the card, the rows, and the search input. */
+ * border-box: the card, the toolbar, the rows, and the search input. */
 .menuCard {
   box-sizing: border-box;
   position: fixed;
   z-index: 1000;
   display: flex;
-  flex-direction: column;
-  width: min(320px, calc(100vw - 24px));
+  flex-direction: row;
+  width: min(360px, calc(100vw - 24px));
   max-height: min(420px, 60vh);
   overflow: hidden;
   padding: 4px;
@@ -241,6 +245,58 @@
   border-radius: 12px;
   background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
   box-shadow: var(--dsw-shadow-lv3);
+}
+
+/* Left tool strip (IDEA branch-panel posture at popup scale): a narrow
+ * column of icon-only buttons for actions that do not belong in the tree
+ * — locate the checked-out branch, expand/collapse the whole tree.
+ * Buttons stack from the BOTTOM up: the card's height shrinks when the
+ * repo has few branches, so a top-anchored strip would drift around and
+ * the buttons would sit far from the search bar; anchoring to the bottom
+ * pins them at a stable spot (beside the search row) whatever the height. */
+.menuToolbar {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  width: 32px;
+  padding: 0 2px;
+  margin-right: 4px;
+  border-right: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.menuToolButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.menuToolButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+.menuToolButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The main column: heading + scrollable rows + pinned search. */
+.menuMain {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Non-interactive group heading — the Menu label row's posture. */
@@ -300,6 +356,14 @@
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
+/* IDEA-style selection: the clicked row gets a bluish fill, layering over
+ * the HEAD tint when the same row is both — selection communicates intent,
+ * the HEAD tint communicates position, and they coexist (IDEA 4.4). */
+.menuRowPicked,
+.menuRowPicked:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary-bluish, #4186f0) 18%, transparent);
+}
+
 /* Occupied-worktree branches: dimmed, not clickable. */
 .menuRow:disabled {
   opacity: 0.45;
@@ -311,6 +375,69 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Search hit highlight (IDEA): the matched substring gets a warm tint
+ * behind it — theme-agnostic, legible in both light and dark cards. */
+.menuSearchMark {
+  background: color-mix(in srgb, #b58900 38%, transparent);
+  border-radius: 2px;
+}
+
+/* Tree group rows (folder headers) — BranchMenu's '/' prefix tree: the
+ * same row geometry as .menuRow, but labeled in the secondary tone so the
+ * leaf rows pop, with a count badge and a chevron that turns on expand. */
+.menuGroup {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #81858c);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuGroup:hover {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+.menuGroupLabel {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuGroupChevron {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.menuGroupChevronOpen {
+  transform: rotate(90deg);
+}
+
+.menuGroupCount {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 400;
+  color: color-mix(in srgb, currentColor 55%, transparent);
 }
 
 /* Zero-search-hit state: centered secondary line inside the rows area. */

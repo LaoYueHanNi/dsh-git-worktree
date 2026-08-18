@@ -239,6 +239,7 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
           ref={chipRef}
           type="button"
           className={css.chip}
+          title={facts.currentBranch}
           onClick={() => {
             // Toggling always unwinds any half-open confirm first.
             setConfirm(null)
