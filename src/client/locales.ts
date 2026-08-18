@@ -11,6 +11,9 @@ export type GitWorktreeKey =
   | 'menuLocalBranches'
   | 'menuSearchPlaceholder'
   | 'menuNoMatches'
+  | 'menuLocate'
+  | 'menuExpandAll'
+  | 'menuCollapseAll'
   | 'switchAsk'
   | 'switchBusy'
   | 'worktreeAskNew'
@@ -36,6 +39,9 @@ export const en: Record<GitWorktreeKey, string> = {
   menuLocalBranches: 'Local branches',
   menuSearchPlaceholder: 'Search branches',
   menuNoMatches: 'No matching branches',
+  menuLocate: 'Locate current branch',
+  menuExpandAll: 'Expand all',
+  menuCollapseAll: 'Collapse all',
   switchAsk: 'Switch to {branch}?',
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
@@ -62,6 +68,9 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuLocalBranches: '本地分支',
   menuSearchPlaceholder: '搜索分支',
   menuNoMatches: '没有匹配的分支',
+  menuLocate: '定位当前分支',
+  menuExpandAll: '全部展开',
+  menuCollapseAll: '全部折叠',
   switchAsk: '是否切到 {branch}？',
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',

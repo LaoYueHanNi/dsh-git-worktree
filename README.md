@@ -12,6 +12,7 @@ Repo: <https://github.com/LaoYueHanNi/dsh-git-worktree>
 
 ## Features
 
+- **IDEA-style branch picker**: the branch menu treats `/` as a folder hierarchy — collapsible folders, last-segment labels, the checked-out branch's chain opens by default and is centered on open. Single click selects a row; double-click or Enter opens the right-side confirm flyout. The left tool strip offers **locate current branch** and **expand/collapse all**; the bottom search keeps the matching branches' ancestor folders and highlights the hit substring. Clipped labels expose the full name on hover.
 - **Branch switching**: pick a branch from the chip's menu and confirm — an in-place `git switch`. Inside a linked worktree it switches within that worktree only.
 - **Worktree isolation**: on a blank session, the **Worktree** toggle turns the pick into `git worktree add` under `~/.dsh/gitworktree/<repo>-<branch>/`, registered as a real workspace with a fresh blank session. Same branch re-picks reuse the existing worktree; stale registrations recover via `git worktree prune`.
 - **Storage root configurable**: **Settings → Git Worktree** — native folder picker, saves automatically.
