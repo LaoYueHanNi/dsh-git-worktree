@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateWorktreeResult, RepoStatus, RouteError, SettingsBody, SwitchResult,
+  CreateWorktreeResult, RepoStatus, RouteError, SwitchResult,
 } from '../wire.ts'
-import { ROUTE_SETTINGS, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -57,27 +57,6 @@ export async function fetchStatus(path: string): Promise<Call<RepoStatus>> {
  */
 export function requestWorktree(repoPath: string, branch: string): Promise<Call<CreateWorktreeResult>> {
   return post<CreateWorktreeResult>(ROUTE_WORKTREE, { repoPath, branch })
-}
-
-/**
- * Read the plugin's persisted settings.
- */
-export async function fetchSettings(): Promise<Call<SettingsBody>> {
-  try {
-    const response = await fetch(ROUTE_SETTINGS, { cache: 'no-store' })
-    if (!response.ok) return { ok: false, error: `HTTP ${String(response.status)}` }
-    return { ...(await response.json() as SettingsBody), ok: true }
-  } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
-  }
-}
-
-/**
- * Persist new settings.
- * @param value - the complete document to store.
- */
-export function putSettings(value: SettingsBody): Promise<Call<SettingsBody>> {
-  return send<SettingsBody>('PUT', ROUTE_SETTINGS, value)
 }
 
 /**

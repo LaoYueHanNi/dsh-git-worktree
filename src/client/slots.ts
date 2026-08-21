@@ -14,12 +14,3 @@ export interface BranchChipInjected {
    */
   adoptWorktree: (path: string) => Promise<void>
 }
-
-/** Injected face of the settings section: the Host's directory picker. */
-export interface SettingsSectionInjected {
-  /**
-   * Open the Host's native directory picker; resolves the chosen absolute
-   * path, or null when the user dismissed the dialog.
-   */
-  pickDirectory: () => Promise<string | null>
-}

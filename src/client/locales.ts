@@ -4,7 +4,7 @@
  * build instead of surfacing a raw key.
  */
 
-/** Every copy key the plugin surfaces (chip, dialogs, settings section). */
+/** Every copy key the plugin surfaces (chip, dialogs, settings card). */
 export type GitWorktreeKey =
   | 'chipWorktree'
   | 'worktreeToggle'
@@ -22,15 +22,21 @@ export type GitWorktreeKey =
   | 'actionCancel'
   | 'actionConfirm'
   | 'errorGeneric'
-  | 'settingsNav'
-  | 'settingsTitle'
-  | 'settingsDescription'
-  | 'settingsRootDir'
-  | 'settingsBrowse'
-  | 'settingsRootDirHelp'
-  | 'settingsRootDirInvalid'
-  | 'settingsSaving'
-  | 'settingsSaved'
+  | 'cardTitle'
+  | 'cardDescription'
+  | 'cardUnsaved'
+  | 'cardExpand'
+  | 'cardCollapse'
+  | 'cardReadOnly'
+  | 'cardRootDirLabel'
+  | 'cardBrowse'
+  | 'cardPicking'
+  | 'cardRootDirHint'
+  | 'cardOverridden'
+  | 'cardSaveFailed'
+  | 'cardDiscard'
+  | 'cardSave'
+  | 'cardSaving'
 
 /** English dictionary — complete by construction. */
 export const en: Record<GitWorktreeKey, string> = {
@@ -50,15 +56,21 @@ export const en: Record<GitWorktreeKey, string> = {
   actionCancel: 'Cancel',
   actionConfirm: 'Confirm',
   errorGeneric: 'Git worktree: {message}',
-  settingsNav: 'Git Worktree',
-  settingsTitle: 'Git worktree',
-  settingsDescription: 'Where isolated worktree folders for new sessions are stored.',
-  settingsRootDir: 'Worktree storage folder',
-  settingsBrowse: 'Browse…',
-  settingsRootDirHelp: 'Absolute path. Empty uses the default ~/.dsh/gitworktree.',
-  settingsRootDirInvalid: 'Enter an absolute path, or leave it empty for the default.',
-  settingsSaving: 'Saving…',
-  settingsSaved: 'Saved',
+  cardTitle: 'Git Worktree',
+  cardDescription: 'Where isolated worktree folders for new sessions are stored.',
+  cardUnsaved: 'Unsaved',
+  cardExpand: 'Expand',
+  cardCollapse: 'Collapse',
+  cardReadOnly: 'The settings document is read-only; edits cannot be saved.',
+  cardRootDirLabel: 'Worktree storage folder',
+  cardBrowse: 'Browse…',
+  cardPicking: 'Choosing…',
+  cardRootDirHint: 'Absolute path. Empty uses the default $DSH_HOME/gitworktree (~/.dsh/gitworktree).',
+  cardOverridden: '(custom location)',
+  cardSaveFailed: 'The change did not save. Check the path is absolute and try again.',
+  cardDiscard: 'Discard',
+  cardSave: 'Save',
+  cardSaving: 'Saving…',
 }
 
 /** 中文词典。 */
@@ -79,13 +91,19 @@ export const zh: Record<GitWorktreeKey, string> = {
   actionCancel: '取消',
   actionConfirm: '确认',
   errorGeneric: 'Git 工作树：{message}',
-  settingsNav: 'Git 工作树',
-  settingsTitle: 'Git 工作树',
-  settingsDescription: '新会话的隔离工作树文件夹存放位置。',
-  settingsRootDir: '工作树存放目录',
-  settingsBrowse: '浏览…',
-  settingsRootDirHelp: '绝对路径。留空使用默认 ~/.dsh/gitworktree。',
-  settingsRootDirInvalid: '请输入绝对路径，或留空使用默认位置。',
-  settingsSaving: '保存中…',
-  settingsSaved: '已保存',
+  cardTitle: 'Git 工作树',
+  cardDescription: '新会话的隔离工作树文件夹存放位置。',
+  cardUnsaved: '未保存',
+  cardExpand: '展开',
+  cardCollapse: '折叠',
+  cardReadOnly: '设置文档为只读，修改无法保存。',
+  cardRootDirLabel: '工作树存放目录',
+  cardBrowse: '浏览…',
+  cardPicking: '选择中…',
+  cardRootDirHint: '绝对路径。留空使用默认 $DSH_HOME/gitworktree（~/.dsh/gitworktree）。',
+  cardOverridden: '（已自定义位置）',
+  cardSaveFailed: '保存未生效，请检查路径是否为绝对路径后重试。',
+  cardDiscard: '放弃',
+  cardSave: '保存',
+  cardSaving: '保存中…',
 }
