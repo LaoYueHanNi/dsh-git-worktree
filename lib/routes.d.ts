@@ -3,31 +3,24 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 import { type DirExists, type Exec } from './git.js';
-import { type StoredSettings } from './settings.js';
-import type { CreateWorktreeResult, RepoStatus, RouteError, SettingsBody, SwitchResult } from './wire.js';
+import type { CreateWorktreeResult, RepoStatus, RouteError, SwitchResult } from './wire.js';
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
     exec: Exec;
-    /** Absolute settings file path (the persisted document). */
-    settingsFile: string;
-    /** In-memory cached settings; the file is authoritative across restarts. */
-    cachedSettings: () => StoredSettings;
-    /** Persist and advance the cache (throws on an invalid value). */
-    storeSettings: (value: StoredSettings) => Promise<void>;
+    /** The settings-resolved rootDir (absent/blank = the default location). */
+    sectionRootDir: () => string | undefined;
     /** User home directory seam. */
     home: () => string;
+    /** `$DSH_HOME` environment value seam. */
+    envHome: () => string | undefined;
     /** Worktree-registration existence seam (tests substitute). */
     dirExists?: DirExists;
 }
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
     status: number;
-    body: RepoStatus | CreateWorktreeResult | SwitchResult | SettingsBody | RouteError;
+    body: RepoStatus | CreateWorktreeResult | SwitchResult | RouteError;
 }
-/** GET /settings 鈥?the persisted document. */
-export declare function handleGetSettings(deps: RouteDeps): Promise<RouteOutcome>;
-/** PUT /settings 鈥?validate, persist, and advance the cache. */
-export declare function handlePutSettings(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
 /**
  * GET /status 鈥?repository facts for one directory.
  * @param deps - host dependencies.

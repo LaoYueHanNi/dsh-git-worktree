@@ -15,7 +15,7 @@ Repo: <https://github.com/LaoYueHanNi/dsh-git-worktree>
 - **IDEA-style branch picker**: the branch menu treats `/` as a folder hierarchy — collapsible folders, last-segment labels, the checked-out branch's chain opens by default and is centered on open. Single click selects a row; double-click or Enter opens the right-side confirm flyout. The left tool strip offers **locate current branch** and **expand/collapse all**; the bottom search keeps the matching branches' ancestor folders and highlights the hit substring. Clipped labels expose the full name on hover.
 - **Branch switching**: pick a branch from the chip's menu and confirm — an in-place `git switch`. Inside a linked worktree it switches within that worktree only.
 - **Worktree isolation**: on a blank session, the **Worktree** toggle turns the pick into `git worktree add` under `~/.dsh/gitworktree/<repo>-<branch>/`, registered as a real workspace with a fresh blank session. Same branch re-picks reuse the existing worktree; stale registrations recover via `git worktree prune`.
-- **Storage root configurable**: **Settings → Git Worktree** — native folder picker, saves automatically.
+- **Storage root configurable**: the **Git Worktree** card under **Settings → Plugins** — a native folder picker or a typed absolute path, effective on save (new worktrees land in the new location; existing ones stay put and remain listable/reusable by git). Empty selects the default `$DSH_HOME/gitworktree` (`~/.dsh/gitworktree`). The value lives in the shared dsh settings document; a legacy `~/.dsh/git-worktree/settings.json` value migrates into it automatically on upgrade (the old file is renamed `.migrated` and kept).
 
 ## Install
 
@@ -47,7 +47,7 @@ dsh plugin --profile web update dsh-git-worktree
 dsh plugin --profile web remove dsh-git-worktree
 ```
 
-The plugin is removed from the profile and stops loading. Worktree folders under `~/.dsh/gitworktree/` and the settings file are kept — delete them manually if you no longer need them.
+The plugin is removed from the profile and stops loading. Worktree folders under `~/.dsh/gitworktree/` are kept; the migrated legacy settings file (`settings.json.migrated`) can be deleted manually if unwanted — the plugin's own settings live in the dsh settings document.
 
 ## Development
 
@@ -56,7 +56,7 @@ Build the plugin once:
 ```sh
 npm install
 npm run build && npm run build:client
-npm test                # vitest (41 tests)
+npm test                # vitest (60 tests)
 node scripts/smoke.mjs  # real-git smoke over the built lib
 ```
 
@@ -79,4 +79,4 @@ Temporary mount — effective for this launch only, no profile changes. Create a
 dsh web --patch <plugin-dir>/cordis.yml
 ```
 
-This mode only mounts the host half (the four `/plugin/git-worktree/*` routes keep working); the chip needs the client bundle resolved by package name, so for UI development use the `link:` install above instead: run `npm run build && npm run build:client` (or `npx tsdown --watch` in the plugin directory), restart `dsh web`, and the browser plugin hot-reloads automatically.
+This mode only mounts the host half (the three `/plugin/git-worktree/*` routes keep working); the chip needs the client bundle resolved by package name, so for UI development use the `link:` install above instead: run `npm run build && npm run build:client` (or `npx tsdown --watch` in the plugin directory), restart `dsh web`, and the browser plugin hot-reloads automatically.
