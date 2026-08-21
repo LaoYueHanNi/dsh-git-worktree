@@ -7,22 +7,20 @@ import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { GitError, addWorktree, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
-import { loadSettings, resolveRootDir, saveSettings, type StoredSettings } from './settings.js'
+import { resolveRootDir } from './settings.js'
 import type {
-  CreateWorktreeBody, CreateWorktreeResult, RepoStatus, RouteError, SettingsBody, SwitchBody, SwitchResult,
+  CreateWorktreeBody, CreateWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
   exec: Exec
-  /** Absolute settings file path (the persisted document). */
-  settingsFile: string
-  /** In-memory cached settings; the file is authoritative across restarts. */
-  cachedSettings: () => StoredSettings
-  /** Persist and advance the cache (throws on an invalid value). */
-  storeSettings: (value: StoredSettings) => Promise<void>
+  /** The settings-resolved rootDir (absent/blank = the default location). */
+  sectionRootDir: () => string | undefined
   /** User home directory seam. */
   home: () => string
+  /** `$DSH_HOME` environment value seam. */
+  envHome: () => string | undefined
   /** Worktree-registration existence seam (tests substitute). */
   dirExists?: DirExists
 }
@@ -30,37 +28,12 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | SettingsBody | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | RouteError
 }
 
 /** Uniform failure envelope. */
 function fail(status: number, error: string): RouteOutcome {
   return { status, body: { error } }
-}
-
-/** GET /settings 鈥?the persisted document. */
-export async function handleGetSettings(deps: RouteDeps): Promise<RouteOutcome> {
-  const value = await loadSettings(deps.settingsFile)
-  return { status: 200, body: { rootDir: value.rootDir } }
-}
-
-/** PUT /settings 鈥?validate, persist, and advance the cache. */
-export async function handlePutSettings(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return fail(400, 'request body must be a JSON object')
-  }
-  const record = body as Record<string, unknown>
-  for (const key of Object.keys(record)) {
-    if (key !== 'rootDir') return fail(400, `unknown body key "${key}"`)
-  }
-  if (typeof record.rootDir !== 'string') return fail(400, 'body key "rootDir" must be a string')
-  try {
-    await saveSettings(deps.settingsFile, { rootDir: record.rootDir })
-    await deps.storeSettings({ rootDir: record.rootDir.trim() })
-    return { status: 200, body: { rootDir: record.rootDir.trim() } }
-  } catch (error) {
-    return fail(400, error instanceof Error ? error.message : String(error))
-  }
 }
 
 /** GitError to outcome: usage-shaped failures are 400, the rest 500. */
@@ -77,7 +50,7 @@ function gitFailure(error: GitError): RouteOutcome {
 export async function handleStatus(deps: RouteDeps, path: string | undefined): Promise<RouteOutcome> {
   if (path === undefined || !isAbsoluteDir(path)) return fail(400, 'query parameter "path" must be an absolute directory')
   const facts = await probeRepo(deps.exec, path, deps.dirExists)
-  const rootDir = resolveRootDir(deps.cachedSettings(), deps.home())
+  const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
   if (facts === undefined) return { status: 200, body: { repo: false } }
   return {
     status: 200,
@@ -123,14 +96,14 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
   const { repoPath, branch } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (branch.trim() === '') return fail(400, '"branch" must be non-empty')
-  const configured = deps.cachedSettings().rootDir.trim()
-  if (configured !== '' && !isAbsoluteConfigPath(configured)) {
-    return fail(400, `configured rootDir "${deps.cachedSettings().rootDir}" is not an absolute path`)
+  const configured = deps.sectionRootDir()?.trim()
+  if (configured !== undefined && configured !== '' && !isAbsoluteConfigPath(configured)) {
+    return fail(400, `configured rootDir "${String(deps.sectionRootDir())}" is not an absolute path`)
   }
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    const rootDir = resolveRootDir(deps.cachedSettings(), deps.home())
+    const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
     // The folder name carries the belonging itself: `<repoName>-<branch>` —
     // the sidebar group title (the folder basename) then reads as the parent
     // repository plus the branch instead of a bare branch word.

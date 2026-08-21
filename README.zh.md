@@ -15,7 +15,7 @@
 - **IDEA 风格分支选择器**：分支菜单把 `/` 视为文件夹层级 —— 可折叠文件夹、末段标签，当前分支所在链路默认展开并居中。单击选中（蓝底），双击或 Enter 弹出右侧确认弹层。左侧工具栏提供**定位当前分支**与**全部展开/折叠**；底部搜索保留匹配分支的祖先文件夹并高亮命中字符；超长标签悬停显示全名。
 - **分支切换**：从 chip 菜单选分支、确认后原地 `git switch`。在 worktree 会话内只作用于该 worktree。
 - **工作树隔离**：空白会话上勾选**「工作树」**再选分支，在 `~/.dsh/gitworktree/<仓库>-<分支>/` 下执行 `git worktree add` 并注册为真实工作区，跳转到新目录的空白会话。重复选同一分支直接复用；失效注册自动 prune 恢复。
-- **存放根路径可配**：**设置 → Git 工作树** —— 原生目录选择器，自动保存。
+- **存放根路径可配**：**设置 → 插件**页签下的 **Git 工作树** 卡片 —— 原生目录选择器或手输绝对路径，保存即生效（新建的 worktree 落在新目录，已有的留在原地，git 仍能识别复用）。留空使用默认 `$DSH_HOME/gitworktree`（`~/.dsh/gitworktree`）。设置存于 dsh 统一设置文档；旧版 `~/.dsh/git-work-tree/settings.json` 的已保存值会在升级后自动迁入（原文件改名 `.migrated` 保留）。
 
 ## 安装
 
@@ -47,7 +47,7 @@ dsh plugin --profile web update dsh-git-worktree
 dsh plugin --profile web remove dsh-git-worktree
 ```
 
-插件会从 profile 移除并停止加载。`~/.dsh/gitworktree/` 下的 worktree 目录与设置文件会保留 —— 需要时手动删除。
+插件会从 profile 移除并停止加载。`~/.dsh/gitworktree/` 下的 worktree 目录会保留；已迁移的旧设置文件（`settings.json.migrated`）如不需要可手动删除，插件自身的设置项存于 dsh 设置文档。
 
 ## 开发
 
@@ -56,7 +56,7 @@ dsh plugin --profile web remove dsh-git-worktree
 ```sh
 npm install
 npm run build && npm run build:client
-npm test                # vitest（41 项测试）
+npm test                # vitest（60 项测试）
 node scripts/smoke.mjs  # 基于构建产物的真实 git 冒烟
 ```
 
@@ -79,4 +79,4 @@ git add lib/
 dsh web --patch <插件目录>/cordis.yml
 ```
 
-此模式只挂载 host 半边（`/plugin/git-worktree/*` 四条路由照常工作）；分支 chip 依赖按包名解析的客户端 bundle，因此开发 UI 请用上面的 `link:` 安装方式：执行 `npm run build && npm run build:client`（或在插件目录跑 `npx tsdown --watch`）并重启 `dsh web` 后，浏览器端插件会自动热重载。
+此模式只挂载 host 半边（`/plugin/git-worktree/*` 三条路由照常工作）；分支 chip 依赖按包名解析的客户端 bundle，因此开发 UI 请用上面的 `link:` 安装方式：执行 `npm run build && npm run build:client`（或在插件目录跑 `npx tsdown --watch`）并重启 `dsh web` 后，浏览器端插件会自动热重载。

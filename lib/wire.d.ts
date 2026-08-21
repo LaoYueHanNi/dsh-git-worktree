@@ -1,6 +1,6 @@
 /**
  * Shared wire contract between the host half (HTTP routes under
- * `/plugin/git-worktree`) and the browser half (chip + settings section).
+ * `/plugin/git-worktree`) and the browser half (chip + plugin settings card).
  * Zero runtime dependencies: constants and types only, imported by both
  * builds.
  */
@@ -8,17 +8,10 @@
 export declare const ROUTE_PREFIX = "/plugin/git-worktree";
 /** GET ROUTE_PREFIX/status?path=<absolute dir> */
 export declare const ROUTE_STATUS = "/plugin/git-worktree/status";
-/** GET/PUT ROUTE_PREFIX/settings — the plugin's own persisted configuration. */
-export declare const ROUTE_SETTINGS = "/plugin/git-worktree/settings";
 /** POST ROUTE_PREFIX/worktree — create-or-reuse a worktree for a branch. */
 export declare const ROUTE_WORKTREE = "/plugin/git-worktree/worktree";
 /** POST ROUTE_PREFIX/switch — in-place branch switch of the main checkout. */
 export declare const ROUTE_SWITCH = "/plugin/git-worktree/switch";
-/** GET settings response / PUT settings request body. */
-export interface SettingsBody {
-    /** Worktree storage root; '' selects the default ~/.dsh/gitworktree. */
-    rootDir: string;
-}
 /** One selectable branch row. */
 export interface BranchEntry {
     /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
