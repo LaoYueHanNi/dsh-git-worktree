@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-worktree",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "DSH plugin: branch visibility and git worktree isolation for Web UI sessions",
   "repository": {
     "type": "git",
