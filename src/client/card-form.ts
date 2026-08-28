@@ -17,6 +17,10 @@
  * @module git-worktree/client/card-form
  */
 
+// Host 0.1.2 moved this contract to '@deepseek-ai/dsh-client-ui-settings/client'
+// (settings-contract.ts), but that release never reached npm; the runtime
+// package's shape is identical and stays installable, so typecheck reads the
+// old home until devDependencies can move past 0.1.1-rc.2.
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 
 /** The field this card edits. */

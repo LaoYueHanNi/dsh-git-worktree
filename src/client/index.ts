@@ -4,11 +4,11 @@
  * card on the Plugins tab (the `git-worktree` settings namespace — the
  * worktree storage root — edited through the settings scope). Repo facts and
  * worktree creation flow through the host half's own routes; session hopping
- * uses the framework's workspaces service; the card's browse button rides the
- * same service's native directory picker (`ctx.workspaces.pickDirectory`).
+ * uses the framework's uiWorkspace navigation; the card's browse button rides
+ * the same service's native directory picker (`ctx.uiWorkspace.pickDirectory`).
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the ui-conversation SlotMap merge (input region entries).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the ui-settings SlotMap merge ('settings.section') and the
@@ -45,9 +45,11 @@ const NS = 'git-worktree'
  */
 const GIT_WORKTREE_NS = 'git-worktree'
 
-/** Required services: the slot ledger, session/workspace runtime, copy, and
- * the settings scope backing the plugin configuration card. */
-export const inject = ['slots', 'sessions', 'workspaces', 'locale', 'connection', 'remote', 'settingsScope']
+/** Required services: the slot ledger, session runtime, copy, and the
+ * settings scope backing the plugin configuration card. Workspace rows and
+ * register still come from `workspaces`; session start and directory picking
+ * live on `uiWorkspace`. */
+export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'locale', 'connection', 'remote', 'settingsScope']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'git-worktree: dictionaries')
@@ -55,7 +57,7 @@ export function apply(ctx: ClientContext): void {
   const chipInjected = (): BranchChipInjected => ({
     adoptWorktree: async (path) => {
       const workspace = await ctx.workspaces.create({ path })
-      ctx.workspaces.startSession(workspace.workspaceId)
+      ctx.uiWorkspace.startSession(workspace.workspaceId)
     },
   })
 
@@ -81,7 +83,7 @@ export function apply(ctx: ClientContext): void {
       ...form.actions(),
       // The shell's own directory picker (the workspace flows' chooser):
       // resolves the chosen absolute path, or null when the user dismisses.
-      pickDirectory: () => ctx.workspaces.pickDirectory(),
+      pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
     }),
   }, GitWorktreeCard))
 }
