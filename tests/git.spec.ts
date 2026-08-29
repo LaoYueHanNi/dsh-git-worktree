@@ -1,6 +1,9 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { normalize } from 'node:path'
-import { addWorktree, probeRepo, switchBranch, type Exec, type ExecResult } from '../src/git.ts'
+import {
+  addWorktree, addWorktreeCutout, cutoutBranchName, probeRepo, switchBranch,
+  type Exec, type ExecResult,
+} from '../src/git.ts'
 
 /** Platform-correct expectation for a scripted POSIX-shaped path. */
 const p = (value: string): string => normalize(value)
@@ -134,6 +137,66 @@ describe('addWorktree', () => {
       { args: ['for-each-ref', 'refs/remotes', 'refs/remotes/nope'], out: { code: 0, stdout: '' } },
     ])
     await expect(addWorktree(exec, '/repo', 'nope', '/root/repo/nope', () => true)).rejects.toThrow('branch "nope" not found')
+  })
+})
+
+describe('cutoutBranchName', () => {
+  it('names the cutout branch <base>-wt when free', async () => {
+    const exec = scripted([
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\ndev\n' } },
+    ])
+    expect(await cutoutBranchName(exec, '/repo', 'main')).toBe('main-wt')
+  })
+
+  it('suffixes -wt<N> past taken names', async () => {
+    const exec = scripted([
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\nmain-wt\nmain-wt2\n' } },
+    ])
+    expect(await cutoutBranchName(exec, '/repo', 'main')).toBe('main-wt3')
+  })
+
+  it('passes a slashed local name and detached HEAD through verbatim', async () => {
+    const exec = scripted([
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'feature/x\n' } },
+    ])
+    expect(await cutoutBranchName(exec, '/repo', 'feature/x')).toBe('feature/x-wt')
+    const detached = scripted([
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\n' } },
+    ])
+    expect(await cutoutBranchName(detached, '/repo', 'HEAD')).toBe('HEAD-wt')
+  })
+
+  it('skips a name whose storage folder is taken though the branch is free', async () => {
+    const exec = scripted([
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\n' } },
+    ])
+    // A branch deleted by hand leaves its folder behind: `main-wt` must not
+    // be planned again, or `worktree add` fails on the existing directory.
+    expect(await cutoutBranchName(exec, '/repo', 'main', name => name === 'main-wt')).toBe('main-wt2')
+  })
+
+  it('keeps the stem when branch and folder are both free', async () => {
+    const exec = scripted([
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\n' } },
+    ])
+    expect(await cutoutBranchName(exec, '/repo', 'main', () => false)).toBe('main-wt')
+  })
+})
+
+describe('addWorktreeCutout', () => {
+  it('adds the new branch out of the base into the target', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'add', '/root/repo/main-wt', '-b', 'main-wt', 'main'] },
+    ])
+    await expect(addWorktreeCutout(exec, '/repo', 'main', 'main-wt', '/root/repo/main-wt')).resolves.toBeUndefined()
+  })
+
+  it('surfaces a git refusal of the base branch', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'add', '/root/repo/main-wt', '-b', 'main-wt', 'main'],
+        out: { code: 128, stderr: 'fatal: invalid reference: main\n' } },
+    ])
+    await expect(addWorktreeCutout(exec, '/repo', 'main', 'main-wt', '/root/repo/main-wt')).rejects.toThrow('fatal')
   })
 })
 

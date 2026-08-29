@@ -18,6 +18,7 @@ export type GitWorktreeKey =
   | 'switchBusy'
   | 'worktreeAskNew'
   | 'worktreeAskReuse'
+  | 'worktreeAskCutOut'
   | 'worktreeBusy'
   | 'actionCancel'
   | 'actionConfirm'
@@ -52,6 +53,7 @@ export const en: Record<GitWorktreeKey, string> = {
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
   worktreeAskReuse: 'Switch to the {branch} worktree?',
+  worktreeAskCutOut: 'Cut a worktree out of the current branch {branch}?',
   worktreeBusy: 'Creating…',
   actionCancel: 'Cancel',
   actionConfirm: 'Confirm',
@@ -87,6 +89,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',
   worktreeAskReuse: '是否切到 {branch} 工作树？',
+  worktreeAskCutOut: '是否从当前分支 {branch} 切出工作树？',
   worktreeBusy: '创建中…',
   actionCancel: '取消',
   actionConfirm: '确认',

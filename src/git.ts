@@ -229,6 +229,63 @@ export async function addWorktree(
 }
 
 /**
+ * Plan a new branch name to cut out of `base`: `<base>-wt`, or the first
+ * `-wt<N>` suffix not already taken (`main` → `main-wt`; if that exists,
+ * `main-wt2`, …). One `for-each-ref` pass decides; the worktree folder
+ * name derives from the returned name, so the caller should resolve it
+ * BEFORE computing the target path. With `folderTaken` given, a name is
+ * only free when its storage folder is free too: a leftover folder of a
+ * since-deleted branch would otherwise fail `worktree add` with a bare
+ * "already exists" — the suffix walk skips it the same way.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param base - base branch local name (or `HEAD` when detached).
+ * @param folderTaken - storage-folder occupancy probe (branch name → taken).
+ * @returns the free cutout branch name.
+ */
+export async function cutoutBranchName(
+  exec: Exec,
+  repoRoot: string,
+  base: string,
+  folderTaken?: (branch: string) => boolean,
+): Promise<string> {
+  const out = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
+  const locals = new Set(out.split('\n').map(l => l.trim()).filter(l => l !== ''))
+  // `base` is the checked-out branch (`branch --show-current` output), which
+  // never carries a remote prefix — pass it through verbatim so a local name
+  // containing '/' survives.
+  const free = (candidate: string): boolean =>
+    !locals.has(candidate) && !(folderTaken?.(candidate) ?? false)
+  const stem = `${base}-wt`
+  if (free(stem)) return stem
+  for (let i = 2; ; i += 1) {
+    const candidate = `${stem}${i}`
+    if (free(candidate)) return candidate
+  }
+}
+
+/**
+ * Create a worktree on a brand-new branch cut out of `base`: the base is
+ * checked out by the main worktree (git forbids a second worktree on it),
+ * so the new branch is created from it and checked out in the fresh
+ * worktree instead.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param base - base branch local name (`main` or `HEAD`).
+ * @param newBranch - the cutout branch name (see {@link cutoutBranchName}).
+ * @param targetPath - absolute directory to create.
+ */
+export async function addWorktreeCutout(
+  exec: Exec,
+  repoRoot: string,
+  base: string,
+  newBranch: string,
+  targetPath: string,
+): Promise<void> {
+  await git(exec, repoRoot, ['worktree', 'add', targetPath, '-b', newBranch, base])
+}
+
+/**
  * In-place branch switch of the main checkout. A remote display name relies
  * on git's dwim: `git switch <local>` creates the tracking branch when
  * exactly one remote has it.

@@ -95,7 +95,7 @@ export interface BranchMenuProps {
   /** Non-null while a picked branch awaits confirmation. */
   confirm: BranchConfirmFly | null
   /** Stage a pick (starts the confirm flyout beside that row). Current
-   * branch re-select closes the menu. */
+   * branch re-select closes the menu unless the owner stages otherwise. */
   onSelect: (branch: string) => void
   /** Dismiss the menu (outside click, Escape with nothing open). */
   onClose: () => void

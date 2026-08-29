@@ -143,6 +143,57 @@ describe('handleCreateWorktree', () => {
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('fatal')
   })
+
+  it('cuts a new branch out of the current one into the sanitized target', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const calls = { ...REPO_CALLS } as Record<string, Partial<ExecResult>>
+    calls['worktree add'] = {}
+    const outcome = await handleCreateWorktree(
+      deps({ exec: scripted(calls), sectionRootDir: () => root, dirExists: () => false }),
+      { repoPath: '/repo', branch: 'main', cutout: true },
+    )
+    expect(outcome).toEqual({ status: 200, body: { path: join(root, 'repo-main-wt'), created: true } })
+  })
+
+  it('suffixes the cutout branch past an existing -wt name', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const calls = { ...REPO_CALLS } as Record<string, Partial<ExecResult>>
+    calls['for-each-ref refs/heads'] = { stdout: 'main\nmain-wt\nfeat/x\n' }
+    calls['worktree add'] = {}
+    const outcome = await handleCreateWorktree(
+      deps({ exec: scripted(calls), sectionRootDir: () => root, dirExists: () => false }),
+      { repoPath: '/repo', branch: 'main', cutout: true },
+    )
+    expect(outcome).toEqual({ status: 200, body: { path: join(root, 'repo-main-wt2'), created: true } })
+  })
+
+  it('skips a cutout name whose storage folder lingers on disk', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const calls = { ...REPO_CALLS } as Record<string, Partial<ExecResult>>
+    calls['worktree add'] = {}
+    const stale = join(root, 'repo-main-wt')
+    const outcome = await handleCreateWorktree(
+      deps({
+        exec: scripted(calls),
+        sectionRootDir: () => root,
+        // `main-wt` is branch-free, but its folder survived a manual branch
+        // deletion — the cutout must move past it instead of failing add.
+        dirExists: path => path === stale,
+      }),
+      { repoPath: '/repo', branch: 'main', cutout: true },
+    )
+    expect(outcome).toEqual({ status: 200, body: { path: join(root, 'repo-main-wt2'), created: true } })
+  })
+
+  it('rejects a non-boolean cutout key', async () => {
+    const outcome = await handleCreateWorktree(deps(), { repoPath: '/repo', branch: 'main', cutout: 1 })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('boolean')
+  })
 })
 
 describe('handleSwitch', () => {

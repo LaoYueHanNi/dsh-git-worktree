@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { childProcessExec, addWorktree, probeRepo, switchBranch } from '../lib/git.js'
+import { childProcessExec, addWorktree, addWorktreeCutout, cutoutBranchName, probeRepo, switchBranch } from '../lib/git.js'
 
 const run = promisify(execFile)
 
@@ -46,6 +46,19 @@ try {
   )
   const again = await addWorktree(childProcessExec, repo, 'feat/x', join(store, 'my-repo', 'feat-x-2'))
   ok('add reuse idempotent', again.created === false && again.path === local.path)
+
+  // Cutout: a new branch out of the occupied current branch.
+  const cutName = await cutoutBranchName(childProcessExec, repo, 'main')
+  ok('cutout name free', cutName === 'main-wt')
+  await addWorktreeCutout(childProcessExec, repo, 'main', cutName, join(store, 'my-repo', cutName))
+  await stat(join(store, 'my-repo', 'main-wt', 'a.txt')).then(
+    () => ok('cutout worktree file present', true),
+    () => ok('cutout worktree file present', false),
+  )
+  const cutName2 = await cutoutBranchName(childProcessExec, repo, 'main')
+  ok('cutout name suffixes past taken', cutName2 === 'main-wt2')
+  const cutFacts = await probeRepo(childProcessExec, repo)
+  ok('cutout worktree visible', cutFacts?.worktrees.some(w => w.branch === 'main-wt'))
 
   const twin = await addWorktree(childProcessExec, repo, 'origin/only-remote', join(store, 'my-repo', 'only-remote'))
   ok('add twin created', twin.created === true)

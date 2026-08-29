@@ -51,6 +51,10 @@ export interface CreateWorktreeBody {
     repoPath: string;
     /** Chosen branch display name: local (`feat-x`) or remote (`origin/feat-x`). */
     branch: string;
+    /** True: cut a NEW branch out of `branch` (the current checkout's
+     * branch — occupied by the main worktree) and isolate it in a fresh
+     * worktree. The storage folder is named after the new branch. */
+    cutout?: boolean;
 }
 /** POST worktree response body. */
 export interface CreateWorktreeResult {

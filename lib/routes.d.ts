@@ -29,7 +29,10 @@ export interface RouteOutcome {
 export declare function handleStatus(deps: RouteDeps, path: string | undefined): Promise<RouteOutcome>;
 /**
  * POST /worktree 鈥?create or reuse the worktree for a branch, then report the
- * directory so the client can register it as a workspace.
+ * directory so the client can register it as a workspace. With `cutout: true`
+ * the branch is the CURRENT checkout (occupied by the main worktree, so git
+ * refuses to add it): a new branch is cut out of it (`<branch>-wt`, first
+ * free `-wt<N>` suffix) and isolated in the fresh worktree instead.
  * @param deps - host dependencies.
  * @param body - parsed request body.
  */

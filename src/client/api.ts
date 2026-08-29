@@ -60,6 +60,16 @@ export function requestWorktree(repoPath: string, branch: string): Promise<Call<
 }
 
 /**
+ * Cut a NEW branch out of the current checkout and isolate it in a fresh
+ * worktree (the current branch itself is occupied by the main worktree).
+ * @param repoPath - absolute directory inside the repository.
+ * @param branch - the current checkout's branch (or `HEAD` when detached).
+ */
+export function requestWorktreeCutout(repoPath: string, branch: string): Promise<Call<CreateWorktreeResult>> {
+  return post<CreateWorktreeResult>(ROUTE_WORKTREE, { repoPath, branch, cutout: true })
+}
+
+/**
  * Switch the main checkout in place.
  * @param repoPath - absolute directory inside the main worktree.
  * @param branch - branch display name.
