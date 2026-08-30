@@ -2,4 +2,4 @@
 # layers (the user's profile cordis.patch.yml) may address the row by id.
 - insert:
     - id: git-worktree
-      name: 'dsh-git-worktree'
+      name: '@laoyuehanni/dsh-git-worktree'

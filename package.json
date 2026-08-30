@@ -1,13 +1,27 @@
 {
-  "name": "dsh-git-worktree",
+  "name": "@laoyuehanni/dsh-git-worktree",
   "version": "0.4.0",
   "description": "DSH plugin: branch visibility and git worktree isolation for Web UI sessions",
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "cordis",
+    "plugin",
+    "git",
+    "worktree",
+    "branch"
+  ],
+  "homepage": "https://github.com/LaoYueHanNi/dsh-git-worktree#readme",
+  "bugs": {
+    "url": "https://github.com/LaoYueHanNi/dsh-git-worktree/issues"
+  },
+  "license": "MIT",
+  "author": "LaoYueHanNi",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/LaoYueHanNi/dsh-git-worktree.git"
+    "url": "git+https://github.com/LaoYueHanNi/dsh-git-worktree.git"
   },
   "type": "module",
-  "license": "MIT",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
@@ -26,8 +40,14 @@
   },
   "files": [
     "lib",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md"
   ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -48,7 +68,8 @@
     "build:all": "npm run build && npm run build:client",
     "watch:client": "tsdown --watch",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.client.json --noEmit"
+    "typecheck": "tsc -p tsconfig.client.json --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run build:client"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

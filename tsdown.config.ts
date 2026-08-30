@@ -1,6 +1,15 @@
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { defineConfig, type Plugin } from 'tsdown'
+
+/**
+ * Plugin id stamped into the loader handoff and the injected style tags.
+ * Derived from package.json so the bundle's registration id always equals
+ * the installed package name — the web shell rejects a bundle whose
+ * `__ModuleLoader__.load` id differs from the loader entry's package.
+ */
+const PLUGIN_ID: string = createRequire(import.meta.url)('./package.json').name
 
 /**
  * CSS Modules inlining: the web shell has no CSS pipeline, so every
@@ -71,7 +80,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
 ]
 
 export default defineConfig({
-  name: 'dsh-git-worktree/client',
+  name: `${PLUGIN_ID}/client`,
   entry: { client: 'src/client/index.ts' },
   // The browser bundle lands beside the tsc host output in lib/; clean must
   // stay off or tsdown would wipe the host half.
@@ -84,10 +93,10 @@ export default defineConfig({
   sourcemap: true,
   external: [...CLIENT_EXTERNALS],
   noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
-  plugins: [cssModulesInline('dsh-git-worktree')],
+  plugins: [cssModulesInline(PLUGIN_ID)],
   outputOptions: {
     entryFileNames: 'client.js',
-    banner: 'window.__ModuleLoader__.load({ id: "dsh-git-worktree", factory: (require) => {',
+    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {`,
     footer: 'return module.exports; } });',
     intro: 'var module = { exports: {} }; var exports = module.exports;',
   },
