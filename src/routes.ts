@@ -5,11 +5,11 @@
 
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, RepoStatus, RouteError, SwitchBody, SwitchResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -28,7 +28,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -198,6 +198,31 @@ export async function handleCreateBranch(deps: RouteDeps, body: unknown): Promis
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const created = await createBranch(deps.exec, facts.repoRoot, name)
     const result: CreateBranchResult = { branch: created }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /fetch 鈥?sync remote-tracking refs for the repository: fetch every
+ * remote and prune tracking branches the remotes no longer carry. Pure
+ * metadata — the working tree and the current checkout are untouched; the
+ * client refetches /status afterwards for the fresh branch list.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handleFetch(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<FetchBody>(body, ['repoPath'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    await fetchAll(deps.exec, facts.repoRoot)
+    const result: FetchResult = { remote: 'all' }
     return { status: 200, body: result }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)

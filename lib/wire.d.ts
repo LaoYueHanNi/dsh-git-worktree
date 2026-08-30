@@ -14,6 +14,8 @@ export declare const ROUTE_WORKTREE = "/plugin/git-worktree/worktree";
 export declare const ROUTE_SWITCH = "/plugin/git-worktree/switch";
 /** POST ROUTE_PREFIX/branch — create a NEW branch from the current checkout and switch to it. */
 export declare const ROUTE_BRANCH = "/plugin/git-worktree/branch";
+/** POST ROUTE_PREFIX/fetch — sync remote-tracking refs (fetch every remote + prune). */
+export declare const ROUTE_FETCH = "/plugin/git-worktree/fetch";
 /** One selectable branch row. */
 export interface BranchEntry {
     /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -89,6 +91,17 @@ export interface CreateBranchBody {
 export interface CreateBranchResult {
     /** The branch created and now checked out. */
     branch: string;
+}
+/** POST fetch request body. */
+export interface FetchBody {
+    /** Any directory inside the repository (workspace cwd). */
+    repoPath: string;
+}
+/** POST fetch response body — the fetch mutates refs server-side; the
+ * client refetches /status for the fresh branch list. */
+export interface FetchResult {
+    /** What the fetch covered: "all" remotes (this plugin always fetches all). */
+    remote: string;
 }
 /** Error envelope every non-2xx response carries. */
 export interface RouteError {

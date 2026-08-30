@@ -120,5 +120,15 @@ export declare function switchBranch(exec: Exec, repoRoot: string, branch: strin
  * @returns the branch name now created and checked out.
  */
 export declare function createBranch(exec: Exec, cwd: string, name: string): Promise<string>;
+/**
+ * Sync remote-tracking refs: fetch every remote and prune tracking branches
+ * the remotes no longer carry (the CLI equivalent of IDEA's "synchronize
+ * remote branches"). Pure metadata — the working tree, local branches, and
+ * the current checkout are untouched; a slow network surfaces through the
+ * executor's hard timeout as a GitError.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory (fetch is repository-wide).
+ */
+export declare function fetchAll(exec: Exec, repoRoot: string): Promise<void>;
 /** Guard for route inputs: a non-empty absolute directory path. */
 export declare function isAbsoluteDir(value: string): boolean;

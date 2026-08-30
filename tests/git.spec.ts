@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalize } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, probeRepo, switchBranch,
+  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, probeRepo, switchBranch,
   type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -233,5 +233,22 @@ describe('createBranch', () => {
         out: { code: 128, stderr: "fatal: 'bad..name' is not a valid branch name\n" } },
     ])
     await expect(createBranch(exec, '/repo', 'bad..name')).rejects.toThrow('not a valid branch name')
+  })
+})
+
+describe('fetchAll', () => {
+  it('fetches every remote with prune at the repository root', async () => {
+    const exec = scripted([
+      { args: ['fetch', '--all', '--prune'], out: { stdout: 'Fetching origin\n' } },
+    ])
+    await expect(fetchAll(exec, '/repo')).resolves.toBeUndefined()
+  })
+
+  it('surfaces a network refusal', async () => {
+    const exec = scripted([
+      { args: ['fetch', '--all', '--prune'],
+        out: { code: 128, stderr: 'fatal: unable to access \'https://example.com/repo.git\': Could not resolve host\n' } },
+    ])
+    await expect(fetchAll(exec, '/repo')).rejects.toThrow('Could not resolve host')
   })
 })

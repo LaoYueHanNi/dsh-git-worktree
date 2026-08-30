@@ -37,7 +37,7 @@ import {
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
-import { fetchStatus, requestCreateBranch, requestSwitch, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { fetchStatus, requestCreateBranch, requestFetch, requestSwitch, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
@@ -346,6 +346,30 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     return undefined
   }), [cwd, refresh, runGuarded])
 
+  /** Remote-sync flow: POST /fetch (fetch every remote + prune), then
+   * refetch the status. Deliberately NOT runGuarded: its success closes the
+   * menu, while the whole point of a sync is watching the refreshed branch
+   * list in place. Single-flight shares busyRef with the other actions, so
+   * a sync and a confirm action can never interleave. */
+  const doFetch = useCallback(async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    const failure = await (async () => {
+      if (cwd === undefined) return 'no session directory'
+      const result = await requestFetch(cwd)
+      if (!result.ok) return result.error
+      return undefined
+    })()
+    busyRef.current = false
+    setBusy(false)
+    if (failure !== undefined) {
+      showError(failure)
+      return
+    }
+    await refresh()
+  }, [cwd, refresh, showError])
+
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
    * branch), register the directory, hop sessions. */
   const doWorktree = useCallback((branch: string, cutout: boolean) => runGuarded(async () => {
@@ -464,6 +488,8 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         canCreate={!worktreeMode}
         busy={busy}
         onCreate={(name) => { void doCreateBranch(name) }}
+        onFetch={() => { void doFetch() }}
+        fetchBusy={busy}
         onSelect={(branch) => {
           // In worktree mode re-selecting the CURRENT branch stages the
           // cut-out confirm; without the mode it is a plain close. Any

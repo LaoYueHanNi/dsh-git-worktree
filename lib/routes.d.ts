@@ -3,7 +3,7 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 import { type DirExists, type Exec } from './git.js';
-import type { CreateBranchResult, CreateWorktreeResult, RepoStatus, RouteError, SwitchResult } from './wire.js';
+import type { CreateBranchResult, CreateWorktreeResult, FetchResult, RepoStatus, RouteError, SwitchResult } from './wire.js';
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
     exec: Exec;
@@ -19,7 +19,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
     status: number;
-    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | RouteError;
+    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | RouteError;
 }
 /**
  * GET /status 鈥?repository facts for one directory.
@@ -52,3 +52,12 @@ export declare function handleSwitch(deps: RouteDeps, body: unknown): Promise<Ro
  * @param body - parsed request body.
  */
 export declare function handleCreateBranch(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
+/**
+ * POST /fetch 鈥?sync remote-tracking refs for the repository: fetch every
+ * remote and prune tracking branches the remotes no longer carry. Pure
+ * metadata — the working tree and the current checkout are untouched; the
+ * client refetches /status afterwards for the fresh branch list.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export declare function handleFetch(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;

@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, RepoStatus, RouteError, SwitchResult,
+  CreateBranchResult, CreateWorktreeResult, FetchResult, RepoStatus, RouteError, SwitchResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -86,4 +86,12 @@ export function requestSwitch(repoPath: string, branch: string): Promise<Call<Sw
  */
 export function requestCreateBranch(repoPath: string, name: string): Promise<Call<CreateBranchResult>> {
   return post<CreateBranchResult>(ROUTE_BRANCH, { repoPath, name })
+}
+
+/**
+ * Sync remote-tracking refs (fetch every remote + prune) for the repository.
+ * @param repoPath - absolute directory inside the repository.
+ */
+export function requestFetch(repoPath: string): Promise<Call<FetchResult>> {
+  return post<FetchResult>(ROUTE_FETCH, { repoPath })
 }

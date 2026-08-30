@@ -327,6 +327,19 @@ export async function createBranch(exec: Exec, cwd: string, name: string): Promi
   return name
 }
 
+/**
+ * Sync remote-tracking refs: fetch every remote and prune tracking branches
+ * the remotes no longer carry (the CLI equivalent of IDEA's "synchronize
+ * remote branches"). Pure metadata — the working tree, local branches, and
+ * the current checkout are untouched; a slow network surfaces through the
+ * executor's hard timeout as a GitError.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory (fetch is repository-wide).
+ */
+export async function fetchAll(exec: Exec, repoRoot: string): Promise<void> {
+  await git(exec, repoRoot, ['fetch', '--all', '--prune'])
+}
+
 /** Guard for route inputs: a non-empty absolute directory path. */
 export function isAbsoluteDir(value: string): boolean {
   return value.trim() !== '' && isAbsolute(value)

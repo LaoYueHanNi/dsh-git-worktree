@@ -23,13 +23,13 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleStatus, handleSwitch,
+  handleCreateBranch, handleCreateWorktree, handleFetch, handleStatus, handleSwitch,
   type RouteDeps, type RouteOutcome,
 } from './routes.js'
 import {
   loadLegacySettings, migratedFileOf, planLegacyMigration, settingsFileOf, validateRootDir,
 } from './settings.js'
-import { ROUTE_BRANCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -192,5 +192,13 @@ export function apply(ctx: Context, config: Config = {}): void {
         send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
       }
     } }), 'git-worktree: branch route')
+
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_FETCH, handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        send(res, await handleFetch(deps(), await readJson(req)))
+      } catch (error) {
+        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
+      }
+    } }), 'git-worktree: fetch route')
   })
 }

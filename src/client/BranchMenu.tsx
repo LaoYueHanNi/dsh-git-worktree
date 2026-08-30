@@ -67,6 +67,7 @@ import {
   IconChevronUpOutline14,
   IconGoalOutline16,
   IconPlusOutline16,
+  IconRefreshOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { branchNameIssue } from '../normalize.ts'
@@ -118,6 +119,11 @@ export interface BranchMenuProps {
   /** True while the create runs: the flyout freezes (input and buttons
    * disable, the Create button shows progress text). */
   busy: boolean
+  /** Sync remote-tracking refs (fetch every remote + prune); the owner
+   * refreshes the rows when it lands — the menu stays open. */
+  onFetch: () => void
+  /** True while the remote sync runs: the fetch tool disables. */
+  fetchBusy: boolean
   /** Dismiss the menu (outside click, Escape with nothing open). */
   onClose: () => void
   /** Bound locale translate (placeholder, empty state, heading, toolbar). */
@@ -250,7 +256,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, onCreate, busy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, onCreate, busy, onFetch, fetchBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -935,6 +941,22 @@ export function BranchMenu({
               onClick={toggleAll}
             >
               {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
+            </button>
+            <button
+              type="button"
+              className={css.menuToolButton}
+              title={t('menuFetch')}
+              aria-label={t('menuFetch')}
+              disabled={fetchBusy}
+              onClick={() => {
+                // A staged confirm must not ride out the sync: while the
+                // fetch runs, busy would flip its labels into progress text
+                // for an action nobody is running.
+                confirmRef.current?.onCancel()
+                onFetch()
+              }}
+            >
+              <IconRefreshOutline16 size={16} />
             </button>
           </div>
           <div className={css.menuMain}>

@@ -4,7 +4,7 @@ import { join, normalize } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleStatus, handleSwitch,
+  handleCreateBranch, handleCreateWorktree, handleFetch, handleStatus, handleSwitch,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -249,6 +249,38 @@ describe('handleCreateBranch', () => {
     expect(outcome.status).toBe(400)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('not a valid branch name')
+  })
+})
+
+describe('handleFetch', () => {
+  it('fetches every remote and reports the coverage', async () => {
+    const calls = { ...REPO_CALLS, 'fetch --all --prune': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleFetch(deps({ exec: scripted(calls) }), { repoPath: '/repo' })
+    expect(outcome).toEqual({ status: 200, body: { remote: 'all' } })
+  })
+
+  it('rejects unknown body keys and a non-absolute repoPath', async () => {
+    expect((await handleFetch(deps(), { repoPath: '/repo', branch: 'main' })).status).toBe(400)
+    expect((await handleFetch(deps(), { repoPath: 'repo' })).status).toBe(400)
+  })
+
+  it('rejects a directory outside any repository', async () => {
+    const exec = scripted({ 'rev-parse --show-toplevel': { code: 128, stderr: 'fatal: not a git repository' } })
+    const outcome = await handleFetch(deps({ exec }), { repoPath: '/plain' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('not inside a git repository')
+  })
+
+  it('maps a network failure to an error envelope', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'fetch --all --prune': { code: 128, stderr: 'fatal: unable to access: Could not resolve host\n' },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleFetch(deps({ exec: scripted(calls) }), { repoPath: '/repo' })
+    expect(outcome.status).toBe(500)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('Could not resolve host')
   })
 })
 
