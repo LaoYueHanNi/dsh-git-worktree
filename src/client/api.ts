@@ -64,9 +64,11 @@ export function requestWorktree(repoPath: string, branch: string): Promise<Call<
  * worktree (the current branch itself is occupied by the main worktree).
  * @param repoPath - absolute directory inside the repository.
  * @param branch - the current checkout's branch (or `HEAD` when detached).
+ * @param name - explicit name for the new branch; omitted, the host
+ * derives `<branch>-wt`, suffixing past taken names.
  */
-export function requestWorktreeCutout(repoPath: string, branch: string): Promise<Call<CreateWorktreeResult>> {
-  return post<CreateWorktreeResult>(ROUTE_WORKTREE, { repoPath, branch, cutout: true })
+export function requestWorktreeCutout(repoPath: string, branch: string, name?: string): Promise<Call<CreateWorktreeResult>> {
+  return post<CreateWorktreeResult>(ROUTE_WORKTREE, { repoPath, branch, cutout: true, ...(name === undefined ? {} : { name }) })
 }
 
 /**

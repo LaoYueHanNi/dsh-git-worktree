@@ -188,6 +188,52 @@ describe('handleCreateWorktree', () => {
     expect(outcome).toEqual({ status: 200, body: { path: join(root, 'repo-main-wt2'), created: true } })
   })
 
+  it('cuts out with an explicit custom branch name', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const calls = { ...REPO_CALLS } as Record<string, Partial<ExecResult>>
+    calls['worktree add'] = {}
+    const outcome = await handleCreateWorktree(
+      deps({ exec: scripted(calls), sectionRootDir: () => root }),
+      { repoPath: '/repo', branch: 'main', cutout: true, name: 'feat-x' },
+    )
+    expect(outcome).toEqual({ status: 200, body: { path: join(root, 'repo-feat-x'), created: true } })
+  })
+
+  it('rejects a cutout name riding the command line as a flag', async () => {
+    const outcome = await handleCreateWorktree(
+      deps(),
+      { repoPath: '/repo', branch: 'main', cutout: true, name: '-feat' },
+    )
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('-')
+  })
+
+  it('rejects a non-string cutout name', async () => {
+    const outcome = await handleCreateWorktree(
+      deps(),
+      { repoPath: '/repo', branch: 'main', cutout: true, name: 7 },
+    )
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('string')
+  })
+
+  it('maps an explicit cutout name colliding with an existing branch to a 400 envelope', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'worktree add': { code: 128, stderr: "fatal: a branch named 'feat-x' already exists\n" },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateWorktree(
+      deps({ exec: scripted(calls) }),
+      { repoPath: '/repo', branch: 'main', cutout: true, name: 'feat-x' },
+    )
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('already exists')
+  })
+
   it('rejects a non-boolean cutout key', async () => {
     const outcome = await handleCreateWorktree(deps(), { repoPath: '/repo', branch: 'main', cutout: 1 })
     expect(outcome.status).toBe(400)
@@ -249,6 +295,17 @@ describe('handleCreateBranch', () => {
     expect(outcome.status).toBe(400)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('not a valid branch name')
+  })
+
+  it('maps a duplicate branch name to a 400 envelope', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'switch -c main': { code: 128, stderr: "fatal: a branch named 'main' already exists\n" },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'main' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('already exists')
   })
 })
 

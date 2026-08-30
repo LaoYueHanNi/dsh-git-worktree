@@ -35,7 +35,7 @@ import {
   Button, IconBranchOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { localBranchName } from '../normalize.ts'
+import { branchNameIssue, localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
 import { fetchStatus, requestCreateBranch, requestFetch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
@@ -77,6 +77,21 @@ interface StatusState {
 interface ConfirmState {
   kind: 'switch' | 'worktree' | 'worktree-cutout'
   branch: string
+  /** Editable cutout name (kind `worktree-cutout` only): pre-filled with
+   * the first free `<branch>-wt` name, editable before confirming. */
+  draft?: string
+}
+
+/** First free `<base>-wt` name against the local branch list — the prefilled
+ * draft of the cutout dialog (same shape as the host's suffix walk, minus
+ * the storage-folder probe the client cannot see). */
+function firstFreeCutoutName(base: string, taken: readonly string[]): string {
+  const stem = `${base}-wt`
+  if (!taken.includes(stem)) return stem
+  for (let i = 2; ; i += 1) {
+    const candidate = `${stem}${i}`
+    if (!taken.includes(candidate)) return candidate
+  }
 }
 
 /**
@@ -161,6 +176,18 @@ interface ChipConfirmProps {
   cancelLabel: string
   /** True while the action runs: both buttons disable. */
   busy: boolean
+  /** Editable new-branch name (cutout flow): present, the dialog renders a
+   * naming input under the ask line and focuses IT instead of the confirm
+   * button; Enter commits a valid draft. */
+  draft?: string
+  onDraftChange?: (value: string) => void
+  draftPlaceholder?: string
+  /** True while the draft is NOT an acceptable new branch name — the
+   * confirm button disables in lockstep. */
+  draftInvalid?: boolean
+  /** Why the draft is invalid (rendered under the input; absent while the
+   * draft is acceptable or merely empty). */
+  draftHint?: string
   /** Run the confirmed action. */
   onConfirm: () => void
   /** Dismiss the dialog without acting. */
@@ -172,11 +199,17 @@ interface ChipConfirmProps {
  * the same popCard chrome as BranchMenu's flyout, but bottom-pinned above
  * the chip in the menu card's posture — the flyout's right-of-card anchor
  * has no card to sit beside here. Outside pointerdown and Escape cancel;
- * the confirm button takes focus so Enter commits.
+ * the naming input (cutout flow) takes focus when present, else the
+ * confirm button does so Enter commits.
  */
-function ChipConfirm({ anchorRef, ask, confirmLabel, cancelLabel, busy, onConfirm, onCancel }: ChipConfirmProps) {
+function ChipConfirm({
+  anchorRef, ask, confirmLabel, cancelLabel, busy,
+  draft, onDraftChange, draftPlaceholder, draftInvalid, draftHint,
+  onConfirm, onCancel,
+}: ChipConfirmProps) {
   const popRef = useRef<HTMLDivElement>(null)
   const confirmRef = useRef<HTMLButtonElement | null>(null)
+  const draftInputRef = useRef<HTMLInputElement | null>(null)
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
 
   // Bottom-pin above the chip and clamp horizontally against the measured,
@@ -204,9 +237,9 @@ function ChipConfirm({ anchorRef, ask, confirmLabel, cancelLabel, busy, onConfir
   // Focus rides a rAF: the first frame lays the dialog out in the hidden
   // measure-then-place posture, and focus() on a visibility:hidden node
   // no-ops — one frame later the placed dialog is visible and the focus
-  // lands.
+  // lands. The naming input wins when present (typing is the point).
   useEffect(() => {
-    const raf = requestAnimationFrame(() => { confirmRef.current?.focus() })
+    const raf = requestAnimationFrame(() => { (draftInputRef.current ?? confirmRef.current)?.focus() })
     return () => { cancelAnimationFrame(raf) }
   }, [])
 
@@ -232,11 +265,41 @@ function ChipConfirm({ anchorRef, ask, confirmLabel, cancelLabel, busy, onConfir
   return createPortal(
     <div ref={popRef} className={css.popCard} style={pos ?? POP_MEASURE} role="dialog" aria-label={ask}>
       <p className={css.popAsk}>{ask}</p>
+      {onDraftChange !== undefined && (
+        <>
+          <input
+            ref={draftInputRef}
+            className={css.menuCreate}
+            type="text"
+            value={draft}
+            placeholder={draftPlaceholder}
+            aria-label={draftPlaceholder}
+            aria-invalid={draftInvalid}
+            spellCheck={false}
+            disabled={busy}
+            onChange={event => { onDraftChange(event.target.value) }}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && draftInvalid !== true && !busy) {
+                event.preventDefault()
+                onConfirm()
+              }
+            }}
+          />
+          {draftInvalid === true && draftHint !== undefined && (
+            <p className={css.menuCreateHintBad} role="status">{draftHint}</p>
+          )}
+        </>
+      )}
       <div className={css.popActions}>
         <button type="button" disabled={busy} onClick={onCancel}>
           {cancelLabel}
         </button>
-        <button ref={confirmRef} type="button" disabled={busy} onClick={onConfirm}>
+        <button
+          ref={confirmRef}
+          type="button"
+          disabled={busy || draftInvalid === true}
+          onClick={onConfirm}
+        >
           {confirmLabel}
         </button>
       </div>
@@ -409,11 +472,11 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
   }, [cwd, refresh, showError, t])
 
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
-   * branch), register the directory, hop sessions. */
-  const doWorktree = useCallback((branch: string, cutout: boolean) => runGuarded(async () => {
+   * branch under an explicit name), register the directory, hop sessions. */
+  const doWorktree = useCallback((branch: string, cutout: boolean, name?: string) => runGuarded(async () => {
     if (cwd === undefined) return 'no session directory'
     const result = cutout
-      ? await requestWorktreeCutout(cwd, branch)
+      ? await requestWorktreeCutout(cwd, branch, name)
       : await requestWorktree(cwd, branch)
     if (!result.ok) return result.error
     try {
@@ -434,6 +497,19 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
   if (facts === null) return null
 
   const confirmLocalName = confirm === null ? '' : localBranchName(confirm.branch)
+  // The cutout dialog carries an EDITABLE new-branch name (pre-filled with
+  // the first free `<branch>-wt`); validated exactly like the create
+  // flyout — git ref-name rules plus a duplicate check against the rows.
+  const isCutout = confirm?.kind === 'worktree-cutout'
+  const cutoutDraft = isCutout ? confirm.draft ?? '' : ''
+  const cutoutIssue = isCutout ? branchNameIssue(cutoutDraft) : null
+  const cutoutDuplicate = isCutout && cutoutIssue === null && rows.some(row => row.name === cutoutDraft)
+  const cutoutValid = cutoutIssue === null && !cutoutDuplicate
+  const cutoutHint = cutoutDuplicate
+    ? t('menuNewBranchExists')
+    : cutoutIssue !== null && cutoutIssue !== 'empty'
+      ? t('menuNewBranchBad')
+      : undefined
   // Reuse applies only to the plain create flow: a cutout always cuts a
   // fresh branch, so the current-branch confirm can never reuse.
   const existingWorktree = confirm === null || confirm.kind !== 'worktree'
@@ -455,7 +531,8 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     busy,
     onConfirm: () => {
       if (confirm.kind === 'worktree' || confirm.kind === 'worktree-cutout') {
-        void doWorktree(confirm.branch, confirm.kind === 'worktree-cutout')
+        if (confirm.kind === 'worktree-cutout' && !cutoutValid) return
+        void doWorktree(confirm.branch, confirm.kind === 'worktree-cutout', confirm.draft)
       } else {
         void doSwitch(confirm.branch)
       }
@@ -495,15 +572,20 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
               type="button"
               className={worktreeMode ? css.checkOn : css.check}
               onClick={() => {
-                // Checking stages the cutout confirm for the current branch
+                // Checking stages the cutout dialog for the current branch
                 // right away — the guidance IS the dialog, not a branch
-                // list to explore. Unchecking clears it (and any menu)
-                // again.
+                // list to explore. The new branch's name is EDITABLE there
+                // (pre-filled with the first free `<current>-wt`); checking
+                // again (or unchecking) clears it (and any menu).
                 const next = !worktreeMode
                 setWorktreeMode(next)
                 setMenuOpen(false)
                 if (next) {
-                  setConfirm({ kind: 'worktree-cutout', branch: facts.currentBranch })
+                  setConfirm({
+                    kind: 'worktree-cutout',
+                    branch: facts.currentBranch,
+                    draft: firstFreeCutoutName(localBranchName(facts.currentBranch), rows.map(row => row.name)),
+                  })
                   if (!busyRef.current) void refresh()
                 } else {
                   setConfirm(null)
@@ -532,12 +614,19 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         updateBusy={updateBusy}
         onSelect={(branch) => {
           // In worktree mode re-selecting the CURRENT branch stages the
-          // cut-out confirm; without the mode it is a plain close. Any
-          // other pick stages the regular confirm flyout beside that row
-          // (menu stays open).
+          // cut-out dialog (editable name); without the mode it is a plain
+          // close. Any other pick stages the regular confirm flyout beside
+          // that row (menu stays open).
           if (branch === facts.currentBranch) {
-            if (worktreeMode) setConfirm({ kind: 'worktree-cutout', branch })
-            else setMenuOpen(false)
+            if (worktreeMode) {
+              setConfirm({
+                kind: 'worktree-cutout',
+                branch,
+                draft: firstFreeCutoutName(localBranchName(branch), rows.map(row => row.name)),
+              })
+            } else {
+              setMenuOpen(false)
+            }
             return
           }
           setConfirm({ kind: worktreeMode ? 'worktree' : 'switch', branch })
@@ -546,7 +635,17 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         t={t}
       />
       {confirmBundle !== null && !menuOpen && (
-        <ChipConfirm anchorRef={chipRef} {...confirmBundle} />
+        <ChipConfirm
+          anchorRef={chipRef}
+          {...confirmBundle}
+          draft={isCutout ? cutoutDraft : undefined}
+          onDraftChange={isCutout
+            ? (value) => { setConfirm(current => current?.kind === 'worktree-cutout' ? { ...current, draft: value } : current) }
+            : undefined}
+          draftPlaceholder={t('menuNewBranchPlaceholder')}
+          draftInvalid={isCutout ? !cutoutValid : undefined}
+          draftHint={cutoutHint}
+        />
       )}
       {toast !== null && <Toast key={toast.seq} text={toast.text} onDone={() => { setToast(null) }} />}
     </>

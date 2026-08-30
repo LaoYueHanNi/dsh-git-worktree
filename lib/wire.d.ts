@@ -61,6 +61,9 @@ export interface CreateWorktreeBody {
      * branch — occupied by the main worktree) and isolate it in a fresh
      * worktree. The storage folder is named after the new branch. */
     cutout?: boolean;
+    /** Cutout only: explicit name for the NEW branch. Default (absent):
+     * derived `<branch>-wt`, suffixing past taken names. */
+    name?: string;
 }
 /** POST worktree response body. */
 export interface CreateWorktreeResult {

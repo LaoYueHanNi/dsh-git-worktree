@@ -44,6 +44,10 @@ function gitFailure(error: GitError): RouteOutcome {
     // branch name`) is caller misuse, not a host fault — the client
     // pre-flights the same rules, this is the backstop.
     || error.stderr.includes('not a valid branch name')
+    // A name or storage folder that already exists is caller misuse too
+    // (a stale worktree folder survives its branch's deletion): the client
+    // pre-flights branch duplicates, this is the backstop.
+    || error.stderr.includes('already exists')
     // Diverged/branchless states an update cannot fast-forward through are
     // the user's repo state, not host faults: no upstream to merge, a
     // detached HEAD, or local commits `--ff-only` must not paper over.
@@ -82,11 +86,12 @@ function readBody<T>(
   body: unknown,
   keys: readonly (keyof T & string)[],
   booleanKeys: readonly (keyof T & string)[] = [],
+  optionalKeys: readonly (keyof T & string)[] = [],
 ): T | RouteOutcome {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return fail(400, 'request body must be a JSON object')
   const record = body as Record<string, unknown>
   for (const key of Object.keys(record)) {
-    if (!keys.includes(key as keyof T & string) && !booleanKeys.includes(key as keyof T & string)) {
+    if (!keys.includes(key as keyof T & string) && !booleanKeys.includes(key as keyof T & string) && !optionalKeys.includes(key as keyof T & string)) {
       return fail(400, `unknown body key "${key}"`)
     }
   }
@@ -97,6 +102,12 @@ function readBody<T>(
     // Optional flag: absent stays absent (`cutout?: boolean`), present must type-check.
     if (record[key] !== undefined && typeof record[key] !== 'boolean') {
       return fail(400, `body key "${key}" must be a boolean`)
+    }
+  }
+  for (const key of optionalKeys) {
+    // Optional string: absent stays absent (`name?: string`), present must type-check.
+    if (record[key] !== undefined && typeof record[key] !== 'string') {
+      return fail(400, `body key "${key}" must be a string`)
     }
   }
   return record as T
@@ -117,9 +128,9 @@ function isOutcome(value: unknown): value is RouteOutcome {
  * @param body - parsed request body.
  */
 export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  const parsed = readBody<CreateWorktreeBody>(body, ['repoPath', 'branch'], ['cutout'])
+  const parsed = readBody<CreateWorktreeBody>(body, ['repoPath', 'branch'], ['cutout'], ['name'])
   if (isOutcome(parsed)) return parsed
-  const { repoPath, branch, cutout } = parsed
+  const { repoPath, branch, cutout, name } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (branch.trim() === '') return fail(400, '"branch" must be non-empty')
   const configured = deps.sectionRootDir()?.trim()
@@ -131,6 +142,18 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
     if (cutout === true) {
+      // An explicit name skips the `-wt` suffix walk and is used verbatim —
+      // both for the branch and the storage folder. A leading dash would
+      // ride `worktree add -b` as a flag; any other git-invalid name
+      // surfaces through the error envelope (the client pre-flights).
+      const custom = name?.trim()
+      if (custom !== undefined && custom !== '') {
+        if (custom.startsWith('-')) return fail(400, '"name" must not start with "-"')
+        const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(custom)}`)
+        await mkdir(rootDir, { recursive: true })
+        await addWorktreeCutout(deps.exec, facts.repoRoot, branch, custom, target)
+        return { status: 200, body: { path: target, created: true } }
+      }
       // The new branch name must be known before the folder name can be
       // computed: the folder carries `<repoName>-<NEW branch>`. The name
       // must be free in BOTH namespaces — the branch table and the storage
