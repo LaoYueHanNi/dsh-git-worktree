@@ -1,5 +1,7 @@
 # dsh-git-worktree
 
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+
 ![Web 界面中的 dsh-git-worktree](gitworktree.png)
 
 简体中文 | [English](./README.md)
