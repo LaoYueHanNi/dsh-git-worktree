@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalize } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, probeRepo, switchBranch,
+  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, probeRepo, switchBranch, updateBranch,
   type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -250,5 +250,39 @@ describe('fetchAll', () => {
         out: { code: 128, stderr: 'fatal: unable to access \'https://example.com/repo.git\': Could not resolve host\n' } },
     ])
     await expect(fetchAll(exec, '/repo')).rejects.toThrow('Could not resolve host')
+  })
+})
+
+describe('updateBranch', () => {
+  it('fetches then fast-forwards HEAD to the upstream', async () => {
+    const exec = scripted([
+      { args: ['fetch', '--all', '--prune'] },
+      { args: ['rev-parse', 'HEAD'], out: { stdout: 'aaa111\n' } },
+      { args: ['merge', '--ff-only', '@{u}'], out: { stdout: 'Updating aaa111..bbb222\nFast-forward\n' } },
+      { args: ['rev-parse', 'HEAD'], out: { stdout: 'bbb222\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+    ])
+    expect(await updateBranch(exec, '/repo')).toEqual({ branch: 'main', updated: true })
+  })
+
+  it('reports a no-op when the upstream already contains HEAD', async () => {
+    const exec = scripted([
+      { args: ['fetch', '--all', '--prune'] },
+      { args: ['rev-parse', 'HEAD'], out: { stdout: 'aaa111\n' } },
+      { args: ['merge', '--ff-only', '@{u}'], out: { stdout: 'Already up to date.\n' } },
+      { args: ['rev-parse', 'HEAD'], out: { stdout: 'aaa111\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+    ])
+    expect(await updateBranch(exec, '/repo')).toEqual({ branch: 'main', updated: false })
+  })
+
+  it('surfaces a fast-forward refusal on a diverged branch', async () => {
+    const exec = scripted([
+      { args: ['fetch', '--all', '--prune'] },
+      { args: ['rev-parse', 'HEAD'], out: { stdout: 'aaa111\n' } },
+      { args: ['merge', '--ff-only', '@{u}'],
+        out: { code: 128, stderr: 'fatal: Not possible to fast-forward, aborting.\n' } },
+    ])
+    await expect(updateBranch(exec, '/repo')).rejects.toThrow('Not possible to fast-forward')
   })
 })

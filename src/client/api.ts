@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, FetchResult, RepoStatus, RouteError, SwitchResult,
+  CreateBranchResult, CreateWorktreeResult, FetchResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -94,4 +94,13 @@ export function requestCreateBranch(repoPath: string, name: string): Promise<Cal
  */
 export function requestFetch(repoPath: string): Promise<Call<FetchResult>> {
   return post<FetchResult>(ROUTE_FETCH, { repoPath })
+}
+
+/**
+ * Update the CURRENT checkout: fetch every remote, then fast-forward the
+ * checked-out branch to its upstream.
+ * @param repoPath - absolute directory whose checked-out branch is updated.
+ */
+export function requestUpdate(repoPath: string): Promise<Call<UpdateResult>> {
+  return post<UpdateResult>(ROUTE_UPDATE, { repoPath })
 }

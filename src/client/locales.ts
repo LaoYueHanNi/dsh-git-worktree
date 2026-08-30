@@ -19,7 +19,10 @@ export type GitWorktreeKey =
   | 'menuNewBranchBad'
   | 'menuNewBranchExists'
   | 'menuFetch'
+  | 'menuUpdate'
   | 'fetchDone'
+  | 'updateDone'
+  | 'updateUpToDate'
   | 'switchAsk'
   | 'switchBusy'
   | 'worktreeAskNew'
@@ -62,7 +65,10 @@ export const en: Record<GitWorktreeKey, string> = {
   menuNewBranchBad: 'Git will not accept this name',
   menuNewBranchExists: 'A branch with this name already exists',
   menuFetch: 'Fetch',
+  menuUpdate: 'Update current branch from upstream',
   fetchDone: 'Remote branches synced',
+  updateDone: '{branch} fast-forwarded to its upstream',
+  updateUpToDate: 'Already up to date',
   switchAsk: 'Switch to {branch}?',
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
@@ -106,7 +112,10 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuNewBranchBad: 'Git 不接受该名称',
   menuNewBranchExists: '同名分支已存在',
   menuFetch: '提取',
+  menuUpdate: '更新当前分支',
   fetchDone: '远程分支已同步',
+  updateDone: '{branch} 已快进到远程最新',
+  updateUpToDate: '已是最新',
   switchAsk: '是否切到 {branch}？',
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',

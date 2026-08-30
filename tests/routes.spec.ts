@@ -4,7 +4,7 @@ import { join, normalize } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleFetch, handleStatus, handleSwitch,
+  handleCreateBranch, handleCreateWorktree, handleFetch, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -281,6 +281,49 @@ describe('handleFetch', () => {
     expect(outcome.status).toBe(500)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('Could not resolve host')
+  })
+})
+
+describe('handleUpdate', () => {
+  it('fetches and fast-forwards the checked-out branch', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'fetch --all --prune': {},
+      'rev-parse HEAD': { stdout: 'aaa111\n' },
+      'merge --ff-only @{u}': { stdout: 'Updating aaa111..bbb222\nFast-forward\n' },
+      'branch --show-current': { stdout: 'main\n' },
+    } as Record<string, Partial<ExecResult>>
+    // rev-parse HEAD runs twice (before/after); the prefix matcher answers
+    // both with the LAST scripted entry for the key — evolve it per call.
+    let at = 0
+    const evolving = scripted(calls)
+    const exec: typeof evolving = async (file, args, options) => {
+      if (args.join(' ') === 'rev-parse HEAD') {
+        at += 1
+        calls['rev-parse HEAD'] = { stdout: at === 1 ? 'aaa111\n' : 'bbb222\n' }
+      }
+      return evolving(file, args, options)
+    }
+    const outcome = await handleUpdate(deps({ exec }), { repoPath: '/repo' })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'main', updated: true } })
+  })
+
+  it('maps a diverged branch to a 400 envelope', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'fetch --all --prune': {},
+      'rev-parse HEAD': { stdout: 'aaa111\n' },
+      'merge --ff-only @{u}': { code: 128, stderr: 'fatal: Not possible to fast-forward, aborting.\n' },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleUpdate(deps({ exec: scripted(calls) }), { repoPath: '/repo' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('Not possible to fast-forward')
+  })
+
+  it('rejects unknown body keys and a non-absolute repoPath', async () => {
+    expect((await handleUpdate(deps(), { repoPath: '/repo', branch: 'main' })).status).toBe(400)
+    expect((await handleUpdate(deps(), { repoPath: 'repo' })).status).toBe(400)
   })
 })
 

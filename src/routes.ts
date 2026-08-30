@@ -5,11 +5,11 @@
 
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, RepoStatus, RouteError, SwitchBody, SwitchResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -28,7 +28,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -44,6 +44,12 @@ function gitFailure(error: GitError): RouteOutcome {
     // branch name`) is caller misuse, not a host fault — the client
     // pre-flights the same rules, this is the backstop.
     || error.stderr.includes('not a valid branch name')
+    // Diverged/branchless states an update cannot fast-forward through are
+    // the user's repo state, not host faults: no upstream to merge, a
+    // detached HEAD, or local commits `--ff-only` must not paper over.
+    || error.stderr.includes('Not possible to fast-forward')
+    || error.stderr.includes('no tracking information')
+    || error.stderr.includes("unknown revision")
   return fail(usage ? 400 : 500, error.message)
 }
 
@@ -223,6 +229,31 @@ export async function handleFetch(deps: RouteDeps, body: unknown): Promise<Route
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     await fetchAll(deps.exec, facts.repoRoot)
     const result: FetchResult = { remote: 'all' }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /update 鈥?update the CURRENT checkout: fetch every remote, then
+ * fast-forward the branch checked out by the queried directory to its
+ * upstream. Divergence, a missing upstream, and conflicting working-tree
+ * changes all surface as 400 envelopes carrying git's own explanation.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handleUpdate(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<UpdateBody>(body, ['repoPath'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const outcome = await updateBranch(deps.exec, facts.repoRoot)
+    const result: UpdateResult = { branch: outcome.branch, updated: outcome.updated }
     return { status: 200, body: result }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)

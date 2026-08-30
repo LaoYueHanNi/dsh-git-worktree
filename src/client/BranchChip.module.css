@@ -290,21 +290,23 @@
   cursor: default;
 }
 
-/* The sync tool while its fetch runs: the refresh glyph spins so the click
- * visibly landed, and the button keeps full opacity — the usual disabled
- * dim would read as "broken" for an in-flight network operation. */
-.menuToolButtonFetching svg {
-  animation: menuToolSpin 900ms linear infinite;
+/* The sync tools while their action runs: a soft opacity pulse. The glyph
+ * is a directional arrow, so the circular-refresh spin read as garbled
+ * rotation — pulsing keeps the arrow legible while clearly "live", and the
+ * button keeps full opacity (the usual disabled dim would read as broken
+ * for an in-flight network operation). */
+.menuToolButtonRunning svg {
+  animation: menuToolPulse 700ms ease-in-out infinite alternate;
 }
 
-.menuToolButtonFetching:disabled {
+.menuToolButtonRunning:disabled {
   opacity: 1;
   cursor: progress;
 }
 
-@keyframes menuToolSpin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+@keyframes menuToolPulse {
+  from { opacity: 1; }
+  to { opacity: 0.25; }
 }
 
 /* The main column: heading + scrollable rows + pinned search. */

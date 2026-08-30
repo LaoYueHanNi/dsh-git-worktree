@@ -8,9 +8,9 @@ Status: implemented
 
 ## Decision
 
-分支菜单工具条新增第四个图标（刷新，末位——创建/定位/展开折叠是浏览与加工工具，同步是数据源操作，排最下）。点击 → `POST /plugin/git-worktree/fetch`（`{ repoPath }`）→ `git.ts` 新增 `fetchAll` 原语执行 `git fetch --all --prune`（仓库级操作，在 probeRepo 探出的 repoRoot 执行）→ 成功后**菜单保持打开**并自动 `refresh()` 刷新行列表——同步的意义就是当场看到新列表，关菜单违背动线；失败 toast，按钮恢复。执行期间单飞共享 `busyRef`（与确认动作互斥），按钮禁用；网络慢由 executor 的 20 秒硬超时兜底转 GitError。
+分支菜单工具条新增提取图标（虚线左下箭头，位于定位与展开/折叠之间——创建/定位/展开折叠是浏览与加工工具，同步是数据源操作，排其后）。点击 → `POST /plugin/git-worktree/fetch`（`{ repoPath }`）→ `git.ts` 新增 `fetchAll` 原语执行 `git fetch --all --prune`（仓库级操作，在 probeRepo 探出的 repoRoot 执行）→ 成功后**菜单保持打开**并自动 `refresh()` 刷新行列表——同步的意义就是当场看到新列表，关菜单违背动线；失败 toast，按钮恢复。执行期间单飞共享 `busyRef`（与确认动作互斥），按钮禁用；网络慢由 executor 的 20 秒硬超时兜底转 GitError。
 
-反馈形态：fetch 常常没有可见副作用（远程没动时列表一模一样），故成功也 toast（"远程分支已同步"），执行中刷新图标旋转、按钮保持全不透明（常规禁用变灰会被读成"坏了"）。
+反馈形态：fetch 常常没有可见副作用（远程没动时列表一模一样），故成功也 toast（"远程分支已同步"），执行中虚线箭头透明度脉冲、按钮保持全不透明（常规禁用变灰会被读成"坏了"）。
 
 与 IDEA 的同名动作刻意不同：不搬它的 `-c credential.helper= / -c core.quotepath= / -c log.showSignature=` 三件套和 `--progress`——那些是 IDEA 进程模型（接管认证、渲染进度条、多语言路径）的需要；浏览器插件把认证交给 git 自己的凭据助手，无进度条可渲染。
 

@@ -130,5 +130,25 @@ export declare function createBranch(exec: Exec, cwd: string, name: string): Pro
  * @param repoRoot - main worktree directory (fetch is repository-wide).
  */
 export declare function fetchAll(exec: Exec, repoRoot: string): Promise<void>;
+/** Outcome of {@link updateBranch}: the branch touched and whether it moved. */
+export interface UpdateOutcome {
+    branch: string;
+    updated: boolean;
+}
+/**
+ * Update the CURRENT checkout: fetch every remote, then fast-forward the
+ * branch checked out by `cwd` to its upstream (`@{u}`) — IDEA's "update
+ * selected branch" in its default merge mode. Deliberately `--ff-only`:
+ * a diverged local branch refuses rather than silently rebase/merge, and
+ * uncommitted working-tree changes are git's own call to reject — the
+ * plugin never stashes behind the user's back. Runs at the queried
+ * directory's own toplevel, so a linked-worktree session updates the
+ * branch ITS worktree holds.
+ * @param exec - executor seam.
+ * @param cwd - directory whose checked-out branch is updated.
+ * @returns the branch name and whether HEAD actually moved (false = the
+ * upstream already contained it).
+ */
+export declare function updateBranch(exec: Exec, cwd: string): Promise<UpdateOutcome>;
 /** Guard for route inputs: a non-empty absolute directory path. */
 export declare function isAbsoluteDir(value: string): boolean;

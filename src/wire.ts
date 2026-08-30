@@ -23,6 +23,9 @@ export const ROUTE_BRANCH = `${ROUTE_PREFIX}/branch`
 /** POST ROUTE_PREFIX/fetch — sync remote-tracking refs (fetch every remote + prune). */
 export const ROUTE_FETCH = `${ROUTE_PREFIX}/fetch`
 
+/** POST ROUTE_PREFIX/update — fast-forward the current branch to its upstream. */
+export const ROUTE_UPDATE = `${ROUTE_PREFIX}/update`
+
 /** One selectable branch row. */
 export interface BranchEntry {
   /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -119,6 +122,23 @@ export interface FetchBody {
 export interface FetchResult {
   /** What the fetch covered: "all" remotes (this plugin always fetches all). */
   remote: string
+}
+
+/** POST update request body. */
+export interface UpdateBody {
+  /** Any directory inside the repository (workspace cwd) — the branch
+   * checked out by THIS directory is the one updated. */
+  repoPath: string
+}
+
+/** POST update response body — fetch every remote, then fast-forward the
+ * checked-out branch to its upstream. */
+export interface UpdateResult {
+  /** The branch that was updated (empty for a detached checkout, which
+   * cannot be updated and always errors before this response). */
+  branch: string
+  /** False when the upstream already contained the branch (nothing moved). */
+  updated: boolean
 }
 
 /** Error envelope every non-2xx response carries. */

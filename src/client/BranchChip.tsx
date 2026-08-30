@@ -37,7 +37,7 @@ import {
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
-import { fetchStatus, requestCreateBranch, requestFetch, requestSwitch, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { fetchStatus, requestCreateBranch, requestFetch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
@@ -254,6 +254,11 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
   const [worktreeMode, setWorktreeMode] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Which arrow is spinning: fetch and update are single-flight against
+   * the SAME busyRef (mutually exclusive), but the spinning state must be
+   * per-tool — one shared flag made both arrows rotate at once. */
+  const [fetchBusy, setFetchBusy] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
   const chipRef = useRef<HTMLButtonElement | null>(null)
   const busyRef = useRef(false)
@@ -357,6 +362,7 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     if (busyRef.current) return
     busyRef.current = true
     setBusy(true)
+    setFetchBusy(true)
     const failure = await (async () => {
       if (cwd === undefined) return 'no session directory'
       const result = await requestFetch(cwd)
@@ -365,12 +371,41 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     })()
     busyRef.current = false
     setBusy(false)
+    setFetchBusy(false)
     if (failure !== undefined) {
       showError(failure)
       return
     }
     await refresh()
     setToast({ seq: Date.now(), text: t('fetchDone') })
+  }, [cwd, refresh, showError, t])
+
+  /** Update-current-branch flow: POST /update (fetch every remote, then
+   * fast-forward the checked-out branch to its upstream), then refetch the
+   * status in place — same keep-the-menu-open semantics as the fetch sync.
+   * The toast tells the two apart: fast-forwarded vs already up to date. */
+  const doUpdate = useCallback(async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setUpdateBusy(true)
+    const result = cwd === undefined ? undefined : await requestUpdate(cwd)
+    busyRef.current = false
+    setBusy(false)
+    setUpdateBusy(false)
+    if (result === undefined) {
+      showError('no session directory')
+      return
+    }
+    if (!result.ok) {
+      showError(result.error)
+      return
+    }
+    await refresh()
+    setToast({
+      seq: Date.now(),
+      text: result.updated ? t('updateDone', { branch: result.branch }) : t('updateUpToDate'),
+    })
   }, [cwd, refresh, showError, t])
 
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
@@ -492,7 +527,9 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         busy={busy}
         onCreate={(name) => { void doCreateBranch(name) }}
         onFetch={() => { void doFetch() }}
-        fetchBusy={busy}
+        fetchBusy={fetchBusy}
+        onUpdate={() => { void doUpdate() }}
+        updateBusy={updateBusy}
         onSelect={(branch) => {
           // In worktree mode re-selecting the CURRENT branch stages the
           // cut-out confirm; without the mode it is a plain close. Any

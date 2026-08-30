@@ -122,8 +122,15 @@ export interface BranchMenuProps {
   /** Sync remote-tracking refs (fetch every remote + prune); the owner
    * refreshes the rows when it lands — the menu stays open. */
   onFetch: () => void
-  /** True while the remote sync runs: the fetch tool disables. */
+  /** True while the remote sync runs: the fetch tool spins and the update
+   * tool disables (single-flight). */
   fetchBusy: boolean
+  /** Update the CURRENT branch: fetch + fast-forward it to its upstream;
+   * the owner refreshes the rows when it lands. */
+  onUpdate: () => void
+  /** True while the update runs: the update tool spins and the fetch tool
+   * disables (single-flight). */
+  updateBusy: boolean
   /** Dismiss the menu (outside click, Escape with nothing open). */
   onClose: () => void
   /** Bound locale translate (placeholder, empty state, heading, toolbar). */
@@ -131,15 +138,16 @@ export interface BranchMenuProps {
 }
 
 /**
- * The fetch glyph in IDEA's posture: a DASHED diagonal running from the
- * top-right down to a bottom-left arrowhead. Dashed because a fetch moves
- * only metadata (remote-tracking refs), never working-tree content — the
- * same visual language as IDEA's synchronize-remote-branches tool. The base
- * library has no such glyph (refresh/download read as data transfer), so it
- * is drawn here, local to the menu; the sync spin animation targets `svg`
- * descendants of the tool button and applies to it unchanged.
+ * The fetch/update glyph in IDEA's posture: a diagonal running from the
+ * top-right down to a bottom-left arrowhead. `dashed` marks the metadata
+ * move (fetch touches remote-tracking refs only, never working-tree
+ * content); the solid variant is the in-place branch update (fetch +
+ * fast-forward) — the pairing is IDEA's dashed/solid synchronize/update
+ * language. The base library has no such glyph, so both are drawn here,
+ * local to the menu; the sync spin animation targets `svg` descendants of
+ * the tool button and applies to them unchanged.
  */
-function FetchGlyph({ size = 16 }: { size?: number }) {
+function FetchGlyph({ size = 16, dashed = true }: { size?: number; dashed?: boolean }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path
@@ -147,7 +155,7 @@ function FetchGlyph({ size = 16 }: { size?: number }) {
         stroke="currentColor"
         strokeWidth="1.3"
         strokeLinecap="round"
-        strokeDasharray="2.4 1.6"
+        strokeDasharray={dashed ? '2.4 1.6' : undefined}
       />
       <path
         d="M5 5.9 V11 H10.1"
@@ -299,7 +307,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, onCreate, busy, onFetch, fetchBusy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, onCreate, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -959,10 +967,26 @@ export function BranchMenu({
             </button>
             <button
               type="button"
-              className={fetchBusy ? `${css.menuToolButton} ${css.menuToolButtonFetching}` : css.menuToolButton}
+              className={updateBusy ? `${css.menuToolButton} ${css.menuToolButtonRunning}` : css.menuToolButton}
+              title={t('menuUpdate')}
+              aria-label={t('menuUpdate')}
+              disabled={busy || fetchBusy}
+              onClick={() => {
+                // A staged confirm must not ride out the update: while it
+                // runs, busy would flip its labels into progress text for
+                // an action nobody is running.
+                confirmRef.current?.onCancel()
+                onUpdate()
+              }}
+            >
+              <FetchGlyph dashed={false} />
+            </button>
+            <button
+              type="button"
+              className={fetchBusy ? `${css.menuToolButton} ${css.menuToolButtonRunning}` : css.menuToolButton}
               title={t('menuFetch')}
               aria-label={t('menuFetch')}
-              disabled={fetchBusy}
+              disabled={busy || updateBusy}
               onClick={() => {
                 // A staged confirm must not ride out the sync: while the
                 // fetch runs, busy would flip its labels into progress text
