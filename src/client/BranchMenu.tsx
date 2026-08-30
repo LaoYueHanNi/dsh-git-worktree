@@ -49,13 +49,14 @@
  * the menu; Enter in the search field commits the first enabled visible row.
  *
  * Long names and many branches: a clipped label shows the full name on
- * hover via the native title (gated to actually-clipped rows only). When
- * the list grows past TREE_MIN_ROWS it renders as a full-depth '/' prefix
- * tree instead: folder-header rows (chevron + count) toggle; under an
- * expanded folder, child rows show only their own segment (indentation
- * carries the hierarchy — no repeated path, no color distinction); linear
- * chains compress into one row; the checked-out branch's chain opens by
- * default (centering still lands it mid-viewport).
+ * hover via the native title (gated to actually-clipped rows only). The
+ * list ALWAYS renders as a full-depth '/' prefix tree: folder-header rows
+ * (chevron + count) toggle; under an expanded folder, child rows show only
+ * their own segment (indentation carries the hierarchy — no repeated path,
+ * no color distinction); linear chains compress into one row. TREE_MIN_ROWS
+ * only sets the DEFAULT opening depth: past it, just the checked-out
+ * branch's chain starts open (centering still lands it mid-viewport); at
+ * or under it, every folder starts open — few branches have nothing to hide.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -145,8 +146,10 @@ const CLICK_GUARD_MS = 250
  * offsetHeight are real for the measure-then-place pass (base Menu trick). */
 const FLY_MEASURE: Partial<CSSStyleDeclaration> = { left: '-9999px', top: '0px', visibility: 'hidden' }
 
-/** Below this many rows the picker stays a flat list: in small repos a
- * tree would hide real branches behind one-entry folders, buying nothing. */
+/** Past this many rows the tree starts with ONLY the checked-out branch's
+ * chain open; at or under it every folder starts open (few branches have
+ * nothing to hide). The tree itself always renders — this threshold is
+ * about the default opening depth, never about flat vs tree. */
 const TREE_MIN_ROWS = 8
 
 /** One node of the '/' prefix tree built from the row list: every segment
@@ -166,6 +169,17 @@ interface TreeNode {
   children: TreeNode[]
   /** Leaf branches under this node, including its own leaf. */
   total: number
+}
+
+/** Every folder path that renders a header, walking the tree depth-first. */
+function collectFolderPaths(nodes: TreeNode[], out: string[] = []): string[] {
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      out.push(node.path)
+      collectFolderPaths(node.children, out)
+    }
+  }
+  return out
 }
 
 const segCmp = (a: string, b: string): number =>
@@ -327,6 +341,11 @@ export function BranchMenu({
   /** Fresh creating flag for the stale-safe document keydown listener. */
   const creatingRef = useRef(creating)
   creatingRef.current = creating
+  /** Latest rows for the open-reset effect: the effect must NOT re-run when
+   * a mid-open refresh swaps the rows (that would reset folders the user
+   * has toggled), but the reset itself still needs the freshest list. */
+  const latestRows = useRef(rows)
+  latestRows.current = rows
   /** Always-fresh pick for the stale-safe document keydown listener. */
   const pickRef = useRef<(el: HTMLElement | null, name: string) => void>(() => {})
   const confirmOpen = confirm !== null
@@ -354,26 +373,13 @@ export function BranchMenu({
   }
   pickRef.current = pick
 
-  /** Prefix tree when the list is big enough to need one; null (flat list)
-   * below TREE_MIN_ROWS. Built once per rows change. */
-  const tree = useMemo(
-    () => (rows.length > TREE_MIN_ROWS ? buildTree(rows) : null),
-    [rows],
-  )
+  /** The '/' prefix tree of the rows — always on; TREE_MIN_ROWS only sets
+   * the default opening depth (see the open-reset effect). */
+  const tree = useMemo(() => buildTree(rows), [rows])
 
   /** Every folder path that renders a header — the expand/collapse-all
    * button's scope. */
-  const folderPaths = useMemo(() => {
-    const out: string[] = []
-    const walk = (nodes: TreeNode[]): void => {
-      for (const node of nodes) {
-        if (node.children.length > 0) out.push(node.path)
-        walk(node.children)
-      }
-    }
-    if (tree !== null) walk(tree)
-    return out
-  }, [tree])
+  const folderPaths = useMemo(() => collectFolderPaths(tree), [tree])
   const allExpanded = folderPaths.length > 0 && folderPaths.every(p => expanded.has(p))
   const toggleAll = (): void => {
     setExpanded(allExpanded ? new Set() : new Set(folderPaths))
@@ -393,15 +399,24 @@ export function BranchMenu({
     })
   }
 
-  // Every open starts from a clean filter, selection, tree, and naming form
-  // — only the current branch's folder chain open.
+  // Every open starts from a clean filter, selection, tree state, and
+  // naming form. The tree's opening depth follows the list size: past
+  // TREE_MIN_ROWS only the checked-out branch's chain starts open, at or
+  // under it every folder does. Rows come through a ref — the effect keys
+  // on [open, currentBranch] so a mid-open refresh never resets folders the
+  // user has toggled by hand.
   useEffect(() => {
     if (!open) return
     setQuery('')
     setSelected(null)
     setCreating(false)
     setDraft('')
-    setExpanded(chainExpanded(currentBranch))
+    const currentRows = latestRows.current
+    setExpanded(
+      currentRows.length > TREE_MIN_ROWS
+        ? chainExpanded(currentBranch)
+        : new Set(collectFolderPaths(buildTree(currentRows))),
+    )
   }, [open, currentBranch])
 
   // A selection that no longer exists in the rows (worktree toggle, refresh)
@@ -874,25 +889,6 @@ export function BranchMenu({
   const buttonOf = (name: string): HTMLButtonElement | null =>
     cardRef.current?.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(name)}"]`) ?? null
 
-  /** One flat row (small repos, and search results there). */
-  const renderRow = (row: BranchRow, highlight: boolean): React.ReactNode => (
-    <button
-      key={row.name}
-      type="button"
-      role="menuitem"
-      data-branch={row.name}
-      className={rowClass(row.name)}
-      disabled={row.disabled}
-      onClick={() => { if (guardActive()) return; rowClick(buttonOf(row.name), row.name) }}
-      onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, row.name) }}
-      onMouseEnter={(event) => { gateTooltip(event.currentTarget, row.name) }}
-      onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
-    >
-      <span className={css.menuRowLabel}>{highlight ? renderLabel(row.name) : row.name}</span>
-      {row.name === currentBranch && <IconCheckOutline16 size={14} />}
-    </button>
-  )
-
   return (
     <>
       {createPortal(
@@ -937,7 +933,7 @@ export function BranchMenu({
               className={css.menuToolButton}
               title={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
               aria-label={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
-              disabled={tree === null || folderPaths.length === 0}
+              disabled={folderPaths.length === 0}
               onClick={toggleAll}
             >
               {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
@@ -962,9 +958,7 @@ export function BranchMenu({
           <div className={css.menuMain}>
             <div className={css.menuHeading}>{t('menuLocalBranches')}</div>
             <div className={css.menuRows} role="presentation" ref={holdRowsCenter}>
-              {tree === null
-                ? (needle === '' ? rows : visible).map(row => renderRow(row, needle !== ''))
-                : (needle === '' ? renderTree(tree, 0) : renderSearch(tree, 0))}
+              {needle === '' ? renderTree(tree, 0) : renderSearch(tree, 0)}
               {visible.length === 0 && <div className={css.menuEmpty}>{t('menuNoMatches')}</div>}
             </div>
             <div className={css.menuSearchWrap}>
