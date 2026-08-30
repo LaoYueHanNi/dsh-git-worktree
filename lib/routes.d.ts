@@ -3,7 +3,7 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 import { type DirExists, type Exec } from './git.js';
-import type { CreateWorktreeResult, RepoStatus, RouteError, SwitchResult } from './wire.js';
+import type { CreateBranchResult, CreateWorktreeResult, RepoStatus, RouteError, SwitchResult } from './wire.js';
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
     exec: Exec;
@@ -19,7 +19,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
     status: number;
-    body: RepoStatus | CreateWorktreeResult | SwitchResult | RouteError;
+    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | RouteError;
 }
 /**
  * GET /status 鈥?repository facts for one directory.
@@ -43,3 +43,12 @@ export declare function handleCreateWorktree(deps: RouteDeps, body: unknown): Pr
  * @param body - parsed request body.
  */
 export declare function handleSwitch(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
+/**
+ * POST /branch 鈥?create a NEW branch from the queried directory's current
+ * checkout (whatever its HEAD points at, detached included) and check it out
+ * in place. Git validates the name; the client pre-flights the same rules
+ * and only sends names it already accepts.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export declare function handleCreateBranch(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalize } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, cutoutBranchName, probeRepo, switchBranch,
+  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, probeRepo, switchBranch,
   type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -216,5 +216,22 @@ describe('switchBranch', () => {
       { args: ['switch', 'dev'] },
     ])
     expect(await switchBranch(exec, '/repo', 'origin/dev')).toBe('dev')
+  })
+})
+
+describe('createBranch', () => {
+  it('runs switch -c at the queried directory and reports the name', async () => {
+    const exec = scripted([
+      { args: ['switch', '-c', 'feat/auth-login'], out: { stdout: "Switched to a new branch 'feat/auth-login'\n" } },
+    ])
+    expect(await createBranch(exec, '/repo/wt', 'feat/auth-login')).toBe('feat/auth-login')
+  })
+
+  it('surfaces a git refusal of the name', async () => {
+    const exec = scripted([
+      { args: ['switch', '-c', 'bad..name'],
+        out: { code: 128, stderr: "fatal: 'bad..name' is not a valid branch name\n" } },
+    ])
+    await expect(createBranch(exec, '/repo', 'bad..name')).rejects.toThrow('not a valid branch name')
   })
 })

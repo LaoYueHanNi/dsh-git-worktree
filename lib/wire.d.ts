@@ -12,6 +12,8 @@ export declare const ROUTE_STATUS = "/plugin/git-worktree/status";
 export declare const ROUTE_WORKTREE = "/plugin/git-worktree/worktree";
 /** POST ROUTE_PREFIX/switch — in-place branch switch of the main checkout. */
 export declare const ROUTE_SWITCH = "/plugin/git-worktree/switch";
+/** POST ROUTE_PREFIX/branch — create a NEW branch from the current checkout and switch to it. */
+export declare const ROUTE_BRANCH = "/plugin/git-worktree/branch";
 /** One selectable branch row. */
 export interface BranchEntry {
     /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -73,6 +75,19 @@ export interface SwitchBody {
 /** POST switch response body. */
 export interface SwitchResult {
     /** The branch actually checked out after the switch. */
+    branch: string;
+}
+/** POST branch request body. */
+export interface CreateBranchBody {
+    /** Any directory inside the repository (workspace cwd) — the new branch is
+     * cut from whatever this directory's HEAD points at and checked out HERE. */
+    repoPath: string;
+    /** User-typed name of the branch to create (a local name, verbatim). */
+    name: string;
+}
+/** POST branch response body. */
+export interface CreateBranchResult {
+    /** The branch created and now checked out. */
     branch: string;
 }
 /** Error envelope every non-2xx response carries. */

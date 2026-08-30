@@ -14,12 +14,18 @@ export type GitWorktreeKey =
   | 'menuLocate'
   | 'menuExpandAll'
   | 'menuCollapseAll'
+  | 'menuNewBranch'
+  | 'menuNewBranchPlaceholder'
+  | 'menuNewBranchBad'
+  | 'menuNewBranchExists'
   | 'switchAsk'
   | 'switchBusy'
   | 'worktreeAskNew'
   | 'worktreeAskReuse'
   | 'worktreeAskCutOut'
   | 'worktreeBusy'
+  | 'createBranchTitle'
+  | 'createBranchBusy'
   | 'actionCancel'
   | 'actionConfirm'
   | 'errorGeneric'
@@ -49,12 +55,18 @@ export const en: Record<GitWorktreeKey, string> = {
   menuLocate: 'Locate current branch',
   menuExpandAll: 'Expand all',
   menuCollapseAll: 'Collapse all',
+  menuNewBranch: 'Create branch from current',
+  menuNewBranchPlaceholder: 'New branch name',
+  menuNewBranchBad: 'Git will not accept this name',
+  menuNewBranchExists: 'A branch with this name already exists',
   switchAsk: 'Switch to {branch}?',
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
   worktreeAskReuse: 'Switch to the {branch} worktree?',
   worktreeAskCutOut: 'Cut a worktree out of the current branch {branch}?',
   worktreeBusy: 'Creating…',
+  createBranchTitle: 'New branch from {branch}',
+  createBranchBusy: 'Creating…',
   actionCancel: 'Cancel',
   actionConfirm: 'Confirm',
   errorGeneric: 'Git worktree: {message}',
@@ -85,12 +97,18 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuLocate: '定位当前分支',
   menuExpandAll: '全部展开',
   menuCollapseAll: '全部折叠',
+  menuNewBranch: '从当前分支新建分支',
+  menuNewBranchPlaceholder: '新分支名称',
+  menuNewBranchBad: 'Git 不接受该名称',
+  menuNewBranchExists: '同名分支已存在',
   switchAsk: '是否切到 {branch}？',
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',
   worktreeAskReuse: '是否切到 {branch} 工作树？',
   worktreeAskCutOut: '是否从当前分支 {branch} 切出工作树？',
   worktreeBusy: '创建中…',
+  createBranchTitle: '从 {branch} 新建分支',
+  createBranchBusy: '创建中…',
   actionCancel: '取消',
   actionConfirm: '确认',
   errorGeneric: 'Git 工作树：{message}',

@@ -4,7 +4,7 @@ import { join, normalize } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateWorktree, handleStatus, handleSwitch,
+  handleCreateBranch, handleCreateWorktree, handleStatus, handleSwitch,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -205,6 +205,50 @@ describe('handleSwitch', () => {
 
   it('rejects unknown body keys', async () => {
     expect((await handleSwitch(deps(), { repoPath: '/repo', branch: 'main', why: true })).status).toBe(400)
+  })
+})
+
+describe('handleCreateBranch', () => {
+  it('creates from the current checkout and reports the name', async () => {
+    const calls = { ...REPO_CALLS, 'switch -c feat/x': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'feat/x' })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'feat/x' } })
+  })
+
+  it('rejects unknown body keys', async () => {
+    expect((await handleCreateBranch(deps(), { repoPath: '/repo', name: 'dev', from: 'main' })).status).toBe(400)
+    expect((await handleCreateBranch(deps(), null)).status).toBe(400)
+  })
+
+  it('rejects a non-absolute repoPath or empty name', async () => {
+    expect((await handleCreateBranch(deps(), { repoPath: 'repo', name: 'dev' })).status).toBe(400)
+    expect((await handleCreateBranch(deps(), { repoPath: '/repo', name: '  ' })).status).toBe(400)
+  })
+
+  it('rejects a leading dash before it can ride the command line as a flag', async () => {
+    const outcome = await handleCreateBranch(deps(), { repoPath: '/repo', name: '-feat' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('-')
+  })
+
+  it('rejects a directory outside any repository', async () => {
+    const exec = scripted({ 'rev-parse --show-toplevel': { code: 128, stderr: 'fatal: not a git repository' } })
+    const outcome = await handleCreateBranch(deps({ exec }), { repoPath: '/plain', name: 'dev' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('not inside a git repository')
+  })
+
+  it('maps a git refusal of the name to a 400 envelope', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'switch -c bad..name': { code: 128, stderr: "fatal: 'bad..name' is not a valid branch name\n" },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'bad..name' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('not a valid branch name')
   })
 })
 

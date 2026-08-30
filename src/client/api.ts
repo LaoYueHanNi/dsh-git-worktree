@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateWorktreeResult, RepoStatus, RouteError, SwitchResult,
+  CreateBranchResult, CreateWorktreeResult, RepoStatus, RouteError, SwitchResult,
 } from '../wire.ts'
-import { ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -76,4 +76,14 @@ export function requestWorktreeCutout(repoPath: string, branch: string): Promise
  */
 export function requestSwitch(repoPath: string, branch: string): Promise<Call<SwitchResult>> {
   return post<SwitchResult>(ROUTE_SWITCH, { repoPath, branch })
+}
+
+/**
+ * Create a NEW branch from the directory's current checkout and switch to it
+ * in place.
+ * @param repoPath - absolute directory whose HEAD the branch is cut from.
+ * @param name - user-typed new branch name (validated client-side already).
+ */
+export function requestCreateBranch(repoPath: string, name: string): Promise<Call<CreateBranchResult>> {
+  return post<CreateBranchResult>(ROUTE_BRANCH, { repoPath, name })
 }

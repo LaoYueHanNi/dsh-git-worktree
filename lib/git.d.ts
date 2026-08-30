@@ -107,5 +107,18 @@ export declare function addWorktreeCutout(exec: Exec, repoRoot: string, base: st
  * @returns the local branch name now checked out.
  */
 export declare function switchBranch(exec: Exec, repoRoot: string, branch: string): Promise<string>;
+/**
+ * Create a NEW branch from the current checkout and check it out in place
+ * (`git switch -c`): the cut point is whatever the queried directory's HEAD
+ * points at, so a detached or unborn checkout cuts from the current commit
+ * too. Runs at the queried directory's own toplevel — a session inside a
+ * linked worktree creates and checks out within that worktree, never the
+ * main checkout (the same semantics as {@link switchBranch}).
+ * @param exec - executor seam.
+ * @param cwd - directory whose HEAD the branch is cut from (worktree toplevel).
+ * @param name - new branch name (git validates; failures raise GitError).
+ * @returns the branch name now created and checked out.
+ */
+export declare function createBranch(exec: Exec, cwd: string, name: string): Promise<string>;
 /** Guard for route inputs: a non-empty absolute directory path. */
 export declare function isAbsoluteDir(value: string): boolean;

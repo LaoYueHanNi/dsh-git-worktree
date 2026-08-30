@@ -60,3 +60,30 @@ export function isAbsoluteConfigPath(value: string): boolean {
   if (value.startsWith('/') || value.startsWith('\\')) return true
   return /^[a-zA-Z]:[\\/]/.test(value)
 }
+
+/** Why a user-typed NEW branch name is not acceptable yet (null = fine). */
+export type BranchNameIssue = 'empty' | 'leadingDash' | 'illegal'
+
+/**
+ * Pre-flight check of a user-typed NEW branch name against git's ref-name
+ * rules (git check-ref-format's reject list, the subset typing can hit):
+ * non-empty; no leading `-` (git would parse it as a flag); no space, `~^:?*[\`
+ * or control character; no `..`, `@{`, `//`, leading/trailing `/`; no component
+ * starting with `.` or ending with `.lock`; no trailing `.`; not the lone `@`.
+ * `git switch -c` stays the authority — a miss here surfaces through the
+ * error envelope — this only feeds immediate form feedback.
+ * @param name - raw draft text (NOT trimmed: a space is a real issue).
+ * @returns the issue kind, or null when the name is acceptable.
+ */
+export function branchNameIssue(name: string): BranchNameIssue | null {
+  if (name.trim() === '') return 'empty'
+  if (name.startsWith('-')) return 'leadingDash'
+  if (name === '@') return 'illegal'
+  if (/[\s~^:?*[\\\u0000-\u001f]/.test(name)) return 'illegal'
+  if (name.includes('..') || name.includes('@{') || name.includes('//')) return 'illegal'
+  if (name.startsWith('/') || name.endsWith('/')) return 'illegal'
+  if (name.endsWith('.')) return 'illegal'
+  if (/(^|\/)\./.test(name)) return 'illegal'
+  if (/(^|\/)[^/]+\.lock($|\/)/.test(name)) return 'illegal'
+  return null
+}

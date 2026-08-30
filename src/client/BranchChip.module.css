@@ -484,3 +484,62 @@
   outline: none;
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
+
+/* ── New-branch create flyout (BranchMenu toolbar plus) ─────────────
+ * Opens to the RIGHT of the card (the confirm flyout's posture) and holds
+ * the whole flow in one panel: ask line, naming input, live hint, and the
+ * Cancel/Create pair — typing the name and pressing Create fires the
+ * create in one stroke, no second confirm step. */
+
+/* The toolbar plus in its active (flyout open) state: a bluish tint
+ * layering the same way the picked row does, so the toggled state reads at
+ * a glance. */
+.menuToolButtonOn,
+.menuToolButtonOn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary-bluish, #4186f0) 18%, transparent);
+  color: var(--dsw-alias-label-primary-bluish, #4186f0);
+}
+
+/* The naming input inside the flyout: borderless, part of the card, focus
+ * shown as the standard hover tint. Fixed width — the popCard is
+ * max-content, so a percentage width would chase the input's own default
+ * size instead of the design width. */
+.menuCreate {
+  box-sizing: border-box;
+  width: 248px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  /* Weight 500 mirrors the chip's branch label (see .menuSearch). */
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.menuCreate::placeholder {
+  color: var(--dsw-alias-label-secondary, #81858c);
+}
+
+.menuCreate:focus {
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+.menuCreate:disabled {
+  opacity: 0.5;
+}
+
+/* The error line under the input — only rendered while the draft is
+ * unacceptable with a non-empty reason; the input itself stays neutral,
+ * the line carries the state. */
+.menuCreateHintBad {
+  margin: 0;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-error);
+}

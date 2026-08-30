@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAbsoluteConfigPath, localBranchName, sanitizeBranchDir, splitRemoteBranch } from '../src/normalize.ts'
+import { branchNameIssue, isAbsoluteConfigPath, localBranchName, sanitizeBranchDir, splitRemoteBranch } from '../src/normalize.ts'
 
 describe('sanitizeBranchDir', () => {
   it('keeps plain names unchanged', () => {
@@ -65,5 +65,44 @@ describe('isAbsoluteConfigPath', () => {
     expect(isAbsoluteConfigPath('')).toBe(false)
     expect(isAbsoluteConfigPath('wt/x')).toBe(false)
     expect(isAbsoluteConfigPath('~/.dsh/wt')).toBe(false)
+  })
+})
+
+describe('branchNameIssue', () => {
+  it('accepts ordinary and nested names', () => {
+    expect(branchNameIssue('main')).toBeNull()
+    expect(branchNameIssue('feat/auth-login')).toBeNull()
+    expect(branchNameIssue('v1.2.3')).toBeNull()
+    expect(branchNameIssue('user@host')).toBeNull()
+  })
+
+  it('rejects empty and whitespace-only drafts', () => {
+    expect(branchNameIssue('')).toBe('empty')
+    expect(branchNameIssue('   ')).toBe('empty')
+  })
+
+  it('rejects a leading dash before git can parse it as a flag', () => {
+    expect(branchNameIssue('-feat')).toBe('leadingDash')
+  })
+
+  it('rejects git-forbidden characters and constructs', () => {
+    expect(branchNameIssue('a b')).toBe('illegal')
+    expect(branchNameIssue('a..b')).toBe('illegal')
+    expect(branchNameIssue('a~b')).toBe('illegal')
+    expect(branchNameIssue('a^b')).toBe('illegal')
+    expect(branchNameIssue('a:b')).toBe('illegal')
+    expect(branchNameIssue('a?b')).toBe('illegal')
+    expect(branchNameIssue('a*b')).toBe('illegal')
+    expect(branchNameIssue('a[b')).toBe('illegal')
+    expect(branchNameIssue('a\\b')).toBe('illegal')
+    expect(branchNameIssue('a@{b')).toBe('illegal')
+    expect(branchNameIssue('a//b')).toBe('illegal')
+    expect(branchNameIssue('/lead')).toBe('illegal')
+    expect(branchNameIssue('trail/')).toBe('illegal')
+    expect(branchNameIssue('trailing.')).toBe('illegal')
+    expect(branchNameIssue('.dotted')).toBe('illegal')
+    expect(branchNameIssue('feat/.hidden')).toBe('illegal')
+    expect(branchNameIssue('feat/x.lock')).toBe('illegal')
+    expect(branchNameIssue('@')).toBe('illegal')
   })
 })

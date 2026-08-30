@@ -5,11 +5,11 @@
 
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, cutoutBranchName, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateWorktreeBody, CreateWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -28,7 +28,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -38,7 +38,12 @@ function fail(status: number, error: string): RouteOutcome {
 
 /** GitError to outcome: usage-shaped failures are 400, the rest 500. */
 function gitFailure(error: GitError): RouteOutcome {
-  const usage = error.stderr.includes('usage:') || error.stderr.includes('fatal: invalid')
+  const usage = error.stderr.includes('usage:')
+    || error.stderr.includes('fatal: invalid')
+    // A user-typed branch name git refuses (`'bad..name' is not a valid
+    // branch name`) is caller misuse, not a host fault — the client
+    // pre-flights the same rules, this is the backstop.
+    || error.stderr.includes('not a valid branch name')
   return fail(usage ? 400 : 500, error.message)
 }
 
@@ -164,6 +169,35 @@ export async function handleSwitch(deps: RouteDeps, body: unknown): Promise<Rout
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const switched = await switchBranch(deps.exec, facts.repoRoot, branch)
     const result: SwitchResult = { branch: switched }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /branch 鈥?create a NEW branch from the queried directory's current
+ * checkout (whatever its HEAD points at, detached included) and check it out
+ * in place. Git validates the name; the client pre-flights the same rules
+ * and only sends names it already accepts.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handleCreateBranch(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<CreateBranchBody>(body, ['repoPath', 'name'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath, name } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  if (name.trim() === '') return fail(400, '"name" must be non-empty')
+  // A leading dash would ride `git switch -c` as a flag — reject before the
+  // exec, not as an "unknown switch" GitError.
+  if (name.startsWith('-')) return fail(400, '"name" must not start with "-"')
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const created = await createBranch(deps.exec, facts.repoRoot, name)
+    const result: CreateBranchResult = { branch: created }
     return { status: 200, body: result }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)

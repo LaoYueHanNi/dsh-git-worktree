@@ -17,15 +17,25 @@
  *      never cover the composer, whatever the branch count.
  *
  * Layout (IDEA branch-panel posture at popup scale): a narrow tool strip
- * on the left (locate-current + expand/collapse-all), then a main column
- * of heading / tree / search. Selection model borrowed from IDEA: a
- * single click SELECTS a row (blue); double-click or Enter then OPENS the
+ * on the left (locate-current + expand/collapse-all + new-branch), then a
+ * main column of heading / tree / search. Selection model borrowed from
+ * IDEA: a single click SELECTS a row (blue); double-click or Enter then OPENS the
  * right-side confirm flyout for that row — the switch itself always goes
  * through the confirmation step, never straight away. While the confirm
  * flyout is open, clicking another row re-anchors it (the old one-click
  * pick flow).
  *
- * The confirm step is a second-level flyout opening to the RIGHT of the
+ * The new-branch tool (the toolbar's plus) opens the create flyout to the
+ * RIGHT of the card (the confirm flyout's submenu posture): the flyout
+ * holds the naming input — validated as you type (git ref-name rules plus
+ * a duplicate check against the rows) with a live hint naming the issue
+ * or, while the draft is acceptable, the branch the cut starts from — and
+ * the Cancel/Create pair. Confirming fires the create in ONE stroke
+ * (create AND in-place switch; no second confirm step — typing the name
+ * into the flyout and pressing Create IS the intent). While the create
+ * runs the flyout freezes (busy disables input and buttons); a failure
+ * toasts and leaves the flyout open for a renamed retry.
+ * The confirm flyout is a second-level portal opening to the RIGHT of the
  * branch card (the base Menu's submenu posture): the chip sits in the
  * bottom composer, so the old below-the-chip bubble landed off-viewport.
  * The flyout is a separate portal (not clipped by the card's
@@ -33,10 +43,10 @@
  * can never overlap the branch list — and vertically centered on the
  * picked row. Its width is content-driven, capped in CSS, wrapping.
  *
- * Close semantics: outside pointerdown (card, flyout, and chip excluded)
+ * Close semantics: outside pointerdown (card, flyouts, and chip excluded)
  * cancels the confirm and closes the menu; Escape unwinds tier by tier —
- * confirm, then search text, then selection, then the menu; Enter in the
- * search field commits the first enabled visible row.
+ * confirm, then the create flyout, then search text, then selection, then
+ * the menu; Enter in the search field commits the first enabled visible row.
  *
  * Long names and many branches: a clipped label shows the full name on
  * hover via the native title (gated to actually-clipped rows only). When
@@ -56,8 +66,10 @@ import {
   IconChevronRightOutline14,
   IconChevronUpOutline14,
   IconGoalOutline16,
+  IconPlusOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { branchNameIssue } from '../normalize.ts'
 import css from './BranchChip.module.css'
 
 /** One selectable branch row (disabled = checked out by a live worktree). */
@@ -97,6 +109,15 @@ export interface BranchMenuProps {
   /** Stage a pick (starts the confirm flyout beside that row). Current
    * branch re-select closes the menu unless the owner stages otherwise. */
   onSelect: (branch: string) => void
+  /** Whether the new-branch tool is offered (worktree mode routes creation
+   * through the cutout flow instead — the toolbar plus then disables). */
+  canCreate: boolean
+  /** Run the create NOW (create AND in-place switch): the flyout's Create
+   * button fires this once for a valid draft — no second confirm step. */
+  onCreate: (name: string) => void
+  /** True while the create runs: the flyout freezes (input and buttons
+   * disable, the Create button shows progress text). */
+  busy: boolean
   /** Dismiss the menu (outside click, Escape with nothing open). */
   onClose: () => void
   /** Bound locale translate (placeholder, empty state, heading, toolbar). */
@@ -229,10 +250,17 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, onCreate, busy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  /**
+   * Search-field ref callback: focus the field the moment it mounts. The
+   * card mounts in two stages (open flips, then pos resolves a render
+   * later), so an [open]-keyed passive effect fires while the input is
+   * still unmounted — its focus() no-ops against a null ref. Focusing at
+   * mount time is immune to that race by construction.
+   */
   /**
    * Search-field ref callback: focus the field the moment it mounts. The
    * card mounts in two stages (open flips, then pos resolves a render
@@ -247,6 +275,13 @@ export function BranchMenu({
    */
   const holdSearchFocus = useCallback((el: HTMLInputElement | null): void => {
     inputRef.current = el
+    if (el !== null) el.focus()
+  }, [])
+  /** Same mount-time focus trick for the new-branch input: the form mounts
+   * when the toolbar plus flips `creating`, mid-card-lifecycle, so the ref
+   * callback is the only reliable focus point. Stable for the same reason
+   * as holdSearchFocus — typing would otherwise re-focus on every render. */
+  const holdCreateFocus = useCallback((el: HTMLInputElement | null): void => {
     if (el !== null) el.focus()
   }, [])
   const flyRef = useRef<HTMLDivElement>(null)
@@ -265,6 +300,14 @@ export function BranchMenu({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   /** IDEA-style selection: clicked row (blue). Zero or one at a time. */
   const [selected, setSelected] = useState<string | null>(null)
+  /** The create flyout: open flag plus the live draft. Opening the menu
+   * (or closing the flyout) resets both — see the open-reset effect. */
+  const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useState('')
+  /** The create flyout element and its placed position (see its place
+   * pass below; same measure-then-place posture as the confirm flyout). */
+  const createFlyRef = useRef<HTMLDivElement | null>(null)
+  const [createFlyPos, setCreateFlyPos] = useState<{ left: number; top: number } | null>(null)
 
   // Latest values for stable-effect listeners (the parent rebuilds the
   // confirm object each render; refs keep the document-level keydown and
@@ -275,6 +318,9 @@ export function BranchMenu({
   queryRef.current = query
   const selectedRef = useRef(selected)
   selectedRef.current = selected
+  /** Fresh creating flag for the stale-safe document keydown listener. */
+  const creatingRef = useRef(creating)
+  creatingRef.current = creating
   /** Always-fresh pick for the stale-safe document keydown listener. */
   const pickRef = useRef<(el: HTMLElement | null, name: string) => void>(() => {})
   const confirmOpen = confirm !== null
@@ -341,12 +387,14 @@ export function BranchMenu({
     })
   }
 
-  // Every open starts from a clean filter, selection, and tree — only the
-  // current branch's folder chain open.
+  // Every open starts from a clean filter, selection, tree, and naming form
+  // — only the current branch's folder chain open.
   useEffect(() => {
     if (!open) return
     setQuery('')
     setSelected(null)
+    setCreating(false)
+    setDraft('')
     setExpanded(chainExpanded(currentBranch))
   }, [open, currentBranch])
 
@@ -486,6 +534,42 @@ export function BranchMenu({
     }
   }, [confirmOpen, pendingName])
 
+  // Create flyout placement: anchored to the card's right edge (never
+  // overlapping the branch list), vertically centered on the card, clamped
+  // into the viewport. Content-driven width via the same measure-then-place
+  // pass the confirm flyout uses (hidden layout, then real offsets).
+  useLayoutEffect(() => {
+    if (!creating) {
+      setCreateFlyPos(null)
+      return
+    }
+    const place = (): void => {
+      const fly = createFlyRef.current
+      const card = cardRef.current
+      if (fly === null || card === null) return
+      const cr = card.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const left = cr.right + GAP
+      const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
+      fly.style.maxWidth = `${room}px`
+      const fw = fly.offsetWidth
+      const fh = fly.offsetHeight
+      const top = Math.min(
+        Math.max(cr.top + cr.height / 2 - fh / 2, MARGIN),
+        Math.max(MARGIN, vh - fh - MARGIN),
+      )
+      setCreateFlyPos({ left: Math.min(left, vw - MARGIN - fw), top })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [creating])
+
   // Confirm opens (or re-anchors to another row) → focus the confirm
   // button (Enter commits, Escape cancels); confirm closes → forget the
   // pending row anchor. The focus rides a rAF: the flyout mounts in the
@@ -514,6 +598,7 @@ export function BranchMenu({
     const onPointerDown = (event: PointerEvent): void => {
       if (cardRef.current?.contains(event.target as Node) === true) return
       if (flyRef.current?.contains(event.target as Node) === true) return
+      if (createFlyRef.current?.contains(event.target as Node) === true) return
       if (anchorRef.current?.contains(event.target as Node) === true) return
       confirmRef.current?.onCancel()
       onClose()
@@ -522,6 +607,7 @@ export function BranchMenu({
       const key = event.key
       if (key === 'Escape') {
         if (confirmRef.current !== null) { confirmRef.current.onCancel(); return }
+        if (creatingRef.current) { setCreating(false); setDraft(''); return }
         if (queryRef.current.trim() !== '') { setQuery(''); return }
         if (selectedRef.current !== null) { setSelected(null); return }
         onClose()
@@ -530,8 +616,8 @@ export function BranchMenu({
       const card = cardRef.current
       const active = document.activeElement
       if (card === null || active === null || !card.contains(active)) return
-      const input = card.querySelector('input')
-      if (active === input) return
+      const inputs = card.querySelectorAll('input')
+      if (inputs.length > 0 && [...inputs].includes(active as HTMLInputElement)) return
       const leaves = [...card.querySelectorAll<HTMLButtonElement>('button[role="menuitem"][data-branch]')]
       if (key === 'ArrowDown' || key === 'ArrowUp') {
         event.preventDefault()
@@ -576,6 +662,27 @@ export function BranchMenu({
     if (card === null) return
     const el = card.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(first.name)}"]`)
     pick(el, first.name)
+  }
+
+  /** New-branch draft validation: git ref-name rules first, then a duplicate
+   * check against the rows (locals only — those ARE the rows). */
+  const createIssue = branchNameIssue(draft)
+  const createDuplicate = createIssue === null && rows.some(row => row.name === draft)
+  const createValid = createIssue === null && !createDuplicate
+  /** Error line under the input, ONLY while the draft is unacceptable with
+   * a non-empty reason (the ask line above already names the cut point, and
+   * an untouched input needs no error) — the Create button disables in
+   * lockstep. */
+  const createHint = createDuplicate ? t('menuNewBranchExists') : t('menuNewBranchBad')
+  const showCreateHint = (createIssue !== null && createIssue !== 'empty') || createDuplicate
+
+  /** Fire the create in one stroke — the flyout's whole point. Invalid
+   * drafts and a running create are no-ops (the Create button disables in
+   * lockstep); the owner closes the menu on success, toasts on failure and
+   * leaves the flyout open for a renamed retry. */
+  const commitCreate = (): void => {
+    if (!createValid || busy) return
+    onCreate(draft)
   }
 
   /** Row class composition: base + HEAD tint + selection (selection wins). */
@@ -793,6 +900,25 @@ export function BranchMenu({
           <div className={css.menuToolbar} role="toolbar" aria-label={t('menuLocalBranches')}>
             <button
               type="button"
+              className={creating ? `${css.menuToolButton} ${css.menuToolButtonOn}` : css.menuToolButton}
+              title={t('menuNewBranch')}
+              aria-label={t('menuNewBranch')}
+              aria-pressed={creating}
+              disabled={!canCreate}
+              onClick={() => {
+                // Opening the flyout cancels a staged confirm first: the
+                // flyout would otherwise stay anchored to a stale row beside
+                // the create panel. Closing drops the draft with it.
+                confirmRef.current?.onCancel()
+                const next = !creating
+                setCreating(next)
+                if (!next) setDraft('')
+              }}
+            >
+              <IconPlusOutline16 size={16} />
+            </button>
+            <button
+              type="button"
               className={css.menuToolButton}
               title={t('menuLocate')}
               aria-label={t('menuLocate')}
@@ -856,6 +982,51 @@ export function BranchMenu({
             </button>
             <button ref={flyConfirmRef} type="button" disabled={confirm.busy} onClick={confirm.onConfirm}>
               {confirm.confirmLabel}
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+      {creating && createPortal(
+        <div
+          ref={createFlyRef}
+          className={css.popCard}
+          style={createFlyPos ?? FLY_MEASURE}
+          role="dialog"
+          aria-label={t('createBranchTitle', { branch: currentBranch })}
+        >
+          <p className={css.popAsk}>{t('createBranchTitle', { branch: currentBranch })}</p>
+          <input
+            ref={holdCreateFocus}
+            className={css.menuCreate}
+            type="text"
+            value={draft}
+            placeholder={t('menuNewBranchPlaceholder')}
+            aria-label={t('menuNewBranchPlaceholder')}
+            aria-invalid={createIssue !== null && createIssue !== 'empty'}
+            spellCheck={false}
+            disabled={busy}
+            onChange={event => { setDraft(event.target.value) }}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitCreate()
+              }
+            }}
+          />
+          {showCreateHint && (
+            <p className={css.menuCreateHintBad} role="status">{createHint}</p>
+          )}
+          <div className={css.popActions}>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setCreating(false); setDraft('') }}
+            >
+              {t('actionCancel')}
+            </button>
+            <button type="button" disabled={!createValid || busy} onClick={commitCreate}>
+              {busy ? t('createBranchBusy') : t('actionConfirm')}
             </button>
           </div>
         </div>,

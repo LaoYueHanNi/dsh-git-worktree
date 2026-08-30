@@ -42,3 +42,17 @@ export declare function splitRemoteBranch(branch: string): {
  * @returns true when the value names an absolute path.
  */
 export declare function isAbsoluteConfigPath(value: string): boolean;
+/** Why a user-typed NEW branch name is not acceptable yet (null = fine). */
+export type BranchNameIssue = 'empty' | 'leadingDash' | 'illegal';
+/**
+ * Pre-flight check of a user-typed NEW branch name against git's ref-name
+ * rules (git check-ref-format's reject list, the subset typing can hit):
+ * non-empty; no leading `-` (git would parse it as a flag); no space, `~^:?*[\`
+ * or control character; no `..`, `@{`, `//`, leading/trailing `/`; no component
+ * starting with `.` or ending with `.lock`; no trailing `.`; not the lone `@`.
+ * `git switch -c` stays the authority — a miss here surfaces through the
+ * error envelope — this only feeds immediate form feedback.
+ * @param name - raw draft text (NOT trimmed: a space is a real issue).
+ * @returns the issue kind, or null when the name is acceptable.
+ */
+export declare function branchNameIssue(name: string): BranchNameIssue | null;

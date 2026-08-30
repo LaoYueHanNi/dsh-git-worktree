@@ -21,6 +21,12 @@
  * current branch stages the same cutout confirm. Dismissing the dialog and
  * sending the message anyway means the user knowingly stays in the current
  * directory — no separate notice fires on send.
+ *
+ * In-place branch creation (the menu toolbar's plus, worktree mode off)
+ * opens the create flyout right of the branch card: type the name, press
+ * Create — the new branch is cut from the session directory's current
+ * checkout and checked out there in one stroke, the worktree-less sibling
+ * of the cutout flow. A failure toasts and leaves the flyout open.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -31,7 +37,7 @@ import {
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
-import { fetchStatus, requestSwitch, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { fetchStatus, requestCreateBranch, requestSwitch, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
@@ -327,6 +333,19 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     return undefined
   }), [cwd, refresh, runGuarded])
 
+  /** Create-branch flow: POST /branch (create from the current checkout and
+   * switch to it in place), then refetch the status — the menu closed by
+   * then, and the chip label must name the new branch. Fired directly by
+   * the menu's create flyout (no confirm kind): typing the name into the
+   * flyout and pressing Create is the intent. */
+  const doCreateBranch = useCallback((name: string) => runGuarded(async () => {
+    if (cwd === undefined) return 'no session directory'
+    const result = await requestCreateBranch(cwd, name)
+    if (!result.ok) return result.error
+    await refresh()
+    return undefined
+  }), [cwd, refresh, runGuarded])
+
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
    * branch), register the directory, hop sessions. */
   const doWorktree = useCallback((branch: string, cutout: boolean) => runGuarded(async () => {
@@ -442,6 +461,9 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         rows={rows}
         currentBranch={facts.currentBranch}
         confirm={confirmBundle}
+        canCreate={!worktreeMode}
+        busy={busy}
+        onCreate={(name) => { void doCreateBranch(name) }}
         onSelect={(branch) => {
           // In worktree mode re-selecting the CURRENT branch stages the
           // cut-out confirm; without the mode it is a plain close. Any
