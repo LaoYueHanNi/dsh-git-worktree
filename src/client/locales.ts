@@ -19,6 +19,7 @@ export type GitWorktreeKey =
   | 'menuNewBranchBad'
   | 'menuNewBranchExists'
   | 'menuFetch'
+  | 'fetchDone'
   | 'switchAsk'
   | 'switchBusy'
   | 'worktreeAskNew'
@@ -60,7 +61,8 @@ export const en: Record<GitWorktreeKey, string> = {
   menuNewBranchPlaceholder: 'New branch name',
   menuNewBranchBad: 'Git will not accept this name',
   menuNewBranchExists: 'A branch with this name already exists',
-  menuFetch: 'Sync remote branches (fetch --prune)',
+  menuFetch: 'Fetch',
+  fetchDone: 'Remote branches synced',
   switchAsk: 'Switch to {branch}?',
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
@@ -103,7 +105,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuNewBranchPlaceholder: '新分支名称',
   menuNewBranchBad: 'Git 不接受该名称',
   menuNewBranchExists: '同名分支已存在',
-  menuFetch: '同步远程分支（fetch --prune）',
+  menuFetch: '提取',
+  fetchDone: '远程分支已同步',
   switchAsk: '是否切到 {branch}？',
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',

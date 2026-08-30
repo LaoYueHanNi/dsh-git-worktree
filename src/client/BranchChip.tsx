@@ -350,7 +350,9 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
    * refetch the status. Deliberately NOT runGuarded: its success closes the
    * menu, while the whole point of a sync is watching the refreshed branch
    * list in place. Single-flight shares busyRef with the other actions, so
-   * a sync and a confirm action can never interleave. */
+   * a sync and a confirm action can never interleave. A network fetch has
+   * NO visible side effect when the remote moved not — the spinning tool
+   * (menu side) and the done toast here ARE the feedback. */
   const doFetch = useCallback(async () => {
     if (busyRef.current) return
     busyRef.current = true
@@ -368,7 +370,8 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
       return
     }
     await refresh()
-  }, [cwd, refresh, showError])
+    setToast({ seq: Date.now(), text: t('fetchDone') })
+  }, [cwd, refresh, showError, t])
 
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
    * branch), register the directory, hop sessions. */

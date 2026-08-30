@@ -290,6 +290,23 @@
   cursor: default;
 }
 
+/* The sync tool while its fetch runs: the refresh glyph spins so the click
+ * visibly landed, and the button keeps full opacity — the usual disabled
+ * dim would read as "broken" for an in-flight network operation. */
+.menuToolButtonFetching svg {
+  animation: menuToolSpin 900ms linear infinite;
+}
+
+.menuToolButtonFetching:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+@keyframes menuToolSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* The main column: heading + scrollable rows + pinned search. */
 .menuMain {
   box-sizing: border-box;

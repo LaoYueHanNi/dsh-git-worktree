@@ -68,7 +68,6 @@ import {
   IconChevronUpOutline14,
   IconGoalOutline16,
   IconPlusOutline16,
-  IconRefreshOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { branchNameIssue } from '../normalize.ts'
@@ -129,6 +128,36 @@ export interface BranchMenuProps {
   onClose: () => void
   /** Bound locale translate (placeholder, empty state, heading, toolbar). */
   t: PropsLocale<'git-worktree'>['t']
+}
+
+/**
+ * The fetch glyph in IDEA's posture: a DASHED diagonal running from the
+ * top-right down to a bottom-left arrowhead. Dashed because a fetch moves
+ * only metadata (remote-tracking refs), never working-tree content — the
+ * same visual language as IDEA's synchronize-remote-branches tool. The base
+ * library has no such glyph (refresh/download read as data transfer), so it
+ * is drawn here, local to the menu; the sync spin animation targets `svg`
+ * descendants of the tool button and applies to it unchanged.
+ */
+function FetchGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M13 3 L5.9 10.1"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeDasharray="2.4 1.6"
+      />
+      <path
+        d="M5 5.9 V11 H10.1"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 /** Viewport edge clearance, mirroring the base Menu portal margin. */
@@ -930,17 +959,7 @@ export function BranchMenu({
             </button>
             <button
               type="button"
-              className={css.menuToolButton}
-              title={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
-              aria-label={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
-              disabled={folderPaths.length === 0}
-              onClick={toggleAll}
-            >
-              {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
-            </button>
-            <button
-              type="button"
-              className={css.menuToolButton}
+              className={fetchBusy ? `${css.menuToolButton} ${css.menuToolButtonFetching}` : css.menuToolButton}
               title={t('menuFetch')}
               aria-label={t('menuFetch')}
               disabled={fetchBusy}
@@ -952,7 +971,17 @@ export function BranchMenu({
                 onFetch()
               }}
             >
-              <IconRefreshOutline16 size={16} />
+              <FetchGlyph />
+            </button>
+            <button
+              type="button"
+              className={css.menuToolButton}
+              title={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
+              aria-label={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
+              disabled={folderPaths.length === 0}
+              onClick={toggleAll}
+            >
+              {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
             </button>
           </div>
           <div className={css.menuMain}>
