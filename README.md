@@ -10,6 +10,16 @@ A dsh plugin for simple branch & worktree management in the Web UI. The composer
 
 Repo: <https://github.com/LaoYueHanNi/dsh-git-worktree>
 
+> [!IMPORTANT]
+> **Upgrading from a GitHub install of 0.3.2 or earlier?** Since 0.4.0 the plugin is distributed on npm as `@laoyuehanni/dsh-git-worktree` (the unscoped name was already taken on the registry). A legacy `github:` install **cannot be upgraded with `update`** — the package was renamed, and an in-place update leaves the plugin failing to load. From 0.4.0 on, remove the old package name first, then install again:
+>
+> ```sh
+> dsh plugin --profile web remove dsh-git-worktree
+> dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
+> ```
+>
+> Worktree folders under `~/.dsh/gitworktree/` and the plugin's settings are untouched by the migration — everything carries over.
+
 ## Features
 
 - **IDEA-style branch picker**: the branch menu treats `/` as a folder hierarchy — collapsible folders, last-segment labels, the checked-out branch's chain opens by default and is centered on open. Single click selects a row; double-click or Enter opens the right-side confirm flyout. The left tool strip offers **locate current branch** and **expand/collapse all**; the bottom search keeps the matching branches' ancestor folders and highlights the hit substring. Clipped labels expose the full name on hover.
@@ -19,13 +29,13 @@ Repo: <https://github.com/LaoYueHanNi/dsh-git-worktree>
 
 ## Install
 
-### From GitHub (recommended)
+### From npm
 
 ```sh
-dsh plugin --profile web add github:LaoYueHanNi/dsh-git-worktree
+dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 ```
 
-> The package declares `dsh.bundle`, so `add` wires the plugin into the profile's layer stack automatically — no config editing needed. The built `lib/` ships in the repo (there is no `prepare` script), so git installs work out of the box without any build allowlist. Requires the `web` profile (`dsh web`).
+> The package declares `dsh.bundle`, so `add` wires the plugin into the profile's layer stack automatically — no config editing needed. The compiled `lib/` ships in the npm tarball, so installs work out of the box without any build step. Requires the `web` profile (`dsh web`).
 
 ### From a local directory (development)
 
@@ -38,13 +48,13 @@ dsh plugin --profile web add link:D:/Code/dsh-worktree
 ## Update
 
 ```sh
-dsh plugin --profile web update dsh-git-worktree
+dsh plugin --profile web update @laoyuehanni/dsh-git-worktree
 ```
 
 ## Remove
 
 ```sh
-dsh plugin --profile web remove dsh-git-worktree
+dsh plugin --profile web remove @laoyuehanni/dsh-git-worktree
 ```
 
 The plugin is removed from the profile and stops loading. Worktree folders under `~/.dsh/gitworktree/` are kept; the migrated legacy settings file (`settings.json.migrated`) can be deleted manually if unwanted — the plugin's own settings live in the dsh settings document.
@@ -60,7 +70,7 @@ npm test                # vitest (60 tests)
 node scripts/smoke.mjs  # real-git smoke over the built lib
 ```
 
-> **No `prepare` script — by design.** The compiled `lib/` output is committed to the repo. pnpm ≥ 10 refuses to run build scripts of git-hosted dependencies unless they are allowlisted (`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`), so a `prepare` script would break the zero-config `github:` install for every user. Shipping prebuilt output instead keeps `dsh plugin add github:LaoYueHanNi/dsh-git-worktree` working out of the box. **After changing anything under `src/`, always rebuild and commit the updated `lib/`**, or installs will get stale output:
+> **No `prepare` script — by design.** The compiled `lib/` output is committed to the repo and ships in the npm tarball. pnpm ≥ 10 refuses to run dependency build scripts unless they are allowlisted, so a `prepare` script would surface as a skipped or failed install step for pnpm users. Shipping prebuilt output instead keeps `dsh plugin add @laoyuehanni/dsh-git-worktree` working out of the box. **After changing anything under `src/`, always rebuild and commit the updated `lib/`** (and release a new version), or installs will get stale output:
 
 ```sh
 npm run build && npm run build:client

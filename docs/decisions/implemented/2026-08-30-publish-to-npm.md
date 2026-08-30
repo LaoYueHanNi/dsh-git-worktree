@@ -18,5 +18,5 @@ Status: implemented
 
 ## Consequences
 
-- 代价：包名变化要求 README 与既有用户改用新安装名。经 token-usage 项目实测，旧 `github:` 安装（依赖键 `dsh-git-worktree`）用 `update` 无法迁移：pnpm 只在原 git 渠道重新解析，且按仓库现名装出 scoped 包后宿主按 patch 的 import 说明符（`@laoyuehanni/dsh-git-worktree`）在 `node_modules` 下解析不到对应目录，启动报 `ERR_MODULE_NOT_FOUND`；按新名 `update` 则因依赖键不存在而静默无效。故 README 顶部放置重装指引（先 `remove dsh-git-worktree` 再 `add` npm 包，`~/.dsh/gitworktree/` 数据不受影响）；每次发布必须在发布机跑完整 typecheck+test+双构建（耗时换安全）；publish 者必须持有 npm 上 laoyuehanni scope 的权限；维护者本机 `web` profile 亦为 github 直装，发布后需按同一步骤迁移（同时充当真实环境验证）。
+- 代价：包名变化要求 README 与既有用户改用新安装名。经 token-usage 项目实测，旧 `github:` 安装（依赖键 `dsh-git-worktree`）用 `update` 无法迁移：pnpm 只在原 git 渠道重新解析，且按仓库现名装出 scoped 包后宿主按 patch 的 import 说明符（`@laoyuehanni/dsh-git-worktree`）在 `node_modules` 下解析不到对应目录，启动报 `ERR_MODULE_NOT_FOUND`；按新名 `update` 则因依赖键不存在而静默无效。故 README 顶部放置重装指引（先 `remove dsh-git-worktree` 再 `add` npm 包，`~/.dsh/gitworktree/` 数据不受影响）；每次发布必须在发布机跑完整 typecheck+test+双构建（耗时换安全）；publish 者必须持有 npm 上 laoyuehanni scope 的权限；维护者本机 `web` profile 亦为 github 直装，发布后需按同一步骤迁移（同时充当真实环境验证）——0.4.0 发布当日已完成：`web` profile 走 remove → add 迁到 npm 包，`web-local` 重挂 link，重启 `dsh web` 后页面与分支 chip 渲染正常，npm 渠道验证通过。
 - 换来：获得 registry 的语义化版本分发与一行安装；公共包规范（许可证/元数据/入口类型声明）全部齐备；prepublishOnly 兜底使"忘构建就发包"这类事故结构性消失；PLUGIN_ID 派生化使未来改名或分叉维护不再有横幅失配死角。

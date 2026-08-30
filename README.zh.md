@@ -10,6 +10,16 @@
 
 仓库：<https://github.com/LaoYueHanNi/dsh-git-worktree>
 
+> [!IMPORTANT]
+> **从 0.3.2 及更早的 GitHub 直装升级？** 0.4.0 起插件发布到 npm，包名变更为 `@laoyuehanni/dsh-git-worktree`（原裸名在 npm 上已被第三方占用）。旧的 `github:` 安装**无法通过 `update` 升级**——包名已变，原地 update 会导致插件加载失败。从 0.4.0 开始使用，需先移除旧包名，再重新安装：
+>
+> ```sh
+> dsh plugin --profile web remove dsh-git-worktree
+> dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
+> ```
+>
+> 迁移不影响数据：`~/.dsh/gitworktree/` 下的 worktree 目录与插件设置完整保留。
+
 ## 功能
 
 - **IDEA 风格分支选择器**：分支菜单把 `/` 视为文件夹层级 —— 可折叠文件夹、末段标签，当前分支所在链路默认展开并居中。单击选中（蓝底），双击或 Enter 弹出右侧确认弹层。左侧工具栏提供**定位当前分支**与**全部展开/折叠**；底部搜索保留匹配分支的祖先文件夹并高亮命中字符；超长标签悬停显示全名。
@@ -19,13 +29,13 @@
 
 ## 安装
 
-### 从 GitHub 安装（推荐）
+### 从 npm 安装
 
 ```sh
-dsh plugin --profile web add github:LaoYueHanNi/dsh-git-worktree
+dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 ```
 
-> 包声明了 `dsh.bundle`，`add` 会自动把插件挂进 profile 的层栈，无需手动改配置。构建产物 `lib/` 随仓库提交（没有 `prepare` 脚本），git 安装开箱即用，无需任何构建白名单。需要 `web` profile（`dsh web`）。
+> 包声明了 `dsh.bundle`，`add` 会自动把插件挂进 profile 的层栈，无需手动改配置。编译产物 `lib/` 随 npm 包分发，安装开箱即用，无需任何构建步骤。需要 `web` profile（`dsh web`）。
 
 ### 从本地目录安装（开发调试用）
 
@@ -38,13 +48,13 @@ dsh plugin --profile web add link:D:/Code/dsh-worktree
 ## 更新
 
 ```sh
-dsh plugin --profile web update dsh-git-worktree
+dsh plugin --profile web update @laoyuehanni/dsh-git-worktree
 ```
 
 ## 移除
 
 ```sh
-dsh plugin --profile web remove dsh-git-worktree
+dsh plugin --profile web remove @laoyuehanni/dsh-git-worktree
 ```
 
 插件会从 profile 移除并停止加载。`~/.dsh/gitworktree/` 下的 worktree 目录会保留；已迁移的旧设置文件（`settings.json.migrated`）如不需要可手动删除，插件自身的设置项存于 dsh 设置文档。
@@ -60,7 +70,7 @@ npm test                # vitest（60 项测试）
 node scripts/smoke.mjs  # 基于构建产物的真实 git 冒烟
 ```
 
-> **刻意不设 `prepare` 脚本。** 编译产物 `lib/` 已提交进仓库。pnpm ≥ 10 默认拒绝执行 git-hosted 依赖的构建脚本，除非加入白名单（报错 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`），因此若保留 `prepare`，每个用户用 `github:` 安装都会失败。改为随仓库分发预构建产物后，`dsh plugin add github:LaoYueHanNi/dsh-git-worktree` 才能零配置开箱即用。**改动 `src/` 下的任何文件后，务必重新构建并提交更新后的 `lib/`**，否则别人安装到的是旧产物：
+> **刻意不设 `prepare` 脚本。** 编译产物 `lib/` 已提交进仓库，并随 npm 包分发。pnpm ≥ 10 默认拒绝执行依赖的构建脚本，除非加入白名单，因此若保留 `prepare`，pnpm 用户的安装会出现被跳过或失败的步骤。改为分发预构建产物后，`dsh plugin add @laoyuehanni/dsh-git-worktree` 才能开箱即用。**改动 `src/` 下的任何文件后，务必重新构建并提交更新后的 `lib/`**（并发布新版本），否则别人安装到的是旧产物：
 
 ```sh
 npm run build && npm run build:client
