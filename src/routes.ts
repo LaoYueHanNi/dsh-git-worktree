@@ -54,6 +54,13 @@ function gitFailure(error: GitError): RouteOutcome {
     || error.stderr.includes('Not possible to fast-forward')
     || error.stderr.includes('no tracking information')
     || error.stderr.includes("unknown revision")
+    // A display name that resolves to no branch at all (a stale row the
+    // menu no longer shows) is caller-side state, not a host fault. The
+    // failure is the SYNTHETIC GitError from git.ts (`branch "x" not
+    // found`), so match its `branch "` shape — git's own "not found"
+    // texts (a remote that vanished mid-fetch: `Repository '...' not
+    // found`) carry no quoted branch and stay 500 host faults.
+    || error.stderr.includes('branch "')
   return fail(usage ? 400 : 500, error.message)
 }
 

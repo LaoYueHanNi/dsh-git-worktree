@@ -138,11 +138,12 @@
 /* Confirm flyout: the second-level panel opening right of the branch
  * card (the base Menu's submenu posture: r12, inverted hairline,
  * shadow-lv3, --dsw-specific-menu). Width is content-driven — it follows
- * the branch name in the ask line — floored at 168px (the Cancel/Confirm
- * pair plus padding: short branch names must not squeeze the buttons into
- * wrapping "切换中…" mid-word) and capped at 400px; BranchMenu also clamps
- * it inline to the room right of the card. Beyond the cap the ask wraps.
- * border-box so every width arm includes the card chrome. */
+ * the longest line (for remote picks that is the subject line's branch
+ * name) — floored at 168px (the Cancel/Confirm pair plus padding: short
+ * branch names must not squeeze the buttons into wrapping "切换中…"
+ * mid-word) and capped at 400px; BranchMenu also clamps it inline to the
+ * room right of the card. Beyond the cap the lines wrap. border-box so
+ * every width arm includes the card chrome. */
 .popCard {
   box-sizing: border-box;
   position: fixed;
@@ -168,6 +169,20 @@
   color: inherit;
   /* Branch names are long unbroken tokens — plain wrapping would let them
    * overflow the capped card instead of breaking. */
+  overflow-wrap: anywhere;
+}
+
+/* Remote confirm's name line: the branch itself, weight 500 like the leaf
+ * rows — the subject the ask line refers to ("该远程分支"). A dedicated
+ * line keeps the long unbroken token away from the sentence, so wraps
+ * happen inside the name instead of shredding the Chinese around it. */
+.popSubject {
+  margin: 0;
+  padding: 0 8px 2px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: inherit;
   overflow-wrap: anywhere;
 }
 
@@ -366,6 +381,19 @@
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
+/* Locked rows (a linked-worktree session answers every non-current pick
+ * with the main-checkout toast): dimmed with a default cursor, but KEEP
+ * the click path alive — no disabled attribute, the double-click is the
+ * toast's stage. Hover stays quiet: nothing is on offer here. */
+.menuRowLocked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menuRowLocked:hover {
+  background: transparent;
+}
+
 /* The checked-out branch: a persistent tint a step above the resting rows
  * so it reads as "you are here" the moment the list scrolls it into view
  * (BranchMenu centers it on open) — the trailing check alone is easy to
@@ -383,17 +411,25 @@
   background: color-mix(in srgb, var(--dsw-alias-label-primary-bluish, #4186f0) 18%, transparent);
 }
 
-/* Occupied-worktree branches: dimmed, not clickable. */
-.menuRow:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
 .menuRowLabel {
   flex: 1 1 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Upstream divergence arrows (↑N/↓N) trailing a local branch row, before
+ * the HEAD check: the count badge tone at a smaller size so a busy list
+ * still reads the name first. Plain text arrows — no base-set icon pairs
+ * a direction with a count. tabular-nums keeps ↑10 from nudging neighbors
+ * as the digits tick. */
+.menuRowArrow {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 20px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, currentColor 55%, transparent);
 }
 
 /* Search hit highlight (IDEA): the matched substring gets a warm tint
@@ -428,6 +464,16 @@
 
 .menuGroup:hover {
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* The two top-level section headers (local/remote branches) step ABOVE the
+ * folder headers they contain: primary label tone like the leaf rows plus
+ * a heavier weight, so the nav hierarchy reads group > row > folder — the
+ * folder headers keep the secondary tone that alone would leave the
+ * sections as the faintest (and most important) rows on the list. */
+.menuGroupTop {
+  color: inherit;
+  font-weight: 600;
 }
 
 .menuGroupLabel {

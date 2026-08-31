@@ -44,7 +44,7 @@ describe('probeRepo', () => {
       { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
       { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
       { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
-      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\nfeat-x\n' } },
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main[ahead 1, behind 2]\nfeat-x\n' } },
       { args: ['for-each-ref', 'refs/remotes'], out: { stdout: 'origin/HEAD\norigin/main\norigin/dev\nupstream/dev\n' } },
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
     ])
@@ -52,10 +52,16 @@ describe('probeRepo', () => {
     expect(facts).toBeDefined()
     expect(facts?.repoName).toBe('repo')
     expect(facts?.currentBranch).toBe('main')
+    // Every remote's remote-only branches come through: `<remote>/HEAD` and
+    // branches with a local twin (origin/main) drop, the rest keep their
+    // remote prefix — origin and upstream side by side, no first-remote fold.
+    // Local rows carry their upstream track: main diverges, feat-x (no
+    // upstream) gets no counts.
     expect(facts?.branches).toEqual([
-      { name: 'main', kind: 'local' },
+      { name: 'main', kind: 'local', ahead: 1, behind: 2 },
       { name: 'feat-x', kind: 'local' },
       { name: 'origin/dev', kind: 'remote' },
+      { name: 'upstream/dev', kind: 'remote' },
     ])
     expect(facts?.worktrees).toEqual([
       { path: p('/repo'), branch: 'main', main: true },
@@ -97,6 +103,44 @@ describe('probeRepo', () => {
     const facts = await probeRepo(exec, '/repo', () => true)
     expect(facts?.currentBranch).toBe('HEAD')
     expect(facts?.worktrees[1]).toEqual({ path: p('/wt'), branch: undefined, main: false })
+  })
+
+  it('drops gone and in-sync upstream tracks, keeps behind-only counts', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
+      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+      // `[gone]` (upstream deleted server-side) carries no counts and must
+      // not surface as NaN-ish garbage; an in-sync branch has no bracket.
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main[behind 3]\ndev[gone]\nsync\n' } },
+      { args: ['for-each-ref', 'refs/remotes'], out: { code: 0, stdout: '' } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+    ])
+    const facts = await probeRepo(exec, '/repo', () => true)
+    expect(facts?.branches).toEqual([
+      { name: 'main', kind: 'local', behind: 3 },
+      { name: 'dev', kind: 'local' },
+      { name: 'sync', kind: 'local' },
+    ])
+  })
+
+  it('skips the bare leftover ref under refs/remotes (no slash below it)', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
+      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\n' } },
+      // `refs/remotes/origin` (shortname `origin`, no `/`) is a leftover
+      // ref, not a remote branch — git branch -r hides it, so must the list.
+      // origin/main also hides: its local twin `main` exists.
+      { args: ['for-each-ref', 'refs/remotes'], out: { stdout: 'origin\norigin/main\norigin/dev\n' } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+    ])
+    const facts = await probeRepo(exec, '/repo', () => true)
+    expect(facts?.branches).toEqual([
+      { name: 'main', kind: 'local' },
+      { name: 'origin/dev', kind: 'remote' },
+    ])
   })
 })
 

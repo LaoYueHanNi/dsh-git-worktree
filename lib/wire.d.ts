@@ -23,6 +23,11 @@ export interface BranchEntry {
     /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
     name: string;
     kind: 'local' | 'remote';
+    /** Commits the local branch is AHEAD of its upstream (local rows with an
+     * upstream only; absent = no upstream or in sync). */
+    ahead?: number;
+    /** Commits the local branch is BEHIND its upstream (same conditions). */
+    behind?: number;
 }
 /** One existing worktree of the repository. */
 export interface WorktreeEntry {
@@ -44,7 +49,8 @@ export type RepoStatus = {
     repoRoot: string;
     /** Branch checked out by the directory the client asked about. */
     currentBranch: string;
-    /** Local branches plus remote branches without a same-named local one. */
+    /** Local branches plus every remote's remote-only branches (those
+     * without a same-named local twin; `<remote>/HEAD` dropped). */
     branches: BranchEntry[];
     /** Every worktree of the repository, main first (git order). */
     worktrees: WorktreeEntry[];

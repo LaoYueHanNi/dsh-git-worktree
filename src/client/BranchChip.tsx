@@ -1,15 +1,19 @@
 /**
  * BranchChipDock: the composer tool-row entry (conversation.input.left, right
  * of the mode chips) for sessions inside a git repository. Blank sessions
- * get the full segmented control — branch picker plus the worktree
- * isolation toggle — because that is the moment to choose the environment
- * for the conversation. Once the session starts, the worktree toggle is
- * withdrawn: a started session may still switch branches in place (a
- * switch inside a linked worktree checks out within that worktree —
- * probeRepo roots at the session directory's toplevel, never the main
- * checkout), but its directory is fixed. Non-git directories and load
- * failures render nothing. The confirm dialogs and the error toast live
- * here too.
+ * OF THE MAIN checkout get the full segmented control — branch picker plus
+ * the worktree isolation toggle — because that is the moment to choose the
+ * environment for the conversation, and starting a worktree is a main-repo
+ * decision. Once the session starts, the worktree toggle is withdrawn (its
+ * directory is fixed). A session inside a LINKED worktree scopes the whole
+ * entry down: blank, the menu lists every branch for READING but every
+ * pick but the current branch answers with the main-checkout hint (and
+ * neither the toggle nor the in-place new-branch tool exists there);
+ * started, the menu shows nothing but the session's own branch — fetch and
+ * update-current stay, since neither moves the checkout (probeRepo still
+ * roots at the session directory's toplevel, never the main checkout).
+ * Non-git directories and load failures render nothing. The confirm
+ * dialogs and the error toast live here too.
  *
  * Checking the worktree toggle pops the cutout confirm dialog right away:
  * confirming it cuts a NEW branch (`<current>-wt`, suffixes past taken
@@ -27,6 +31,19 @@
  * Create — the new branch is cut from the session directory's current
  * checkout and checked out there in one stroke, the worktree-less sibling
  * of the cutout flow. A failure toasts and leaves the flyout open.
+ *
+ * Remote branches join the picker under their own menu group: picking one
+ * stages the remote-twin confirm — the switch creates the local tracking
+ * branch in place (git's dwim), the worktree pick creates the twin inside
+ * its fresh worktree. Both rides go through the existing /switch and
+ * /worktree routes, which already resolve `<remote>/name` display names.
+ *
+ * Branches held by linked worktrees get their own 「工作树」 group (blank
+ * sessions only): they have left the local group — git refuses to check
+ * them out twice, so a local-group row would be a dead end — and a
+ * double-click hops the session straight into that worktree directory
+ * (adoptWorktree; no git action, no confirm). A started session's
+ * directory is fixed, so the group only exists while blank.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -77,6 +94,11 @@ interface StatusState {
 interface ConfirmState {
   kind: 'switch' | 'worktree' | 'worktree-cutout'
   branch: string
+  /** True when `branch` names a REMOTE branch (an `origin/feat-x` row):
+   * the switch confirm creates the local tracking twin, the worktree
+   * confirm creates the twin plus its worktree — the ask lines spell that
+   * out instead of reading as a plain in-place switch. */
+  remote?: boolean
   /** Editable cutout name (kind `worktree-cutout` only): pre-filled with
    * the first free `<branch>-wt` name, editable before confirming. */
   draft?: string
@@ -142,26 +164,45 @@ function displayBranch(branch: string): string {
 }
 
 /**
- * Build the branch rows for the picker: local branches only (remote
- * branches are not offered). A branch already checked out by a live
- * worktree is disabled while the worktree toggle is off (git refuses such
- * a switch); with the toggle on it is the reuse path, so it stays
- * selectable. The selected row's trailing check is BranchMenu's own
- * affordance — no leading icon.
+ * Build the branch rows for the picker in three kinds: LOCAL branches not
+ * held by a linked worktree, REMOTE branches, and one WORKTREE row per
+ * linked worktree. A branch held by a worktree LEAVES the local group —
+ * git refuses to check it out twice, so the row would be a dead end; the
+ * worktree group is the way INTO it instead (a direct session hop, see
+ * the owner's onAdoptWorktree). The main worktree and detached worktrees
+ * don't come along: the main checkout is home, not a hop target, and a
+ * detached worktree has no branch name to offer.
+ *
+ * Inside a linked-worktree session every row but the current branch is
+ * LOCKED (dimmed, still clickable): a pick reaches the owner, which
+ * answers with the main-checkout hint — the dimming reads as "not usable
+ * here" at a glance while the click keeps its explanation.
  */
 function buildBranchRows(
   branches: readonly BranchEntry[],
   worktrees: readonly WorktreeEntry[],
   currentBranch: string,
-  worktreeMode: boolean,
+  inLinkedWorktree: boolean,
 ): BranchRow[] {
-  const occupied = new Set(worktrees.flatMap(w => w.branch === undefined ? [] : [w.branch]))
-  return branches
-    .filter(b => b.kind === 'local')
-    .map(branch => ({
-      name: branch.name,
-      disabled: branch.name !== currentBranch && !worktreeMode && occupied.has(localBranchName(branch.name)),
-    }))
+  const held = new Set(worktrees.flatMap(w => w.main || w.branch === undefined ? [] : [w.branch]))
+  const lock = (name: string): boolean => inLinkedWorktree && name !== currentBranch
+  return [
+    ...branches.filter(b => b.kind === 'local' && !held.has(b.name)).map(b => ({
+      name: b.name,
+      kind: 'local' as const,
+      ahead: b.ahead,
+      behind: b.behind,
+      locked: lock(b.name),
+    })),
+    ...branches.filter(b => b.kind === 'remote').map(b => ({
+      name: b.name,
+      kind: 'remote' as const,
+      locked: lock(b.name),
+    })),
+    ...worktrees.flatMap(w => w.main || w.branch === undefined
+      ? []
+      : [{ name: w.branch, kind: 'worktree' as const, path: w.path, locked: lock(w.branch) }]),
+  ]
 }
 
 /** The standalone confirm dialog shown while the branch menu is closed. */
@@ -170,6 +211,9 @@ interface ChipConfirmProps {
   anchorRef: React.RefObject<HTMLElement | null>
   /** Ask line (already localized). */
   ask: string
+  /** The branch the ask refers to, on its own weight-500 line (remote picks
+   * only — the ask line says "该远程分支" and this names it). */
+  subject?: string
   /** Confirm-button label (progress text while busy). */
   confirmLabel: string
   /** Cancel-button label. */
@@ -203,7 +247,7 @@ interface ChipConfirmProps {
  * confirm button does so Enter commits.
  */
 function ChipConfirm({
-  anchorRef, ask, confirmLabel, cancelLabel, busy,
+  anchorRef, ask, subject, confirmLabel, cancelLabel, busy,
   draft, onDraftChange, draftPlaceholder, draftInvalid, draftHint,
   onConfirm, onCancel,
 }: ChipConfirmProps) {
@@ -265,6 +309,7 @@ function ChipConfirm({
   return createPortal(
     <div ref={popRef} className={css.popCard} style={pos ?? POP_MEASURE} role="dialog" aria-label={ask}>
       <p className={css.popAsk}>{ask}</p>
+      {subject !== undefined && <p className={css.popSubject}>{subject}</p>}
       {onDraftChange !== undefined && (
         <>
           <input
@@ -471,6 +516,25 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     })
   }, [cwd, refresh, showError, t])
 
+  /** Worktree-group flow: hop the session into the EXISTING worktree
+   * directory. No git action, no confirm — the double-click IS the hop
+   * (a directory jump is reversible and touches nothing), and the owner's
+   * adoptWorktree registers the folder and opens a blank session there. */
+  const doAdoptWorktree = useCallback((path: string): void => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    adoptWorktree(path)
+      .then(() => { setMenuOpen(false) })
+      .catch((cause: unknown) => {
+        showError(cause instanceof Error ? cause.message : String(cause))
+      })
+      .finally(() => {
+        busyRef.current = false
+        setBusy(false)
+      })
+  }, [adoptWorktree, showError])
+
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
    * branch under an explicit name), register the directory, hop sessions. */
   const doWorktree = useCallback((branch: string, cutout: boolean, name?: string) => runGuarded(async () => {
@@ -488,9 +552,34 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
   }), [adoptWorktree, cwd, runGuarded])
 
   const facts = repo.facts
-  const rows = useMemo(
-    () => facts === null ? [] : buildBranchRows(facts.branches, facts.worktrees, facts.currentBranch, worktreeMode),
-    [facts, worktreeMode],
+  // The session sits in a linked worktree when its directory's toplevel is
+  // NOT the main worktree entry — the trigger for the scoped menu (see
+  // below) and for hiding the worktree toggle.
+  const inLinkedWorktree = facts !== null
+    && facts.worktrees.find(w => w.main)?.path !== facts.repoRoot
+  const rows = useMemo(() => {
+    if (facts === null) return []
+    // A STARTED linked-worktree session shows nothing but its own branch:
+    // the menu there is a position marker plus the fetch/update tools, not
+    // a picker — every other branch lives behind the main checkout. A BLANK
+    // one shows the full list for reading; its picks are answered with the
+    // main-checkout hint (see onSelect).
+    if (inLinkedWorktree && !session.blank) {
+      const current = facts.branches.find(b => b.kind === 'local' && b.name === facts.currentBranch)
+      return current === undefined
+        ? []
+        : [{ name: current.name, kind: 'local' as const, ahead: current.ahead, behind: current.behind }]
+    }
+    return buildBranchRows(facts.branches, facts.worktrees, facts.currentBranch, inLinkedWorktree)
+  }, [facts, inLinkedWorktree, session.blank])
+  // Every already-taken LOCAL name feeds the new-branch namespaces (cutout
+  // prefill and the duplicate checks): local rows and worktree rows alike
+  // (a worktree row IS a checked-out branch), while a remote row is no
+  // claim at all — a remote branch with a same-named local twin never
+  // reaches the client (the host hides those rows).
+  const localNames = useMemo(
+    () => rows.filter(row => row.kind !== 'remote').map(row => row.name),
+    [rows],
   )
 
   // Non-repo and still-loading directories render nothing at all.
@@ -503,7 +592,7 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
   const isCutout = confirm?.kind === 'worktree-cutout'
   const cutoutDraft = isCutout ? confirm.draft ?? '' : ''
   const cutoutIssue = isCutout ? branchNameIssue(cutoutDraft) : null
-  const cutoutDuplicate = isCutout && cutoutIssue === null && rows.some(row => row.name === cutoutDraft)
+  const cutoutDuplicate = isCutout && cutoutIssue === null && localNames.includes(cutoutDraft)
   const cutoutValid = cutoutIssue === null && !cutoutDuplicate
   const cutoutHint = cutoutDuplicate
     ? t('menuNewBranchExists')
@@ -517,13 +606,21 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
     : facts.worktrees.find(w => w.branch === confirmLocalName)
 
   /** One confirm bundle shared by the menu flyout and the standalone
-   * dialog (whichever is showing). */
+   * dialog (whichever is showing). Remote picks keep the ask line SHORT (a
+   * wrapping sentence with long branch names breaks badly) and name the
+   * branch on its own weight-500 line — the dwim/worktree consequences are
+   * git's default behavior, not worth a third line. */
   const confirmBundle = confirm === null ? null : {
     ask: confirm.kind === 'worktree-cutout'
       ? t('worktreeAskCutOut', { branch: confirmLocalName })
       : confirm.kind === 'worktree'
-        ? t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName })
-        : t('switchAsk', { branch: confirm.branch }),
+        ? confirm.remote === true
+          ? t('worktreeAskRemote')
+          : t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName })
+        : confirm.remote === true
+          ? t('switchAskRemote')
+          : t('switchAsk', { branch: confirm.branch }),
+    subject: confirm.remote === true ? confirm.branch : undefined,
     confirmLabel: busy
       ? (confirm.kind === 'worktree' || confirm.kind === 'worktree-cutout' ? t('worktreeBusy') : t('switchBusy'))
       : t('actionConfirm'),
@@ -562,10 +659,12 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
           <IconBranchOutline16 size={12} />
           <span className={css.branch}>{displayBranch(facts.currentBranch)}</span>
         </button>
-        {/* The worktree toggle exists only for blank sessions: the started
-         * session's directory is fixed, so its chip degrades to the plain
-         * branch picker (the dock's only child then rounds all corners). */}
-        {session.blank && (
+        {/* The worktree toggle exists only for blank sessions OF THE MAIN
+         * checkout: starting a worktree is a main-repo decision — a session
+         * already inside a linked worktree gets neither the toggle nor the
+         * in-place new-branch tool (its directory identity is not ours to
+         * move). */}
+        {session.blank && !inLinkedWorktree && (
           <>
             <span className={css.divider} aria-hidden="true" />
             <button
@@ -584,7 +683,7 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
                   setConfirm({
                     kind: 'worktree-cutout',
                     branch: facts.currentBranch,
-                    draft: firstFreeCutoutName(localBranchName(facts.currentBranch), rows.map(row => row.name)),
+                    draft: firstFreeCutoutName(localBranchName(facts.currentBranch), localNames),
                   })
                   if (!busyRef.current) void refresh()
                 } else {
@@ -605,7 +704,8 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         rows={rows}
         currentBranch={facts.currentBranch}
         confirm={confirmBundle}
-        canCreate={!worktreeMode}
+        canCreate={!worktreeMode && !inLinkedWorktree}
+        canAdopt={session.blank}
         busy={busy}
         onCreate={(name) => { void doCreateBranch(name) }}
         onFetch={() => { void doFetch() }}
@@ -616,20 +716,39 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
           // In worktree mode re-selecting the CURRENT branch stages the
           // cut-out dialog (editable name); without the mode it is a plain
           // close. Any other pick stages the regular confirm flyout beside
-          // that row (menu stays open).
+          // that row (menu stays open) — except a WORKTREE row: the pick
+          // hops the session straight into that worktree directory, no
+          // confirm (the menu closes on success).
           if (branch === facts.currentBranch) {
             if (worktreeMode) {
               setConfirm({
                 kind: 'worktree-cutout',
                 branch,
-                draft: firstFreeCutoutName(localBranchName(branch), rows.map(row => row.name)),
+                draft: firstFreeCutoutName(localBranchName(branch), localNames),
               })
             } else {
               setMenuOpen(false)
             }
             return
           }
-          setConfirm({ kind: worktreeMode ? 'worktree' : 'switch', branch })
+          // A linked-worktree session stages NO branch action — not plain
+          // switches, not remote checkouts, not worktree hops. One hint
+          // sends every pick back to the main checkout, where the worktree
+          // toggle (and the whole action surface) lives.
+          if (inLinkedWorktree) {
+            setToast({ seq: Date.now(), text: t('mainRepoOnly') })
+            return
+          }
+          const row = rows.find(r => r.name === branch)
+          if (row?.kind === 'worktree' && row.path !== undefined) {
+            doAdoptWorktree(row.path)
+            return
+          }
+          // Remote rows carry the remote-twin wording into whichever confirm
+          // they stage (switch = tracking twin in place, worktree = twin in
+          // its own directory); local rows keep the plain asks.
+          const remote = row?.kind === 'remote'
+          setConfirm({ kind: worktreeMode ? 'worktree' : 'switch', branch, remote })
         }}
         onClose={() => { setMenuOpen(false) }}
         t={t}

@@ -31,6 +31,9 @@
  */
 import { chromium } from 'playwright-core'
 
+/** Attribute-selector escape for Node context (the CSS global is browser-only). */
+const esc = value => value.replace(/[\\"]/g, '\\$&')
+
 const port = process.argv[2] ?? '3080'
 const exe = `${process.env.LOCALAPPDATA}\\ms-playwright\\chromium-1200\\chrome-win64\\chrome.exe`
 const browser = await chromium.launch({ executablePath: exe })
@@ -75,7 +78,7 @@ ok('tree active (folder headers render)', groupCount >= 1, `groups=${groupCount}
 
 // ── Req 2: current branch visible on open ─────────────────────────────
 const chipTitle = (await chip.getAttribute('title')) ?? ''
-ok('current branch renderable without expanding', await card.locator(`button[data-branch="${CSS.escape(chipTitle)}"]`).count() === 1,
+ok('current branch renderable without expanding', await card.locator(`button[data-branch="${esc(chipTitle)}"]`).count() === 1,
   `branch=${chipTitle}`)
 const curAncestors = chipTitle.split('/').filter(s => s !== '').slice(0, -1)
 if (curAncestors.length > 0) {
@@ -171,7 +174,7 @@ if (await featureHdr0.getAttribute('aria-expanded') === 'false') {
   await featureHdr0.click()
   await page.waitForTimeout(300)
 }
-const headRow = card.locator(`button[data-branch="${CSS.escape(chipTitle)}"]`)
+const headRow = card.locator(`button[data-branch="${esc(chipTitle)}"]`)
 ok('HEAD row keeps its own tint next to a selection', await headRow.evaluate(b => b.className.includes('menuRowSelected')))
 // Enter stages the confirm flyout for the selected row.
 await someRow.press('Enter')
@@ -227,7 +230,7 @@ await page.screenshot({ path: 'scripts/verify-tree-2-tooltip.png' })
 
 // ── Req 8: double-click stages the flyout; on the CURRENT branch the
 // staged pick just closes the menu (never switches the repo HEAD) ──────
-await card.locator(`button[data-branch="${CSS.escape(chipTitle)}"]`).dblclick()
+await card.locator(`button[data-branch="${esc(chipTitle)}"]`).dblclick()
 await page.waitForTimeout(400)
 ok('double-click on current closes the menu', await card.count() === 0)
 

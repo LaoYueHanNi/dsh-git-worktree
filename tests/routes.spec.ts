@@ -138,10 +138,24 @@ describe('handleCreateWorktree', () => {
   it('maps a git failure to an error envelope', async () => {
     const calls = { ...REPO_CALLS } as Record<string, Partial<ExecResult>>
     calls['worktree add'] = { code: 128, stderr: 'fatal: invalid reference' }
-    const outcome = await handleCreateWorktree(deps({ exec: scripted(calls) }), { repoPath: '/repo', branch: 'dev' })
+    // The branch must exist locally AND hold no worktree for the failure to
+    // land IN `worktree add` (occupied branches take the reuse path, an
+    // unknown name is refused earlier inside resolveBranch).
+    calls['worktree list --porcelain'] = { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' }
+    const outcome = await handleCreateWorktree(deps({ exec: scripted(calls) }), { repoPath: '/repo', branch: 'feat/x' })
     expect(outcome.status).toBe(400)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('fatal')
+  })
+
+  it('maps an unresolvable branch name to a 400 envelope', async () => {
+    // 'dev' exists in no namespace here: resolveBranch refuses it before any
+    // `worktree add`, and the synthetic `branch "dev" not found` stderr (the
+    // `branch "` shape gitFailure matches) is caller misuse (400).
+    const outcome = await handleCreateWorktree(deps(), { repoPath: '/repo', branch: 'dev' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('not found')
   })
 
   it('cuts a new branch out of the current one into the sanitized target', async () => {
@@ -338,6 +352,20 @@ describe('handleFetch', () => {
     expect(outcome.status).toBe(500)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('Could not resolve host')
+  })
+
+  it('maps a vanished remote to a 500 envelope, not the 400 not-found class', async () => {
+    // git's own `Repository '...' not found` stderr contains "not found"
+    // but NOT the synthetic `branch "` shape: the 400 class is reserved
+    // for display names the menu invented, a deleted remote is host state.
+    const calls = {
+      ...REPO_CALLS,
+      'fetch --all --prune': { code: 128, stderr: "fatal: unable to access 'https://x/': Repository 'gone' not found\n" },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleFetch(deps({ exec: scripted(calls) }), { repoPath: '/repo' })
+    expect(outcome.status).toBe(500)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain("Repository 'gone' not found")
   })
 })
 

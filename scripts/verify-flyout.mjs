@@ -12,6 +12,9 @@
  */
 import { chromium } from 'playwright-core'
 
+/** Attribute-selector escape for Node context (the CSS global is browser-only). */
+const esc = value => value.replace(/[\\"]/g, '\\$&')
+
 const port = process.argv[2] ?? '3080'
 const exe = `${process.env.LOCALAPPDATA}\\ms-playwright\\chromium-1200\\chrome-win64\\chrome.exe`
 const browser = await chromium.launch({ executablePath: exe })
@@ -55,7 +58,7 @@ ok('heading weight 400 (req 2, untouched)', fonts.heading === '400', fonts.headi
 const pickRow = async (name) => {
   await menu.locator('input').fill(name)
   await page.waitForTimeout(300)
-  const row = menu.locator(`button[data-branch="${CSS.escape(name)}"]`)
+  const row = menu.locator(`button[data-branch="${esc(name)}"]`)
   if (await row.count() === 0) return { ok: false, seen: 'no matching row' }
   await row.click()
   await page.waitForTimeout(150)
@@ -149,7 +152,7 @@ if (pickables.length > 0) {
   // The confirm flyout is open here, so a click re-picks (re-anchors) —
   // no Enter needed: the click handler stages the pick while a confirm is
   // showing (the old one-click flow), per the menu's interaction model.
-  const otherRow = menu.locator(`button[data-branch="${CSS.escape(pickables[0])}"]`)
+  const otherRow = menu.locator(`button[data-branch="${esc(pickables[0])}"]`)
   otherName = pickables[0]
   await otherRow.scrollIntoViewIfNeeded()
   await otherRow.click()

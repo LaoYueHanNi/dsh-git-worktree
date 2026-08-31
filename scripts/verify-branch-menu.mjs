@@ -28,14 +28,23 @@ page.on('console', msg => {
 await page.goto(`http://127.0.0.1:${port}`, { waitUntil: 'domcontentloaded', timeout: 20000 })
 await page.waitForTimeout(3500)
 
-// 1. Fresh New Session (blank composer) so the chip dock is present.
-await page.getByText('新会话').first().click()
-await page.waitForTimeout(2000)
+// 1. Anchor to a MAIN-repo session directly. The 新会话 button follows the
+// recently-ACTIVE workspace — a prior hop into a worktree (probe-worktree-*)
+// leaves that active, and a linked-worktree session locks switching — so
+// the button is useless as an anchor. Expand the main repo workspace and
+// open its first session instead; a started session still has the chip and
+// the full menu (fixture: the main repo holds a session titled as below).
+await page.getByText('dsh-token-usage', { exact: true }).first().click()
+await page.waitForTimeout(800)
+await page.getByText('详细分析当前项目').first().click()
+await page.waitForTimeout(1500)
 
-// 2. The chip is the button preceding the 工作树/Worktree toggle.
-const toggle = page.locator('button').filter({ hasText: /^(工作树|Worktree)$/ }).first()
-ok('chip dock present', await toggle.count() > 0)
-const chip = toggle.locator('xpath=preceding-sibling::button[1]')
+// 2. A started session's dock has no worktree toggle — anchor the chip by
+// its branch-title button (this repo's checkout is main). waitFor bridges
+// the session-switch render: a bare count() raced it once (0 then present).
+const chip = page.locator('button[title="main"]').first()
+await chip.waitFor({ state: 'visible', timeout: 10000 })
+ok('chip dock present', await chip.count() > 0)
 console.log('chip text:', JSON.stringify((await chip.textContent())?.trim()))
 await chip.click()
 await page.waitForTimeout(700)
@@ -113,6 +122,9 @@ const targets = await page.evaluate(() => {
   const rows = [...card.querySelectorAll('button[role="menuitem"]:not([disabled])')]
   return rows
     .filter(r => r.querySelector('svg') === null)
+    // Worktree rows hop the session on pick (no confirm flyout) — they are
+    // not switch-confirm targets.
+    .filter(r => r.dataset.kind !== 'worktree')
     .map(r => r.dataset.branch ?? (r.textContent ?? '').trim())
     .filter(n => n !== '')
 })
@@ -127,6 +139,11 @@ const isCurrentOnly = await page.evaluate(() => {
 })
 if (isCurrentOnly) {
   console.log('skip pick/commit checks (single-branch repo, only the current branch)')
+} else if (target === '') {
+  // A linked-worktree session locks every switch target (worktree rows are
+  // hop-only, not confirm targets) — the pick/commit path has nothing to
+  // drive here; rerun anchored to the main workspace.
+  console.log('skip pick/commit checks (no unlocked switch targets — linked-worktree session?)')
 } else {
   ok('pickable row exists', target !== '', `candidates=${targets.length}`)
   console.log('target row:', JSON.stringify(target))

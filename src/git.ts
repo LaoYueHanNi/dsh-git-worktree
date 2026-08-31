@@ -116,23 +116,51 @@ async function currentBranch(exec: Exec, cwd: string): Promise<string> {
   return trimmed === '' ? 'HEAD' : trimmed
 }
 
-/** Local branches plus remote-only branches (first remote only, `<remote>/HEAD` dropped). */
+/**
+ * Local branches (each carrying its ahead/behind vs the upstream when one
+ * exists) plus remote-only branches across EVERY remote (`<remote>/HEAD`
+ * dropped).
+ *
+ * The upstream track comes from `%(upstream:track)`, which renders
+ * `[ahead N, behind M]` (or a bare `[gone]`) directly after the refname —
+ * `[` is illegal in refnames, so `indexOf('[')` splits name from track
+ * without a separator. `[gone]` (upstream deleted server-side) carries no
+ * counts and is dropped here; the UI renders no marker for it.
+ */
 async function listBranches(exec: Exec, repoRoot: string): Promise<BranchEntry[]> {
-  const localOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
-  const locals = localOut.split('\n').map(l => l.trim()).filter(l => l !== '')
-  const entries: BranchEntry[] = locals.map(name => ({ name, kind: 'local' }))
+  const localOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)%(upstream:track)'])
+  const entries: BranchEntry[] = []
+  for (const line of localOut.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    const bracket = trimmed.indexOf('[')
+    const name = (bracket === -1 ? trimmed : trimmed.slice(0, bracket)).trim()
+    if (name === '') continue
+    const track = bracket === -1 ? '' : trimmed.slice(bracket)
+    const ahead = /\bahead (\d+)/.exec(track)
+    const behind = /\bbehind (\d+)/.exec(track)
+    const entry: BranchEntry = { name, kind: 'local' }
+    if (ahead !== null) entry.ahead = Number(ahead[1])
+    if (behind !== null) entry.behind = Number(behind[1])
+    entries.push(entry)
+  }
   const remoteOut = await gitMaybe(exec, repoRoot, ['for-each-ref', 'refs/remotes', '--format=%(refname:short)'])
   if (remoteOut !== undefined) {
-    const seenRemotes = new Set<string>()
+    // Local names as a Set: the twin lookup runs once per remote row, and a
+    // linear scan over the assembled list would make the loop quadratic —
+    // felt at thousand-branch repos, free to avoid.
+    const localNames = new Set(entries.filter(e => e.kind === 'local').map(e => e.name))
     for (const line of remoteOut.split('\n')) {
       const name = line.trim()
       if (name === '') continue
       const localName = localBranchName(name)
-      if (localName === 'HEAD' || locals.includes(localName)) continue
-      const remote = name.slice(0, name.length - localName.length - 1)
-      // One remote only: a branch visible on several remotes collapses to the first.
-      if (seenRemotes.size === 1 && !seenRemotes.has(remote)) continue
-      seenRemotes.add(remote)
+      // A bare ref directly under refs/remotes (shortname without `/`, like
+      // a leftover `refs/remotes/origin`) is not a remote branch — git
+      // branch -r hides it, the menu must not offer it either.
+      if (localName === name) continue
+      // A remote branch with a local twin stays hidden: the twin is the
+      // actionable row, showing both would duplicate it in the menu.
+      if (localName === 'HEAD' || localNames.has(localName)) continue
       entries.push({ name, kind: 'remote' })
     }
   }
@@ -179,6 +207,10 @@ async function resolveBranch(exec: Exec, repoRoot: string, branch: string): Prom
   const localsOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
   const locals = localsOut.split('\n').map(l => l.trim()).filter(l => l !== '')
   if (locals.includes(branch)) return { local: branch, remote: undefined }
+  // A name without `/` can never name a remote branch — `<remote>/<name>`
+  // always carries the slash. This guards the leftover bare `refs/remotes/<x>`
+  // ref too: matching it would compute a garbage remote part.
+  if (!branch.includes('/')) return undefined
   const local = localBranchName(branch)
   if (local !== branch && locals.includes(local)) return undefined // the display names a remote, but the local twin exists: use the twin
   const remoteOut = await gitMaybe(exec, repoRoot, ['for-each-ref', 'refs/remotes', `refs/remotes/${branch}`, '--format=%(refname:short)'])

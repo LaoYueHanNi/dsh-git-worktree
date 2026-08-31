@@ -18,7 +18,17 @@
  *
  * Layout (IDEA branch-panel posture at popup scale): a narrow tool strip
  * on the left (locate-current + expand/collapse-all + new-branch), then a
- * main column of heading / tree / search. Selection model borrowed from
+ * main column of heading / tree / search. The list renders in TWO
+ * top-level collapsible groups — local branches first, then remote
+ * branches (each a folder-header-style row with chevron + count): under a
+ * SINGLE remote the remote rows drop their `<remote>/` prefix (the header
+ * already says "remote"; a stripped display name can never collide with a
+ * local row because the host hides remote branches that have a local
+ * twin), with SEVERAL remotes the full names stay so `origin`/`upstream`
+ * become the folder layer beneath the header. Picking a remote row hands
+ * the owner the real `<remote>/name` (see pick) — the remote confirms are
+ * the owner's wording (tracking-twin switch / twin-in-worktree).
+ * Selection model borrowed from
  * IDEA: a single click SELECTS a row (blue); double-click or Enter then OPENS the
  * right-side confirm flyout for that row — the switch itself always goes
  * through the confirmation step, never straight away. While the confirm
@@ -73,16 +83,31 @@ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { branchNameIssue } from '../normalize.ts'
 import css from './BranchChip.module.css'
 
-/** One selectable branch row (disabled = checked out by a live worktree). */
+/** One selectable branch row. `name` is the ACTION name sent to the owner —
+ * for a remote row the full `origin/feat-x`; the group model derives the
+ * DISPLAY name (see groupRows). `ahead`/`behind` are local-row-only
+ * upstream divergence counts (absent without an upstream or in sync).
+ * `path` is worktree-row-only: the directory a pick hops the session into.
+ * `locked` rows are DIMMED but clickable — a pick still reaches the owner,
+ * which answers with the main-checkout hint inside a linked-worktree
+ * session (deliberately NOT the HTML disabled attribute: a disabled button
+ * swallows the click, and the hint would never fire). */
 export interface BranchRow {
   name: string
-  disabled: boolean
+  kind: 'local' | 'remote' | 'worktree'
+  path?: string
+  ahead?: number
+  behind?: number
+  locked?: boolean
 }
 
 /** The confirm flyout bundle, owned and localized by the caller. */
 export interface BranchConfirmFly {
   /** Ask line (already localized). */
   ask: string
+  /** The branch the ask refers to, on its own weight-500 line (remote
+   * picks only — the ask line says "该远程分支" and this names it). */
+  subject?: string
   /** Confirm-button label (progress text while busy). */
   confirmLabel: string
   /** Cancel-button label. */
@@ -101,8 +126,13 @@ export interface BranchMenuProps {
   open: boolean
   /** The chip element — the popup's bottom edge pins just above its top. */
   anchorRef: React.RefObject<HTMLElement | null>
-  /** Every local branch as a row (occupancy-disabled rows included). */
+  /** Every branch as a row (local, remote, and one worktree row per live
+   * linked worktree; remote rows carry their `<remote>/name` action name). */
   rows: readonly BranchRow[]
+  /** Whether the worktree group is offered (a session hop only makes
+   * sense while the session is blank — a started session's directory is
+   * fixed). Blank sessions show the group, started ones never do. */
+  canAdopt: boolean
   /** The branch currently checked out (trailing check, HEAD tint). */
   currentBranch: string
   /** Non-null while a picked branch awaits confirmation. */
@@ -222,6 +252,56 @@ function collectFolderPaths(nodes: TreeNode[], out: string[] = []): string[] {
 const segCmp = (a: string, b: string): number =>
   a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
 
+/**
+ * The menu's group model derived from the flat row list: local rows as
+ * they are, remote rows displayed under their group header, and worktree
+ * rows collected as-is (one per linked worktree, direct hop targets). With
+ * a SINGLE remote the `<remote>/` prefix is dropped from the display
+ * (`origin/feat/x` reads as `feat/x` — the header already says "remote",
+ * and a dropped display name can never collide with a local row because
+ * the host hides remote branches that have a local twin); with SEVERAL
+ * remotes the full name stays, so `origin`/`upstream` become the folder
+ * layer that keeps same-named branches apart. `remoteNameMap` maps a
+ * displayed remote name back to the action name (an identity map when
+ * nothing was dropped).
+ */
+interface BranchGroups {
+  localRows: BranchRow[]
+  remoteDisplayRows: BranchRow[]
+  worktreeRows: BranchRow[]
+  remoteNameMap: ReadonlyMap<string, string>
+}
+
+/** Split rows into the three groups and derive the remote display names. */
+function groupRows(rows: readonly BranchRow[]): BranchGroups {
+  const localRows: BranchRow[] = []
+  const remoteRows: BranchRow[] = []
+  const worktreeRows: BranchRow[] = []
+  for (const row of rows) {
+    if (row.kind === 'remote') remoteRows.push(row)
+    else if (row.kind === 'worktree') worktreeRows.push(row)
+    else localRows.push(row)
+  }
+  const first = remoteRows[0]?.name ?? ''
+  const slash = first.indexOf('/')
+  const soleRemote = slash > 0 && remoteRows.every(row => row.name.startsWith(first.slice(0, slash + 1)))
+    ? first.slice(0, slash)
+    : undefined
+  const display = (name: string): string => soleRemote === undefined ? name : name.slice(soleRemote.length + 1)
+  return {
+    localRows,
+    remoteDisplayRows: remoteRows.map(row => ({ ...row, name: display(row.name) })),
+    worktreeRows,
+    remoteNameMap: new Map(remoteRows.map(row => [display(row.name), row.name])),
+  }
+}
+
+/** Expanded-key space: folder paths carry their group prefix so a local
+ * folder can never share a toggle state with a same-named remote display
+ * folder (`feat/x` on both sides). Group OPEN flags stay booleans beside
+ * this set — they are not part of the path namespace at all. */
+const groupKey = (group: 'local' | 'remote', path: string): string => `${group}:${path}`
+
 /** Build the prefix tree of the rows (see TreeNode). */
 function buildTree(rows: readonly BranchRow[]): TreeNode[] {
   /** Mutable builder node — same shape as TreeNode but built incrementally
@@ -307,7 +387,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, onCreate, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, onCreate, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -352,9 +432,19 @@ export function BranchMenu({
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
   const [flyPos, setFlyPos] = useState<{ left: number; top: number } | null>(null)
   const [query, setQuery] = useState('')
-  /** Expanded folder set, keyed by node path. Re-seeded on every open so
-   * the current branch's chain is visible without re-expanding by hand. */
+  /** Expanded folder set, keyed by group-prefixed node path (see groupKey).
+   * Re-seeded on every open so the current branch's chain is visible
+   * without re-expanding by hand. */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  /** Top-level group open flags, beside the expanded set (which owns
+   * folder paths only — a group header is not a path node). Re-seeded on
+   * every open: past TREE_MIN_ROWS the remote group starts closed so the
+   * list leads with the local branches. The WORKTREE group starts open
+   * unconditionally — it is the blank session's quick-hop entry, always
+   * worth its few rows. */
+  const [localGroupOpen, setLocalGroupOpen] = useState(true)
+  const [remoteGroupOpen, setRemoteGroupOpen] = useState(true)
+  const [worktreeGroupOpen, setWorktreeGroupOpen] = useState(true)
   /** IDEA-style selection: clicked row (blue). Zero or one at a time. */
   const [selected, setSelected] = useState<string | null>(null)
   /** The create flyout: open flag plus the live draft. Opening the menu
@@ -402,33 +492,67 @@ export function BranchMenu({
 
   /** Stage a pick: remember the row element (the flyout anchors beside
    * it), then hand the branch to the owner. All pick paths — search Enter,
-   * keyboard Enter on a selected row — funnel through here. */
+   * keyboard Enter on a selected row — funnel through here. A remote row
+   * carries its DISPLAY name through selection and anchors; the owner
+   * always receives the real `<remote>/name` action name. */
   const pick = (el: HTMLElement | null, name: string): void => {
     if (el !== null) pendingRef.current = { name, el }
     setPendingName(name)
-    onSelect(name)
+    onSelect(remoteNameMapRef.current.get(name) ?? name)
   }
   pickRef.current = pick
 
-  /** The '/' prefix tree of the rows — always on; TREE_MIN_ROWS only sets
-   * the default opening depth (see the open-reset effect). */
-  const tree = useMemo(() => buildTree(rows), [rows])
+  /** The two-group model of the rows (see groupRows) and each group's '/'
+   * prefix tree — always on; TREE_MIN_ROWS only sets the default opening
+   * depth (see the open-reset effect). */
+  const grouped = useMemo(() => groupRows(rows), [rows])
+  const localTree = useMemo(() => buildTree(grouped.localRows), [grouped.localRows])
+  const remoteTree = useMemo(() => buildTree(grouped.remoteDisplayRows), [grouped.remoteDisplayRows])
+  /** Fresh display→action map for the stale-safe document keydown listener
+   * (its Enter path funnels through pick, which reads the ref). */
+  const remoteNameMapRef = useRef(grouped.remoteNameMap)
+  remoteNameMapRef.current = grouped.remoteNameMap
 
-  /** Every folder path that renders a header — the expand/collapse-all
-   * button's scope. */
-  const folderPaths = useMemo(() => collectFolderPaths(tree), [tree])
-  const allExpanded = folderPaths.length > 0 && folderPaths.every(p => expanded.has(p))
+  /** Every folder key that renders a header — the expand/collapse-all
+   * button's scope (group-prefixed, see groupKey). */
+  const folderPaths = useMemo(() => [
+    ...collectFolderPaths(localTree).map(p => groupKey('local', p)),
+    ...collectFolderPaths(remoteTree).map(p => groupKey('remote', p)),
+  ], [localTree, remoteTree])
+  /** Locked row names (dimmed, pick-answered-with-hint) — a Set for the
+   * click gate. MUST sit before the `!open` early return: a hook after it
+   * would change the hook count between a closed and an open menu
+   * (React #310, seen live as the whole dock unmounting on first open). */
+  const lockedRows = useMemo(
+    () => new Set(rows.filter(r => r.locked === true).map(r => r.name)),
+    [rows],
+  )
+  const allExpanded = folderPaths.every(p => expanded.has(p)) && localGroupOpen && remoteGroupOpen
+    && (!canAdopt || worktreeGroupOpen)
   const toggleAll = (): void => {
-    setExpanded(allExpanded ? new Set() : new Set(folderPaths))
+    // The group headers join the toggle scope: one button opens (or
+    // collapses) the whole tree, headers included.
+    const next = !allExpanded
+    setLocalGroupOpen(next)
+    setRemoteGroupOpen(next)
+    setWorktreeGroupOpen(next)
+    setExpanded(next ? new Set(folderPaths) : new Set())
   }
   const locateCurrent = (): void => {
     // Locate, don't restructure: only ADD the current branch's ancestor
     // folders if they happen to be closed (the row must exist to scroll
-    // to it) — folders the user expanded/collapsed stay untouched. Then
-    // center the row one frame later, once the re-render has committed.
+    // to it) — folders the user expanded/collapsed stay untouched. The
+    // LOCAL group opens too: the current branch usually lives there. In a
+    // blank linked-worktree session, though, the branch is HELD by the
+    // worktree this session sits in and its row was filed into the
+    // WORKTREE group — that group must open as well, or the scroll target
+    // never renders. Then center the row one frame later, once the
+    // re-render has committed.
+    setLocalGroupOpen(true)
+    if (grouped.worktreeRows.some(row => row.name === currentBranch)) setWorktreeGroupOpen(true)
     setExpanded(prev => {
       const next = new Set(prev)
-      for (const p of chainExpanded(currentBranch)) next.add(p)
+      for (const p of chainExpanded(currentBranch)) next.add(groupKey('local', p))
       return next
     })
     requestAnimationFrame(() => {
@@ -438,10 +562,11 @@ export function BranchMenu({
 
   // Every open starts from a clean filter, selection, tree state, and
   // naming form. The tree's opening depth follows the list size: past
-  // TREE_MIN_ROWS only the checked-out branch's chain starts open, at or
-  // under it every folder does. Rows come through a ref — the effect keys
-  // on [open, currentBranch] so a mid-open refresh never resets folders the
-  // user has toggled by hand.
+  // TREE_MIN_ROWS the local group (plus the checked-out branch's folder
+  // chain) starts open while the remote group starts closed, at or under
+  // it every group and folder does. Rows come through a ref — the effect
+  // keys on [open, currentBranch] so a mid-open refresh never resets
+  // folders the user has toggled by hand.
   useEffect(() => {
     if (!open) return
     setQuery('')
@@ -449,10 +574,17 @@ export function BranchMenu({
     setCreating(false)
     setDraft('')
     const currentRows = latestRows.current
+    const current = groupRows(currentRows)
+    const localPaths = collectFolderPaths(buildTree(current.localRows)).map(p => groupKey('local', p))
+    const remotePaths = collectFolderPaths(buildTree(current.remoteDisplayRows)).map(p => groupKey('remote', p))
+    const many = currentRows.length > TREE_MIN_ROWS
+    setLocalGroupOpen(true)
+    setRemoteGroupOpen(!many)
+    setWorktreeGroupOpen(true)
     setExpanded(
-      currentRows.length > TREE_MIN_ROWS
-        ? chainExpanded(currentBranch)
-        : new Set(collectFolderPaths(buildTree(currentRows))),
+      many
+        ? new Set([...chainExpanded(currentBranch)].map(p => groupKey('local', p)))
+        : new Set([...localPaths, ...remotePaths]),
     )
   }, [open, currentBranch])
 
@@ -706,15 +838,20 @@ export function BranchMenu({
   if (!open || pos === null) return null
 
   const needle = query.trim().toLowerCase()
+  // Search matches the DISPLAY names — what the rows actually show. With a
+  // single remote that is the prefix-stripped form (searching "origin" no
+  // longer matches; the user searches what they see), with several remotes
+  // the full name.
   const visible = needle === ''
     ? rows
-    : rows.filter(row => row.name.toLowerCase().includes(needle))
+    : [...grouped.localRows, ...grouped.worktreeRows, ...grouped.remoteDisplayRows]
+      .filter(row => row.name.toLowerCase().includes(needle))
 
-  /** Enter in the search field: commit the first enabled visible row
-   * (its rendered button is the anchor — found by its data-branch key; the
-   * label text alone can't identify a row inside a tree). */
+  /** Enter in the search field: commit the first visible row (its rendered
+   * button is the anchor — found by its data-branch key; the label text
+   * alone can't identify a row inside a tree). */
   const commitFirst = (): void => {
-    const first = visible.find(row => !row.disabled)
+    const first = visible[0]
     if (first === undefined) return
     const card = cardRef.current
     if (card === null) return
@@ -723,9 +860,15 @@ export function BranchMenu({
   }
 
   /** New-branch draft validation: git ref-name rules first, then a duplicate
-   * check against the rows (locals only — those ARE the rows). */
+   * check against every EXISTING local branch — local rows and worktree
+   * rows alike (a worktree row IS a checked-out branch, just filed under
+   * its own group). A remote display name is not a claim on a new local
+   * branch's name (its twin could not even coexist with one; the host
+   * hides such remote rows). */
   const createIssue = branchNameIssue(draft)
-  const createDuplicate = createIssue === null && rows.some(row => row.name === draft)
+  const existsLocally = (name: string): boolean =>
+    grouped.localRows.some(row => row.name === name) || grouped.worktreeRows.some(row => row.name === name)
+  const createDuplicate = createIssue === null && existsLocally(draft)
   const createValid = createIssue === null && !createDuplicate
   /** Error line under the input, ONLY while the draft is unacceptable with
    * a non-empty reason (the ask line above already names the cut point, and
@@ -743,19 +886,44 @@ export function BranchMenu({
     onCreate(draft)
   }
 
-  /** Row class composition: base + HEAD tint + selection (selection wins). */
-  const rowClass = (name: string): string => {
+  /** Row class composition: base + HEAD tint + selection (selection wins)
+   * + the locked dim. */
+  const rowClass = (row: BranchRow | null, name: string): string => {
     let cls = css.menuRow
     if (name === currentBranch) cls += ` ${css.menuRowSelected}`
     if (name === selected) cls += ` ${css.menuRowPicked}`
+    if (row?.locked === true) cls += ` ${css.menuRowLocked}`
     return cls
+  }
+
+  /** Locked rows keep the click path ALIVE (the owner answers picks with
+   * the main-checkout toast) but stay unselected — a dimmed row wearing
+   * the blue selection would read as "chosen yet unusable". */
+  const isLocked = (name: string): boolean => lockedRows.has(name)
+
+  /** The upstream divergence arrows of a local row (IDEA's ↑N/↓N) ahead of
+   * the trailing check: plain text marks in the secondary tone — no base
+   * icon pairs a direction with a count. Absent without an upstream or
+   * when in sync. */
+  const renderArrows = (row: BranchRow | null): React.ReactNode => {
+    if (row === null) return null
+    const marks: React.ReactNode[] = []
+    if ((row.ahead ?? 0) > 0) {
+      marks.push(<span key="ahead" className={css.menuRowArrow} title={t('aheadTitle', { n: row.ahead })}>↑{row.ahead}</span>)
+    }
+    if ((row.behind ?? 0) > 0) {
+      marks.push(<span key="behind" className={css.menuRowArrow} title={t('behindTitle', { n: row.behind })}>↓{row.behind}</span>)
+    }
+    return marks
   }
 
   /** A row's click behavior: with the confirm flyout open, clicking a row
    * re-picks it (the old one-click flow — the flyout re-anchors); without
    * one it just selects (IDEA model — double-click or Enter opens the
-   * confirm flyout for the selected row). */
+   * confirm flyout for the selected row). Locked rows do neither: dimmed
+   * rows are not selectable, the double-click is the hint's stage. */
   const rowClick = (el: HTMLButtonElement, name: string): void => {
+    if (isLocked(name)) return
     if (confirmOpen) pick(el, name)
     else setSelected(name)
   }
@@ -787,15 +955,58 @@ export function BranchMenu({
     return false
   }
 
-  /** One tree group-header row: its own segment (a compressed chain's
+  /** One top-level group header (local/remote branches): the folder-header
+   * posture with its own open flag — toggling flips the flag, never a key
+   * in the expanded path set. `menuGroupTop` lifts the tone above the
+   * folder headers (see the CSS note). In the search view (onToggle
+   * absent) it renders inert: the matched subtrees below are force-open
+   * anyway. */
+  const renderGroupHeader = (label: string, count: number, open: boolean, onToggle?: () => void): React.ReactNode => {
+    const cls = `${css.menuGroup} ${css.menuGroupTop}`
+    return (
+      onToggle === undefined
+        ? (
+          <div className={cls} role="presentation" style={{ paddingLeft: 8 }}>
+            <IconChevronDownOutline14 size={12} className={css.menuGroupChevron} />
+            <span className={css.menuGroupLabel}>{label}</span>
+            <span className={css.menuGroupCount}>({count})</span>
+          </div>
+        )
+        : (
+          <button
+            type="button"
+            className={cls}
+            aria-expanded={open}
+            onClick={() => {
+              if (guardActive()) return
+              onToggle()
+              armShiftGuard()
+            }}
+          >
+            <IconChevronRightOutline14
+              size={12}
+              className={open ? `${css.menuGroupChevron} ${css.menuGroupChevronOpen}` : css.menuGroupChevron}
+            />
+            <span className={css.menuGroupLabel}>{label}</span>
+            <span className={css.menuGroupCount}>({count})</span>
+          </button>
+        )
+    )
+  }
+
+  /**
+   * One tree group-header row: its own segment (a compressed chain's
    * walked segments join the label), a count badge, and a chevron that
    * turns for expansion. Clicking toggles. One color throughout — the
-   * folder path is not color-distinguished from the name. */
-  const renderHeader = (node: TreeNode, label: string, depth: number): React.ReactNode => {
-    const isOpen = expanded.has(node.path)
+   * folder path is not color-distinguished from the name. `prefix` scopes
+   * the expanded-key space to the owning group (see groupKey) and keeps
+   * React keys unique across the two trees.
+   */
+  const renderHeader = (node: TreeNode, label: string, depth: number, prefix: string): React.ReactNode => {
+    const isOpen = expanded.has(`${prefix}${node.path}`)
     return (
       <button
-        key={`group:${node.path}`}
+        key={`${prefix}group:${node.path}`}
         type="button"
         className={css.menuGroup}
         data-group={node.path}
@@ -803,7 +1014,7 @@ export function BranchMenu({
         aria-expanded={isOpen}
         onClick={() => {
           if (guardActive()) return
-          toggle(node.path)
+          toggle(`${prefix}${node.path}`)
           armShiftGuard()
         }}
       >
@@ -820,15 +1031,20 @@ export function BranchMenu({
   /** One tree leaf row: under an expanded folder it shows only its own
    * segment (indentation carries the hierarchy — no repeated full path);
    * a compressed linear chain keeps its walked segments in the label so
-   * the context survives without a pointless one-entry folder. */
-  const renderLeaf = (node: TreeNode, label: string, depth: number): React.ReactNode => (
+   * the context survives without a pointless one-entry folder. The
+   * data-branch key stays the group-local DISPLAY name — unique across
+   * all groups (a remote display name can never equal a local row; a
+   * worktree row's branch has left the local group) — which is what the
+   * buttonOf/commitFirst/center lookups rely on. */
+  const renderLeaf = (node: TreeNode, label: string, depth: number, prefix: string): React.ReactNode => (
     <button
-      key={node.path}
+      key={`${prefix}${node.path}`}
       type="button"
       role="menuitem"
       data-branch={node.path}
-      className={rowClass(node.path)}
-      disabled={node.leaf?.disabled ?? false}
+      data-kind={node.leaf?.kind}
+      className={rowClass(node.leaf ?? null, node.path)}
+      title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
       style={{ paddingLeft: 8 + depth * 12 }}
       onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
       onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
@@ -836,7 +1052,36 @@ export function BranchMenu({
       onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
     >
       <span className={css.menuRowLabel}>{label}</span>
+      {renderArrows(node.leaf)}
       {node.path === currentBranch && <IconCheckOutline16 size={14} />}
+    </button>
+  )
+
+  /** One flat worktree row: a direct hop target, one per linked worktree
+   * — no tree (worktree names rarely fork, and the group is a launcher,
+   * not a taxonomy), no confirm (the double-click IS the hop; the owner
+   * picks it up through onSelect). The native title carries the worktree
+   * DIRECTORY — the fact a branch row cannot show. The row the session
+   * currently lives in keeps the trailing check + HEAD tint: it is the
+   * "you are here" mark the local group no longer holds (its branch was
+   * filed into THIS group). */
+  const renderFlatLeaf = (row: BranchRow, prefix: string): React.ReactNode => (
+    <button
+      key={`${prefix}${row.name}`}
+      type="button"
+      role="menuitem"
+      data-branch={row.name}
+      data-kind={row.kind}
+      className={rowClass(row, row.name)}
+      title={row.locked === true ? t('mainRepoOnly') : row.path}
+      style={{ paddingLeft: 8 + 12 }}
+      onClick={() => { if (guardActive()) return; rowClick(buttonOf(row.name), row.name) }}
+      onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, row.name) }}
+      onMouseEnter={(event) => { gateTooltip(event.currentTarget, row.name) }}
+      onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+    >
+      <span className={css.menuRowLabel}>{row.name}</span>
+      {row.name === currentBranch && <IconCheckOutline16 size={14} />}
     </button>
   )
 
@@ -845,7 +1090,7 @@ export function BranchMenu({
    * `feature/优化` stays a single flat row instead of a pointless one-entry
    * folder, while a real fork (`a/deep/tree` holding leaf1+leaf2) gets a
    * header whose children show only their own segments. */
-  const renderTree = (nodes: TreeNode[], depth: number): React.ReactNode[] => {
+  const renderTree = (nodes: TreeNode[], depth: number, prefix: string): React.ReactNode[] => {
     const out: React.ReactNode[] = []
     for (const node of nodes) {
       let cur = node
@@ -856,17 +1101,17 @@ export function BranchMenu({
       }
       const label = parts.length === 0 ? cur.segment : `${parts.join('/')}/${cur.segment}`
       if (cur.leaf !== null) {
-        out.push(renderLeaf(cur, label, depth))
+        out.push(renderLeaf(cur, label, depth, prefix))
         // A branch that is also a folder path (`feature` next to
         // `feature/x`): keep the pickable row and fold the children under
         // a second, toggle-only header of the same name (rare coexistence).
         if (cur.children.length > 0) {
-          out.push(renderHeader(cur, label, depth))
-          if (expanded.has(cur.path)) out.push(...renderTree(cur.children, depth + 1))
+          out.push(renderHeader(cur, label, depth, prefix))
+          if (expanded.has(`${prefix}${cur.path}`)) out.push(...renderTree(cur.children, depth + 1, prefix))
         }
       } else {
-        out.push(renderHeader(cur, label, depth))
-        if (expanded.has(cur.path)) out.push(...renderTree(cur.children, depth + 1))
+        out.push(renderHeader(cur, label, depth, prefix))
+        if (expanded.has(`${prefix}${cur.path}`)) out.push(...renderTree(cur.children, depth + 1, prefix))
       }
     }
     return out
@@ -876,7 +1121,15 @@ export function BranchMenu({
    * filter keeps the path), hide non-matching siblings, force every kept
    * folder open, and highlight the hit substring. No chain compression —
    * the full ancestor path is exactly the context the search is for. */
-  const renderSearch = (nodes: TreeNode[], depth: number): React.ReactNode[] => {
+  /** Needle-matching leaf count of a tree: the search-view group header
+   * must count the MATCHES under it, not the whole group — a full count
+   * above two filtered rows reads as a lie. */
+  const searchLeafCount = (nodes: TreeNode[]): number =>
+    nodes.reduce((sum, node) => sum
+      + (node.leaf !== null && node.leaf.name.toLowerCase().includes(needle) ? 1 : 0)
+      + searchLeafCount(node.children), 0)
+
+  const renderSearch = (nodes: TreeNode[], depth: number, prefix: string): React.ReactNode[] => {
     const out: React.ReactNode[] = []
     for (const node of nodes) {
       const leafHit = node.leaf !== null && node.leaf.name.toLowerCase().includes(needle)
@@ -884,12 +1137,13 @@ export function BranchMenu({
       if (leafHit) {
         out.push(
           <button
-            key={node.path}
+            key={`${prefix}${node.path}`}
             type="button"
             role="menuitem"
             data-branch={node.path}
-            className={rowClass(node.path)}
-            disabled={node.leaf?.disabled ?? false}
+            data-kind={node.leaf?.kind}
+            className={rowClass(node.leaf ?? null, node.path)}
+            title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
             style={{ paddingLeft: 8 + depth * 12 }}
             onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
             onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
@@ -897,6 +1151,7 @@ export function BranchMenu({
             onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
           >
             <span className={css.menuRowLabel}>{renderLabel(node.segment)}</span>
+            {renderArrows(node.leaf)}
             {node.path === currentBranch && <IconCheckOutline16 size={14} />}
           </button>,
         )
@@ -904,7 +1159,7 @@ export function BranchMenu({
       if (childHit) {
         out.push(
           <div
-            key={`search:${node.path}`}
+            key={`${prefix}search:${node.path}`}
             role="presentation"
             className={css.menuGroup}
             data-group={node.path}
@@ -915,7 +1170,7 @@ export function BranchMenu({
             <span className={css.menuGroupCount}>({node.total})</span>
           </div>,
         )
-        out.push(...renderSearch(node.children, depth + 1))
+        out.push(...renderSearch(node.children, depth + 1, prefix))
       }
     }
     return out
@@ -934,28 +1189,36 @@ export function BranchMenu({
           className={css.menuCard}
           style={{ left: pos.left, bottom: pos.bottom }}
           role="menu"
-          aria-label={t('menuLocalBranches')}
+          aria-label={t('menuBranches')}
         >
-          <div className={css.menuToolbar} role="toolbar" aria-label={t('menuLocalBranches')}>
-            <button
-              type="button"
-              className={creating ? `${css.menuToolButton} ${css.menuToolButtonOn}` : css.menuToolButton}
-              title={t('menuNewBranch')}
-              aria-label={t('menuNewBranch')}
-              aria-pressed={creating}
-              disabled={!canCreate}
-              onClick={() => {
-                // Opening the flyout cancels a staged confirm first: the
-                // flyout would otherwise stay anchored to a stale row beside
-                // the create panel. Closing drops the draft with it.
-                confirmRef.current?.onCancel()
-                const next = !creating
-                setCreating(next)
-                if (!next) setDraft('')
-              }}
-            >
-              <IconPlusOutline16 size={16} />
-            </button>
+          <div className={css.menuToolbar} role="toolbar" aria-label={t('menuBranches')}>
+            {/* The plus UNMOUNTS where branch creation has no business
+              * (worktree mode armed, or a linked-worktree session) instead
+              * of disabling: a disabled button swallows clicks with no
+              * answer — the exact dead-gray shape this menu locked rows
+              * out of (see the menu-scope DR). Escape (creatingRef branch)
+              * and outside clicks already collapse the create flyout, so
+              * losing the anchor button takes no dismiss path with it. */}
+            {canCreate && (
+              <button
+                type="button"
+                className={creating ? `${css.menuToolButton} ${css.menuToolButtonOn}` : css.menuToolButton}
+                title={t('menuNewBranch')}
+                aria-label={t('menuNewBranch')}
+                aria-pressed={creating}
+                onClick={() => {
+                  // Opening the flyout cancels a staged confirm first: the
+                  // flyout would otherwise stay anchored to a stale row beside
+                  // the create panel. Closing drops the draft with it.
+                  confirmRef.current?.onCancel()
+                  const next = !creating
+                  setCreating(next)
+                  if (!next) setDraft('')
+                }}
+              >
+                <IconPlusOutline16 size={16} />
+              </button>
+            )}
             <button
               type="button"
               className={css.menuToolButton}
@@ -1002,17 +1265,68 @@ export function BranchMenu({
               className={css.menuToolButton}
               title={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
               aria-label={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
-              disabled={folderPaths.length === 0}
+              // The group headers fold too, so the tool stays live whenever
+              // any row exists — folders alone no longer gate it.
+              disabled={rows.length === 0}
               onClick={toggleAll}
             >
               {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
             </button>
           </div>
           <div className={css.menuMain}>
-            <div className={css.menuHeading}>{t('menuLocalBranches')}</div>
+            <div className={css.menuHeading}>{t('menuBranches')}</div>
             <div className={css.menuRows} role="presentation" ref={holdRowsCenter}>
-              {needle === '' ? renderTree(tree, 0) : renderSearch(tree, 0)}
-              {visible.length === 0 && <div className={css.menuEmpty}>{t('menuNoMatches')}</div>}
+              {needle === '' ? (
+                <>
+                  {grouped.localRows.length > 0 && renderGroupHeader(t('menuLocalBranches'), grouped.localRows.length, localGroupOpen,
+                    () => setLocalGroupOpen(value => !value))}
+                  {localGroupOpen && renderTree(localTree, 1, 'local:')}
+                  {canAdopt && grouped.worktreeRows.length > 0 && (
+                    <>
+                      {renderGroupHeader(t('menuWorktrees'), grouped.worktreeRows.length, worktreeGroupOpen,
+                        () => setWorktreeGroupOpen(value => !value))}
+                      {worktreeGroupOpen && grouped.worktreeRows.map(row => renderFlatLeaf(row, 'worktree:'))}
+                    </>
+                  )}
+                  {grouped.remoteDisplayRows.length > 0 && (
+                    <>
+                      {renderGroupHeader(t('menuRemoteBranches'), grouped.remoteDisplayRows.length, remoteGroupOpen,
+                        () => setRemoteGroupOpen(value => !value))}
+                      {remoteGroupOpen && renderTree(remoteTree, 1, 'remote:')}
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  {grouped.localRows.some(row => row.name.toLowerCase().includes(needle)) && (
+                    <>
+                      {renderGroupHeader(t('menuLocalBranches'), searchLeafCount(localTree), true)}
+                      {renderSearch(localTree, 1, 'local:')}
+                    </>
+                  )}
+                  {canAdopt && grouped.worktreeRows.some(row => row.name.toLowerCase().includes(needle)) && (
+                    <>
+                      {renderGroupHeader(t('menuWorktrees'), grouped.worktreeRows.filter(row => row.name.toLowerCase().includes(needle)).length, true)}
+                      {grouped.worktreeRows
+                        .filter(row => row.name.toLowerCase().includes(needle))
+                        .map(row => renderFlatLeaf(row, 'worktree:'))}
+                    </>
+                  )}
+                  {grouped.remoteDisplayRows.some(row => row.name.toLowerCase().includes(needle)) && (
+                    <>
+                      {renderGroupHeader(t('menuRemoteBranches'), searchLeafCount(remoteTree), true)}
+                      {renderSearch(remoteTree, 1, 'remote:')}
+                    </>
+                  )}
+                </>
+              )}
+              {/* Two distinct empties: a filter that matched nothing
+                * ("no MATCHES") versus a menu with no rows at all — a
+                * detached HEAD's started worktree session, a fresh repo.
+                * "No matching branches" under zero rows would blame the
+                * search the user never typed. */}
+              {visible.length === 0
+                && <div className={css.menuEmpty}>{rows.length === 0 ? t('menuNoBranches') : t('menuNoMatches')}</div>}
             </div>
             <div className={css.menuSearchWrap}>
               <input
@@ -1045,6 +1359,7 @@ export function BranchMenu({
           aria-label={confirm.ask}
         >
           <p className={css.popAsk}>{confirm.ask}</p>
+          {confirm.subject !== undefined && <p className={css.popSubject}>{confirm.subject}</p>}
           <div className={css.popActions}>
             <button type="button" disabled={confirm.busy} onClick={confirm.onCancel}>
               {confirm.cancelLabel}

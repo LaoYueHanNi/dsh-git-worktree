@@ -8,9 +8,14 @@
 export type GitWorktreeKey =
   | 'chipWorktree'
   | 'worktreeToggle'
+  | 'menuBranches'
   | 'menuLocalBranches'
+  | 'menuWorktrees'
+  | 'menuRemoteBranches'
+  | 'mainRepoOnly'
   | 'menuSearchPlaceholder'
   | 'menuNoMatches'
+  | 'menuNoBranches'
   | 'menuLocate'
   | 'menuExpandAll'
   | 'menuCollapseAll'
@@ -23,9 +28,13 @@ export type GitWorktreeKey =
   | 'fetchDone'
   | 'updateDone'
   | 'updateUpToDate'
+  | 'aheadTitle'
+  | 'behindTitle'
   | 'switchAsk'
+  | 'switchAskRemote'
   | 'switchBusy'
   | 'worktreeAskNew'
+  | 'worktreeAskRemote'
   | 'worktreeAskReuse'
   | 'worktreeAskCutOut'
   | 'worktreeBusy'
@@ -54,9 +63,14 @@ export type GitWorktreeKey =
 export const en: Record<GitWorktreeKey, string> = {
   chipWorktree: 'Worktree',
   worktreeToggle: 'Create an isolated worktree',
+  menuBranches: 'Branches',
   menuLocalBranches: 'Local branches',
+  menuWorktrees: 'Worktrees',
+  menuRemoteBranches: 'Remote branches',
+  mainRepoOnly: 'Branch operations start from the main checkout',
   menuSearchPlaceholder: 'Search branches',
   menuNoMatches: 'No matching branches',
+  menuNoBranches: 'No branches yet',
   menuLocate: 'Locate current branch',
   menuExpandAll: 'Expand all',
   menuCollapseAll: 'Collapse all',
@@ -69,9 +83,13 @@ export const en: Record<GitWorktreeKey, string> = {
   fetchDone: 'Remote branches synced',
   updateDone: '{branch} fast-forwarded to its upstream',
   updateUpToDate: 'Already up to date',
+  aheadTitle: '{n} commits ahead of upstream',
+  behindTitle: '{n} commits behind upstream',
   switchAsk: 'Switch to {branch}?',
+  switchAskRemote: 'Check out this remote branch?',
   switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
+  worktreeAskRemote: 'Create a worktree from this remote branch?',
   worktreeAskReuse: 'Switch to the {branch} worktree?',
   worktreeAskCutOut: 'Cut a new branch out of {branch} into an isolated worktree',
   worktreeBusy: 'Creating…',
@@ -101,9 +119,14 @@ export const en: Record<GitWorktreeKey, string> = {
 export const zh: Record<GitWorktreeKey, string> = {
   chipWorktree: '工作树',
   worktreeToggle: '创建隔离工作树',
+  menuBranches: '分支',
   menuLocalBranches: '本地分支',
+  menuWorktrees: '工作树',
+  menuRemoteBranches: '远程分支',
+  mainRepoOnly: '分支操作请在主仓库发起',
   menuSearchPlaceholder: '搜索分支',
   menuNoMatches: '没有匹配的分支',
+  menuNoBranches: '暂无分支',
   menuLocate: '定位当前分支',
   menuExpandAll: '全部展开',
   menuCollapseAll: '全部折叠',
@@ -116,9 +139,13 @@ export const zh: Record<GitWorktreeKey, string> = {
   fetchDone: '远程分支已同步',
   updateDone: '{branch} 已快进到远程最新',
   updateUpToDate: '已是最新',
+  aheadTitle: '领先上游 {n} 个提交',
+  behindTitle: '落后上游 {n} 个提交',
   switchAsk: '是否切到 {branch}？',
+  switchAskRemote: '是否检出该远程分支？',
   switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',
+  worktreeAskRemote: '从该远程分支新建工作树？',
   worktreeAskReuse: '是否切到 {branch} 工作树？',
   worktreeAskCutOut: '从当前分支 {branch} 切出新分支到隔离工作树',
   worktreeBusy: '创建中…',
