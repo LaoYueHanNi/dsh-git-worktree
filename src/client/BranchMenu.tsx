@@ -219,6 +219,15 @@ const FLY_MEASURE: Partial<CSSStyleDeclaration> = { left: '-9999px', top: '0px',
  * about the default opening depth, never about flat vs tree. */
 const TREE_MIN_ROWS = 8
 
+/** Leaf rows indent one chevron slot PAST their tree depth. Folder headers
+ * lead with a collapsing chevron (12px icon + 6px gap) that leaf rows lack
+ * — without compensation a leaf's text starts LEFT of its own group header's
+ * text and same-level leaves read shallower than folders. The extra 18px
+ * aligns same-level leaf TEXT with folder TEXT (the VS Code file-tree
+ * posture: a chevron column marks foldable rows, a text column carries
+ * content), so leaf padding is 8 + 12×depth + 18. */
+const LEAF_CHEVRON_SLOT = 18
+
 /** One node of the '/' prefix tree built from the row list: every segment
  * boundary is a folder level, so `feature/x/y` nests under `feature` and
  * `x`, and the leaves (rows) sit at the terminal nodes. */
@@ -1045,7 +1054,7 @@ export function BranchMenu({
       data-kind={node.leaf?.kind}
       className={rowClass(node.leaf ?? null, node.path)}
       title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
-      style={{ paddingLeft: 8 + depth * 12 }}
+      style={{ paddingLeft: 8 + depth * 12 + LEAF_CHEVRON_SLOT }}
       onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
       onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
       onMouseEnter={(event) => { gateTooltip(event.currentTarget, node.path) }}
@@ -1074,7 +1083,7 @@ export function BranchMenu({
       data-kind={row.kind}
       className={rowClass(row, row.name)}
       title={row.locked === true ? t('mainRepoOnly') : row.path}
-      style={{ paddingLeft: 8 + 12 }}
+      style={{ paddingLeft: 8 + 12 + LEAF_CHEVRON_SLOT }}
       onClick={() => { if (guardActive()) return; rowClick(buttonOf(row.name), row.name) }}
       onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, row.name) }}
       onMouseEnter={(event) => { gateTooltip(event.currentTarget, row.name) }}
@@ -1144,7 +1153,7 @@ export function BranchMenu({
             data-kind={node.leaf?.kind}
             className={rowClass(node.leaf ?? null, node.path)}
             title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
-            style={{ paddingLeft: 8 + depth * 12 }}
+            style={{ paddingLeft: 8 + depth * 12 + LEAF_CHEVRON_SLOT }}
             onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
             onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
             onMouseEnter={(event) => { gateTooltip(event.currentTarget, node.path) }}
