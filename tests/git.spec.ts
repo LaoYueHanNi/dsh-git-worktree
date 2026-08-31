@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { normalize } from 'node:path'
+import { normalize, resolve } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, probeRepo, switchBranch, updateBranch,
+  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, probeRepo, probeWorkspaceGit, switchBranch, updateBranch,
   type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -328,5 +328,63 @@ describe('updateBranch', () => {
         out: { code: 128, stderr: 'fatal: Not possible to fast-forward, aborting.\n' } },
     ])
     await expect(updateBranch(exec, '/repo')).rejects.toThrow('Not possible to fast-forward')
+  })
+})
+
+describe('probeWorkspaceGit', () => {
+  /** Platform-real directory shapes — Windows runs get drive-qualified paths. */
+  const REPO = resolve('/repo')
+  const WT = resolve('/wt/feat-x')
+  /** Git porcelain prints forward slashes even on Windows. */
+  const slashes = (value: string): string => value.replace(/\\/g, '/')
+
+  it('marks a main checkout main and reports its branch', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { stdout: `${slashes(REPO)}\n` } },
+      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '.git\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+    ])
+    expect(await probeWorkspaceGit(exec, REPO)).toEqual({
+      repoRoot: REPO, repoName: 'repo', branch: 'main', main: true,
+    })
+  })
+
+  it('groups a linked worktree under the main repository its common dir names', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { stdout: `${slashes(WT)}\n` } },
+      // GIT_COMMON_DIR of a linked worktree is the path back to the SHARED
+      // `<repo>/.git` — real git often prints it relative to the worktree.
+      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '../../repo/.git\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: 'feat-x\n' } },
+    ])
+    // Same grouping key as the main checkout probe above: both resolve the
+    // common dir to `<REPO>/.git`, both answer repoRoot REPO.
+    expect(await probeWorkspaceGit(exec, WT)).toEqual({
+      repoRoot: REPO, repoName: 'repo', branch: 'feat-x', main: false,
+    })
+  })
+
+  it('normalizes a detached or unborn HEAD to a null branch', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { stdout: `${slashes(REPO)}\n` } },
+      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '.git\n' } },
+      { args: ['branch', '--show-current'], out: { stdout: '\n' } },
+    ])
+    expect((await probeWorkspaceGit(exec, REPO))?.branch).toBeNull()
+  })
+
+  it('answers undefined outside any git repository', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { code: 128, stderr: 'fatal: not a git repository\n' } },
+    ])
+    expect(await probeWorkspaceGit(exec, '/plain')).toBeUndefined()
+  })
+
+  it('answers undefined when the common dir cannot be resolved', async () => {
+    const exec = scripted([
+      { args: ['rev-parse', '--show-toplevel'], out: { stdout: `${slashes(REPO)}\n` } },
+      { args: ['rev-parse', '--git-common-dir'], out: { code: 128, stderr: 'fatal: bad revision\n' } },
+    ])
+    expect(await probeWorkspaceGit(exec, REPO)).toBeUndefined()
   })
 })

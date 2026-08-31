@@ -46,7 +46,7 @@
  * directory is fixed, so the group only exists while blank.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Button, IconBranchOutline16, Toast,
@@ -152,7 +152,7 @@ const POP_MARGIN = 12
 const POP_GAP = 6
 /** Unplaced dialog: hidden but laid out at a fixed origin so offsetWidth is
  * real for the measure-then-place pass (BranchMenu's flyout trick). */
-const POP_MEASURE: Partial<CSSStyleDeclaration> = { left: '-9999px', bottom: '0px', visibility: 'hidden' }
+const POP_MEASURE: CSSProperties = { left: '-9999px', bottom: '0px', visibility: 'hidden' }
 
 /**
  * Clamp a branch name for chip display: names up to 25 chars pass through;
@@ -190,8 +190,8 @@ function buildBranchRows(
     ...branches.filter(b => b.kind === 'local' && !held.has(b.name)).map(b => ({
       name: b.name,
       kind: 'local' as const,
-      ahead: b.ahead,
-      behind: b.behind,
+      ...b.ahead === undefined ? {} : { ahead: b.ahead },
+      ...b.behind === undefined ? {} : { behind: b.behind },
       locked: lock(b.name),
     })),
     ...branches.filter(b => b.kind === 'remote').map(b => ({
@@ -568,7 +568,12 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
       const current = facts.branches.find(b => b.kind === 'local' && b.name === facts.currentBranch)
       return current === undefined
         ? []
-        : [{ name: current.name, kind: 'local' as const, ahead: current.ahead, behind: current.behind }]
+        : [{
+            name: current.name,
+            kind: 'local' as const,
+            ...current.ahead === undefined ? {} : { ahead: current.ahead },
+            ...current.behind === undefined ? {} : { behind: current.behind },
+          }]
     }
     return buildBranchRows(facts.branches, facts.worktrees, facts.currentBranch, inLinkedWorktree)
   }, [facts, inLinkedWorktree, session.blank])
@@ -620,7 +625,7 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         : confirm.remote === true
           ? t('switchAskRemote')
           : t('switchAsk', { branch: confirm.branch }),
-    subject: confirm.remote === true ? confirm.branch : undefined,
+    ...confirm.remote === true ? { subject: confirm.branch } : {},
     confirmLabel: busy
       ? (confirm.kind === 'worktree' || confirm.kind === 'worktree-cutout' ? t('worktreeBusy') : t('switchBusy'))
       : t('actionConfirm'),
@@ -757,13 +762,13 @@ export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree,
         <ChipConfirm
           anchorRef={chipRef}
           {...confirmBundle}
-          draft={isCutout ? cutoutDraft : undefined}
-          onDraftChange={isCutout
-            ? (value) => { setConfirm(current => current?.kind === 'worktree-cutout' ? { ...current, draft: value } : current) }
-            : undefined}
+          {...isCutout ? { draft: cutoutDraft } : {}}
+          {...isCutout
+            ? { onDraftChange: (value: string) => { setConfirm(current => current?.kind === 'worktree-cutout' ? { ...current, draft: value } : current) } }
+            : {}}
           draftPlaceholder={t('menuNewBranchPlaceholder')}
-          draftInvalid={isCutout ? !cutoutValid : undefined}
-          draftHint={cutoutHint}
+          {...isCutout && !cutoutValid ? { draftInvalid: true } : {}}
+          {...cutoutHint === undefined ? {} : { draftHint: cutoutHint }}
         />
       )}
       {toast !== null && <Toast key={toast.seq} text={toast.text} onDone={() => { setToast(null) }} />}

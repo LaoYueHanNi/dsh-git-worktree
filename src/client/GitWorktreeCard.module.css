@@ -246,3 +246,70 @@
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 1px;
 }
+
+/* Sidebar-grouping switch: title + hint + caution beside a checkbox. */
+.toggleRow {
+  margin-top: 10px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.toggleText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toggleLabel {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.toggleMark {
+  margin-left: 4px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.toggleHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.toggleNote {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.toggleControl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-top: 2px;
+}
+
+.spinner {
+  display: flex;
+  color: var(--dsw-alias-label-tertiary);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.toggle {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+}
+
+.toggle:disabled {
+  cursor: progress;
+}

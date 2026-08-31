@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { sectionOf, validateConfig } from '../src/index.ts'
 import {
   loadLegacySettings, migratedFileOf, planLegacyMigration, settingsFileOf, validateRootDir,
 } from '../src/settings.ts'
@@ -90,5 +91,20 @@ describe('settings file locations', () => {
   it('appends .migrated for the backup name', () => {
     expect(migratedFileOf('/home/u/.dsh/git-worktree/settings.json'))
       .toBe('/home/u/.dsh/git-worktree/settings.json.migrated')
+  })
+})
+
+describe('config section shapes', () => {
+  it('spells the grouping default ON in the composition layer', () => {
+    expect(sectionOf({})).toEqual({ groupSidebar: true })
+    expect(sectionOf({ groupSidebar: false })).toEqual({ groupSidebar: false })
+    expect(sectionOf({ rootDir: 'D:\\wt' })).toEqual({ rootDir: 'D:\\wt', groupSidebar: true })
+  })
+
+  it('validates the grouping key and rejects unknown keys', () => {
+    expect(() => validateConfig({})).not.toThrow()
+    expect(() => validateConfig({ groupSidebar: false })).not.toThrow()
+    expect(() => validateConfig({ groupSidebar: 'yes' })).toThrow('"groupSidebar" must be a boolean')
+    expect(() => validateConfig({ groupSidebar: true, nope: 1 })).toThrow('unknown key "nope"')
   })
 })

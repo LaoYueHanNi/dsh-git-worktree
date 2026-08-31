@@ -3,7 +3,7 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 import { type DirExists, type Exec } from './git.js';
-import type { CreateBranchResult, CreateWorktreeResult, FetchResult, RepoStatus, RouteError, SwitchResult, UpdateResult } from './wire.js';
+import type { CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, RepoStatus, RouteError, SwitchResult, UpdateResult } from './wire.js';
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
     exec: Exec;
@@ -19,8 +19,18 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
     status: number;
-    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | RouteError;
+    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | RouteError;
 }
+/**
+ * POST /group — git belonging facts for a batch of workspace directories.
+ * Deduplicates, validates, probes in bounded batches, and answers 200 with
+ * per-path facts (null for non-repositories); a repository-wide git failure
+ * is a per-path null, never a 500 — the sidebar must degrade to flat, not
+ * error out.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ paths }`.
+ */
+export declare function handleGroupWorktrees(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
 /**
  * GET /status 鈥?repository facts for one directory.
  * @param deps - host dependencies.

@@ -69,7 +69,7 @@
  * or under it, every folder starts open — few branches have nothing to hide.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconCheckOutline16,
@@ -211,7 +211,7 @@ const FLY_MAX_WIDTH = 400
 const CLICK_GUARD_MS = 250
 /** Unplaced flyout: hidden but laid out at a fixed origin so offsetWidth/
  * offsetHeight are real for the measure-then-place pass (base Menu trick). */
-const FLY_MEASURE: Partial<CSSStyleDeclaration> = { left: '-9999px', top: '0px', visibility: 'hidden' }
+const FLY_MEASURE: CSSProperties = { left: '-9999px', top: '0px', visibility: 'hidden' }
 
 /** Past this many rows the tree starts with ONLY the checked-out branch's
  * chain open; at or under it every folder starts open (few branches have
@@ -331,10 +331,12 @@ function buildTree(rows: readonly BranchRow[]): TreeNode[] {
     let level = root
     let path = ''
     for (let i = 0; i < segs.length; i += 1) {
-      path = path === '' ? segs[i] : `${path}/${segs[i]}`
-      let node = find(level, segs[i])
+      const seg = segs[i]
+      if (seg === undefined) break
+      path = path === '' ? seg : `${path}/${seg}`
+      let node = find(level, seg)
       if (node === undefined) {
-        node = { segment: segs[i], path, depth: i, leaf: null, children: [], total: 0 }
+        node = { segment: seg, path, depth: i, leaf: null, children: [], total: 0 }
         level.push(node)
       }
       if (i === segs.length - 1) node.leaf = row
@@ -368,7 +370,9 @@ function chainExpanded(branch: string): Set<string> {
   const set = new Set<string>()
   let path = ''
   for (let i = 0; i < segs.length - 1; i += 1) {
-    path = path === '' ? segs[i] : `${path}/${segs[i]}`
+    const seg = segs[i]
+    if (seg === undefined) break
+    path = path === '' ? seg : `${path}/${seg}`
     set.add(path)
   }
   return set
@@ -826,6 +830,7 @@ export function BranchMenu({
         if (key === 'ArrowDown') next = idx < 0 ? 0 : Math.min(leaves.length - 1, idx + 1)
         else next = idx <= 0 ? leaves.length - 1 : idx - 1
         const target = leaves[next]
+        if (target === undefined) return
         const name = target.dataset.branch ?? null
         if (name !== null) setSelected(name)
         target.focus()
@@ -896,9 +901,10 @@ export function BranchMenu({
   }
 
   /** Row class composition: base + HEAD tint + selection (selection wins)
-   * + the locked dim. */
+   * + the locked dim. (`css` is an index-signature record, so noUncheckedIndexedAccess
+   * types every class as possibly absent — the base falls back to ''.) */
   const rowClass = (row: BranchRow | null, name: string): string => {
-    let cls = css.menuRow
+    let cls = css.menuRow ?? ''
     if (name === currentBranch) cls += ` ${css.menuRowSelected}`
     if (name === selected) cls += ` ${css.menuRowPicked}`
     if (row?.locked === true) cls += ` ${css.menuRowLocked}`
@@ -930,8 +936,10 @@ export function BranchMenu({
    * re-picks it (the old one-click flow — the flyout re-anchors); without
    * one it just selects (IDEA model — double-click or Enter opens the
    * confirm flyout for the selected row). Locked rows do neither: dimmed
-   * rows are not selectable, the double-click is the hint's stage. */
-  const rowClick = (el: HTMLButtonElement, name: string): void => {
+   * rows are not selectable, the double-click is the hint's stage. `el` is
+   * nullable like {@link pick}'s anchor: a row whose button is already
+   * unmounted still selects/picks, it just re-anchors nothing. */
+  const rowClick = (el: HTMLButtonElement | null, name: string): void => {
     if (isLocked(name)) return
     if (confirmOpen) pick(el, name)
     else setSelected(name)
@@ -1105,8 +1113,10 @@ export function BranchMenu({
       let cur = node
       const parts: string[] = []
       while (cur.leaf === null && cur.children.length === 1) {
+        const next = cur.children[0]
+        if (next === undefined) break
         parts.push(cur.segment)
-        cur = cur.children[0]
+        cur = next
       }
       const label = parts.length === 0 ? cur.segment : `${parts.join('/')}/${cur.segment}`
       if (cur.leaf !== null) {

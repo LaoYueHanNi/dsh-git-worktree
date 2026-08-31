@@ -2,7 +2,7 @@
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-![Web 界面中的 dsh-git-worktree](gitworktree.png)
+![Web 界面中的 dsh-git-worktree](gitworktree_zh.png)
 
 简体中文 | [English](./README.md)
 
@@ -33,6 +33,9 @@
 - **更新当前分支**：实线箭头（虚线提取旁）更新**当前分支**——先 fetch 全部远程，再把当前分支快进（`--ff-only`）到其上游。本地分叉、无上游、工作区改动冲突都会被拒绝并给出 git 原话；插件绝不代你 stash 或改写历史。
 - **工作树隔离**：空白会话上勾选**「工作树」**立即在 chip 上方弹出「从当前分支切出」确认弹窗——弹窗内可**编辑新分支名**（预填第一个空闲的 `<当前分支>-wt`，重名自动递增 `-wt2`、`-wt3`…），确认后从当前检出切出**新分支**并隔离到全新 worktree；分支 chip 的菜单仍可打开，选其他分支则在 `~/.dsh/gitworktree/<仓库>-<分支>/` 下执行 `git worktree add`。两条路径都会注册为真实工作区并跳转到新目录的空白会话。重复选同一分支直接复用；失效注册自动 prune 恢复。取消确认弹窗后直接发消息，即默许在当前目录开始会话。
 - **存放根路径可配**：**设置 → 插件**页签下的 **Git 工作树** 卡片 —— 原生目录选择器或手输绝对路径，保存即生效（新建的 worktree 落在新目录，已有的留在原地，git 仍能识别复用）。留空使用默认 `$DSH_HOME/gitworktree`（`~/.dsh/gitworktree`）。设置存于 dsh 统一设置文档；旧版 `~/.dsh/git-work-tree/settings.json` 的已保存值会在升级后自动迁入（原文件改名 `.migrated` 保留）。
+- **聚合工作区**：DSH 尚未开放多工作区聚合接口，故按原生侧边栏 1:1 替换左侧列表，并把同一仓库的主仓库与 worktree 工作区聚成可折叠的**仓库组**——主行显示 `主仓库（分支）`，工作树行显示分支。分组从磁盘 git 事实派生、不存关系数据；没有 worktree 的仓库保持单行。设置卡 **聚合工作区**（测试功能，默认开）可随时切回原生。
+
+  ![侧边栏按仓库聚合工作区](sidebar-grouping_zh.png)
 
 ## 安装
 

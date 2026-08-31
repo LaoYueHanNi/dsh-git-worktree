@@ -57,6 +57,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-settings-plugins"
       ]
@@ -86,10 +87,12 @@
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-settings-plugins": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.7",
     "@types/node": "^24.13.3",
     "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
     "playwright-core": "^1.55.1",
     "react": "^18.2.0",
     "tsdown": "^0.14.0",

@@ -23,13 +23,13 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleFetch, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleFetch, handleGroupWorktrees, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps, type RouteOutcome,
 } from './routes.js'
 import {
   loadLegacySettings, migratedFileOf, planLegacyMigration, settingsFileOf, validateRootDir,
 } from './settings.js'
-import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_GROUP, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -41,16 +41,21 @@ const BODY_LIMIT = 64 * 1024
 export interface Config {
   /** Worktree storage root; defaults to `$DSH_HOME/gitworktree` (`~/.dsh/gitworktree`). */
   rootDir?: string
+  /** Sidebar git grouping on/off; absent = on (the composition-entry layer's default). */
+  groupSidebar?: boolean
 }
 
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: Config): void {
-  const unknown = Object.keys(config).find(key => key !== 'rootDir')
+  const unknown = Object.keys(config).find(key => key !== 'rootDir' && key !== 'groupSidebar')
   if (unknown !== undefined) {
     throw new Error(`GitWorktreeConfig: unknown key "${unknown}"`)
   }
   if (config.rootDir !== undefined && (typeof config.rootDir !== 'string' || config.rootDir.length === 0)) {
     throw new Error('GitWorktreeConfig: "rootDir" must be a non-empty string')
+  }
+  if (config.groupSidebar !== undefined && typeof config.groupSidebar !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "groupSidebar" must be a boolean')
   }
   validateRootDir(config.rootDir)
 }
@@ -58,20 +63,28 @@ export function validateConfig(config: Config): void {
 /** The settings namespace this plugin serves; its browser card spells the same string. */
 export const GIT_WORKTREE_NS = settingsNamespace('git-worktree')
 
-/** The settings-facing subset of the config: the worktree storage root. */
+/** The settings-facing subset of the config: the worktree storage root and the sidebar grouping switch. */
 export interface SectionConfig {
   /** Worktree storage root; absent/blank selects `$DSH_HOME/gitworktree`. */
   rootDir?: string
+  /** Whether the sidebar groups same-repository workspaces; absent = on. */
+  groupSidebar?: boolean
 }
 
 /** Schema resolving the `git-worktree` settings section. */
 export const sectionSchema: z<SectionConfig> = z.object({
   rootDir: z.string(),
+  groupSidebar: z.boolean(),
 })
 
 /** The section-shaped view of a config: absent keys stay absent (`exactOptionalPropertyTypes`). */
 export function sectionOf(config: Config): SectionConfig {
-  return { ...(config.rootDir === undefined ? {} : { rootDir: config.rootDir }) }
+  return {
+    ...(config.rootDir === undefined ? {} : { rootDir: config.rootDir }),
+    // The composition layer spells the shipped default (grouping ON) so a
+    // user-layer unset can always fall back to it.
+    groupSidebar: config.groupSidebar ?? true,
+  }
 }
 
 /**
@@ -96,7 +109,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   installSettingsSection(ctx, GIT_WORKTREE_NS, sectionSchema, sectionOf(config), {
-    validate: value => validateRootDir(value.rootDir),
+    validate: value => {
+      validateRootDir(value.rootDir)
+      if (value.groupSidebar !== undefined && typeof value.groupSidebar !== 'boolean') {
+        throw new Error('groupSidebar must be a boolean')
+      }
+    },
     setSource: (source) => { sectionSource = source },
     onChange: () => {
       // The storage root takes effect live: the routes read the section
@@ -200,6 +218,14 @@ export function apply(ctx: Context, config: Config = {}): void {
         send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
       }
     } }), 'git-worktree: fetch route')
+
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_GROUP, handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        send(res, await handleGroupWorktrees(deps(), await readJson(req)))
+      } catch (error) {
+        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
+      }
+    } }), 'git-worktree: group route')
 
     webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_UPDATE, handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {

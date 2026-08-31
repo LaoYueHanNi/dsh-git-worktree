@@ -16,7 +16,7 @@
  */
 
 import { useState } from 'react'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutline14, IconLoadingOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CardActions, CardStore } from './card-form.ts'
 import css from './GitWorktreeCard.module.css'
@@ -120,6 +120,32 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
               {t('cardRootDirHint')}
               {state.overridden ? ` ${t('cardOverridden')}` : ''}
             </p>
+            <label className={`${css.field} ${css.toggleRow}`} aria-busy={state.groupingPending}>
+              <span className={css.toggleText}>
+                <span className={css.toggleLabel}>
+                  {t('cardGroupSidebarLabel')}
+                  <span className={css.toggleMark}>{t('cardGroupSidebarMark')}</span>
+                </span>
+                <span className={css.toggleHint}>{t('cardGroupSidebarHint')}</span>
+                <span className={css.toggleNote}>{t('cardGroupSidebarNote')}</span>
+              </span>
+              <span className={css.toggleControl}>
+                {state.groupingPending
+                  ? (
+                    <span className={css.spinner} role="status" aria-label={t('cardGroupSidebarBusy')}>
+                      <IconLoadingOutline16 size={14} />
+                    </span>
+                  )
+                  : null}
+                <input
+                  className={css.toggle}
+                  type="checkbox"
+                  disabled={lockInput || state.groupingPending}
+                  checked={state.groupSidebar}
+                  onChange={event => { props.setGroupSidebar(event.target.checked) }}
+                />
+              </span>
+            </label>
             <div className={css.footer}>
               {state.failed
                 ? <p className={css.failed} role="status">{t('cardSaveFailed')}</p>

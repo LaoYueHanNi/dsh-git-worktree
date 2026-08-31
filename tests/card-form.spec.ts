@@ -98,6 +98,90 @@ describe('CardForm projection', () => {
     expect(store.getSnapshot().rootDir).toBe('/data/wt')
     expect(store.getSnapshot().overridden).toBe(true)
   })
+
+  it('defaults the grouping switch on and follows live writes', async () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    const store = form.bind()
+    expect(store.getSnapshot().groupSidebar).toBe(true)
+    expect(store.getSnapshot().groupingPending).toBe(false)
+    await form.actions().setGroupSidebar(false)
+    expect(scope.writes).toEqual([{ op: 'set', field: 'groupSidebar', value: false }])
+    expect(store.getSnapshot().groupSidebar).toBe(false)
+    expect(store.getSnapshot().groupingPending).toBe(false)
+    expect(store.getSnapshot().dirty).toBe(false)
+    await form.actions().setGroupSidebar(true)
+    expect(store.getSnapshot().groupSidebar).toBe(true)
+  })
+
+  it('flips the switch and marks pending before the write lands', async () => {
+    const scope = new FakeScope({})
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const originalSet = scope.set.bind(scope)
+    scope.set = async (field, value) => {
+      await gate
+      return originalSet(field, value)
+    }
+    const form = new CardForm(scope)
+    const store = form.bind()
+    const pending = form.actions().setGroupSidebar(false)
+    const deadline = Date.now() + 500
+    while (!store.getSnapshot().groupingPending && Date.now() < deadline) {
+      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+    }
+    expect(store.getSnapshot()).toMatchObject({ groupSidebar: false, groupingPending: true, dirty: false })
+    expect(scope.writes).toEqual([])
+    release()
+    await pending
+    expect(store.getSnapshot()).toMatchObject({ groupSidebar: false, groupingPending: false })
+    expect(scope.writes).toEqual([{ op: 'set', field: 'groupSidebar', value: false }])
+  })
+
+  it('keeps groupingPending until the seat callback settles on disable and enable', async () => {
+    const scope = new FakeScope({})
+    let release!: () => void
+    let gate = new Promise<void>(resolve => { release = resolve })
+    const seen: boolean[] = []
+    const form = new CardForm(scope, async (enabled) => {
+      seen.push(enabled)
+      await gate
+    })
+    const store = form.bind()
+
+    const disable = form.actions().setGroupSidebar(false)
+    const untilPending = Date.now() + 500
+    while (!store.getSnapshot().groupingPending && Date.now() < untilPending) {
+      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+    }
+    const untilWrite = Date.now() + 500
+    while (seen.length === 0 && Date.now() < untilWrite) {
+      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+    }
+    expect(seen).toEqual([false])
+    expect(store.getSnapshot().groupingPending).toBe(true)
+    release()
+    await disable
+    expect(store.getSnapshot().groupingPending).toBe(false)
+
+    gate = new Promise<void>(resolve => { release = resolve })
+    const enable = form.actions().setGroupSidebar(true)
+    const untilEnable = Date.now() + 500
+    while (seen.length < 2 && Date.now() < untilEnable) {
+      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+    }
+    expect(seen).toEqual([false, true])
+    expect(store.getSnapshot().groupingPending).toBe(true)
+    release()
+    await enable
+    expect(store.getSnapshot().groupingPending).toBe(false)
+  })
+
+  it('projects a stored off switch without staging', () => {
+    const scope = new FakeScope({ groupSidebar: false }, { user: { groupSidebar: false } })
+    const form = new CardForm(scope)
+    expect(form.bind().getSnapshot()).toMatchObject({ groupSidebar: false, dirty: false })
+  })
 })
 
 describe('CardForm staging', () => {

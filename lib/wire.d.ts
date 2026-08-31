@@ -18,6 +18,8 @@ export declare const ROUTE_BRANCH = "/plugin/git-worktree/branch";
 export declare const ROUTE_FETCH = "/plugin/git-worktree/fetch";
 /** POST ROUTE_PREFIX/update — fast-forward the current branch to its upstream. */
 export declare const ROUTE_UPDATE = "/plugin/git-worktree/update";
+/** POST ROUTE_PREFIX/group — git belonging facts for a batch of workspace paths. */
+export declare const ROUTE_GROUP = "/plugin/git-worktree/group";
 /** One selectable branch row. */
 export interface BranchEntry {
     /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -132,4 +134,25 @@ export interface UpdateResult {
 /** Error envelope every non-2xx response carries. */
 export interface RouteError {
     error: string;
+}
+/** Git belonging facts of one workspace directory; null = not a git repository. */
+export interface WorkspaceGitFacts {
+    /** Grouping key: the repository's main worktree directory (canonical). */
+    repoRoot: string;
+    /** Group title: the main repository directory basename. */
+    repoName: string;
+    /** Branch checked out by this directory; null = detached or unborn HEAD. */
+    branch: string | null;
+    /** True when this directory IS the main worktree (holds the shared .git). */
+    main: boolean;
+}
+/** POST group request body. */
+export interface GroupWorkspacesBody {
+    /** Absolute workspace directories to probe (deduped server-side). */
+    paths: string[];
+}
+/** POST group response body — one entry per DISTINCT requested path. */
+export interface GroupWorkspacesResult {
+    /** Git facts per path; null marks a path outside any git repository. */
+    facts: Record<string, WorkspaceGitFacts | null>;
 }

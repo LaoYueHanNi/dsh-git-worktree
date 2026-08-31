@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, FetchResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
+  CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_GROUP, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -105,4 +105,14 @@ export function requestFetch(repoPath: string): Promise<Call<FetchResult>> {
  */
 export function requestUpdate(repoPath: string): Promise<Call<UpdateResult>> {
   return post<UpdateResult>(ROUTE_UPDATE, { repoPath })
+}
+
+/**
+ * Git belonging facts for a batch of workspace directories; a path outside
+ * any git repository answers null, a failed route call answers the error
+ * envelope (the sidebar then renders flat, its degrade shape).
+ * @param paths - absolute workspace directories to probe.
+ */
+export async function requestGroupWorktrees(paths: readonly string[]): Promise<Call<GroupWorkspacesResult>> {
+  return post<GroupWorkspacesResult>(ROUTE_GROUP, { paths })
 }

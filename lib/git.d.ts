@@ -3,7 +3,7 @@
  * injectable `exec` seam (tests substitute it); every method is plain
  * argument assembly plus porcelain parsing, no ambient state.
  */
-import type { BranchEntry, WorktreeEntry } from './wire.js';
+import type { BranchEntry, WorktreeEntry, WorkspaceGitFacts } from './wire.js';
 /** One process result as the seam reports it. */
 export interface ExecResult {
     code: number;
@@ -152,3 +152,23 @@ export interface UpdateOutcome {
 export declare function updateBranch(exec: Exec, cwd: string): Promise<UpdateOutcome>;
 /** Guard for route inputs: a non-empty absolute directory path. */
 export declare function isAbsoluteDir(value: string): boolean;
+/**
+ * Lightweight git belonging probe for ONE workspace directory: the three
+ * facts the sidebar grouping needs and nothing else (no branch list, no
+ * worktree list — {@link probeRepo} stays the full-facts path for the chip).
+ *
+ * `repoRoot` — the grouping key — is derived from `--git-common-dir`, which
+ * names the SHARED `<repo>/.git` from every worktree of the repository: the
+ * main checkout reports it directly, a linked worktree reports the path back
+ * to it. Both therefore resolve to the same repository root and group
+ * together, wherever the linked folder physically lives.
+ * `main` is decided without `worktree list`: a directory is the main worktree
+ * exactly when its own toplevel holds that shared .git.
+ * `branch` normalizes detached/unborn HEAD to null HERE so no consumer
+ * downstream ever string-compares against git's synthetic `'HEAD'`.
+ * @param exec - executor seam.
+ * @param path - absolute directory the workspace reports.
+ * @returns the facts, or undefined outside any git repository (a missing git
+ * binary surfaces the same way — a non-zero exit through the seam).
+ */
+export declare function probeWorkspaceGit(exec: Exec, path: string): Promise<WorkspaceGitFacts | undefined>;

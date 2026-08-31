@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, normalize } from 'node:path'
+import { join, normalize, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleFetch, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleFetch, handleGroupWorktrees, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -426,5 +426,80 @@ describe('resolveRootDir', () => {
 
   it('uses a configured root verbatim', () => {
     expect(resolveRootDir(' D:\\wt ', '/home/u', '/env-home')).toBe('D:\\wt')
+  })
+})
+
+describe('handleGroupWorktrees', () => {
+  /** Platform-real directory shapes — Windows runs get drive-qualified paths. */
+  const REPO = resolve('/repo')
+  const WT = resolve('/wt/feat-x')
+
+  /**
+   * Executor keyed by cwd then argument prefix: /group probes MANY
+   * directories with the SAME commands, so the argument-keyed scripted()
+   * above cannot tell them apart.
+   */
+  function cwdScripted(table: Record<string, Record<string, Partial<ExecResult>>>): Exec {
+    return async (_file, args, options) => {
+      const perDir = table[options.cwd]
+      if (perDir === undefined) throw new Error(`unexpected cwd: ${options.cwd}`)
+      const key = args.join(' ')
+      const entry = Object.entries(perDir).find(([prefix]) => key === prefix || key.startsWith(prefix))
+      if (entry === undefined) throw new Error(`unexpected git call in ${options.cwd}: git ${key}`)
+      return { code: 0, stdout: '', stderr: '', ...entry[1] }
+    }
+  }
+
+  /** Main checkout answers: own toplevel, shared .git, branch main. */
+  const MAIN_CALLS = {
+    'rev-parse --show-toplevel': { stdout: `${REPO.replace(/\\/g, '/')}\n` },
+    'rev-parse --git-common-dir': { stdout: '.git\n' },
+    'branch --show-current': { stdout: 'main\n' },
+  } satisfies Record<string, Partial<ExecResult>>
+
+  /** Linked worktree answers: its own toplevel, common dir back to REPO. */
+  const LINKED_CALLS = {
+    'rev-parse --show-toplevel': { stdout: `${WT.replace(/\\/g, '/')}\n` },
+    'rev-parse --git-common-dir': { stdout: '../../repo/.git\n' },
+    'branch --show-current': { stdout: 'feat-x\n' },
+  } satisfies Record<string, Partial<ExecResult>>
+
+  it('rejects a malformed body, relative paths, and unknown keys', async () => {
+    expect((await handleGroupWorktrees(deps(), undefined)).status).toBe(400)
+    expect((await handleGroupWorktrees(deps(), { paths: 'x' })).status).toBe(400)
+    expect((await handleGroupWorktrees(deps(), { paths: ['repo/sub'] })).status).toBe(400)
+    expect((await handleGroupWorktrees(deps(), { paths: [REPO], extra: 1 })).status).toBe(400)
+  })
+
+  it('caps distinct paths at 256', async () => {
+    const paths = Array.from({ length: 257 }, (_v, i) => resolve(`/p/${String(i)}`))
+    expect((await handleGroupWorktrees(deps(), { paths })).status).toBe(400)
+  })
+
+  it('dedupes and answers per-path facts with one shared grouping key', async () => {
+    const exec = cwdScripted({ [REPO]: MAIN_CALLS, [WT]: LINKED_CALLS })
+    const outcome = await handleGroupWorktrees(deps({ exec }), { paths: [REPO, WT, REPO] })
+    expect(outcome.status).toBe(200)
+    if (!('facts' in outcome.body)) throw new Error('expected facts body')
+    const facts = outcome.body.facts
+    // Keys echo the requested path verbatim (deduped); VALUES share one key.
+    expect(Object.keys(facts).sort()).toEqual([REPO, WT].sort())
+    expect(facts[REPO]).toEqual({ repoRoot: REPO, repoName: 'repo', branch: 'main', main: true })
+    expect(facts[WT]).toEqual({ repoRoot: REPO, repoName: 'repo', branch: 'feat-x', main: false })
+  })
+
+  it('answers null for non-repositories and stays 200 when git fails everywhere', async () => {
+    const PLAIN = resolve('/plain')
+    const exec = cwdScripted({
+      [PLAIN]: {
+        'rev-parse --show-toplevel': { code: 128, stderr: 'fatal: not a git repository\n' },
+      },
+      [REPO]: MAIN_CALLS,
+    })
+    const outcome = await handleGroupWorktrees(deps({ exec }), { paths: [PLAIN, REPO] })
+    expect(outcome.status).toBe(200)
+    if (!('facts' in outcome.body)) throw new Error('expected facts body')
+    expect(outcome.body.facts[PLAIN]).toBeNull()
+    expect(outcome.body.facts[REPO]).not.toBeNull()
   })
 })

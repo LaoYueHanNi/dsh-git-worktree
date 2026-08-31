@@ -5,11 +5,11 @@
 
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, isAbsoluteDir, probeRepo, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, isAbsoluteDir, probeRepo, probeWorkspaceGit, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, GroupWorkspacesResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -28,12 +28,57 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | RouteError
 }
 
 /** Uniform failure envelope. */
 function fail(status: number, error: string): RouteOutcome {
   return { status, body: { error } }
+}
+
+/** Upper bound on distinct paths one /group request may probe. */
+const GROUP_PATHS_LIMIT = 256
+
+/** Probes per in-flight batch — polite on Windows, where each git call is a process spawn. */
+const GROUP_BATCH_SIZE = 8
+
+/**
+ * POST /group — git belonging facts for a batch of workspace directories.
+ * Deduplicates, validates, probes in bounded batches, and answers 200 with
+ * per-path facts (null for non-repositories); a repository-wide git failure
+ * is a per-path null, never a 500 — the sidebar must degrade to flat, not
+ * error out.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ paths }`.
+ */
+export async function handleGroupWorktrees(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return fail(400, 'request body must be a JSON object')
+  const paths = (body as Record<string, unknown>).paths
+  if (!Array.isArray(paths)) return fail(400, 'body key "paths" must be an array of absolute directories')
+  const unknownKeys = Object.keys(body as Record<string, unknown>).filter(key => key !== 'paths')
+  if (unknownKeys.length > 0) return fail(400, `unknown body key "${unknownKeys[0]}"`)
+  const distinct: string[] = []
+  for (const candidate of paths) {
+    if (typeof candidate !== 'string' || !isAbsoluteDir(candidate)) return fail(400, 'body key "paths" must be an array of absolute directories')
+    if (!distinct.includes(candidate)) distinct.push(candidate)
+  }
+  if (distinct.length > GROUP_PATHS_LIMIT) return fail(400, `body key "paths" accepts at most ${String(GROUP_PATHS_LIMIT)} distinct directories`)
+
+  const facts: Record<string, GroupWorkspacesResult['facts'][string]> = {}
+  for (let start = 0; start < distinct.length; start += GROUP_BATCH_SIZE) {
+    const batch = distinct.slice(start, start + GROUP_BATCH_SIZE)
+    const probed = await Promise.all(batch.map(async (path) => {
+      // A probe never throws here by contract (gitMaybe folds non-zero exits),
+      // but a defensive catch keeps ONE bad path from sinking the batch.
+      try {
+        return [path, await probeWorkspaceGit(deps.exec, path) ?? null] as const
+      } catch {
+        return [path, null] as const
+      }
+    }))
+    for (const [path, value] of probed) facts[path] = value
+  }
+  return { status: 200, body: { facts } }
 }
 
 /** GitError to outcome: usage-shaped failures are 400, the rest 500. */

@@ -1,0 +1,479 @@
+/* Native WorkspaceBrowser.module.css + WorkspacePicker.module.css transplanted
+ * 1:1 (DSW tokens, search expand, reduced-motion). Drag classes
+ * (workspaceDrop*, listTopDrop*) are kept for P3; unused in P2.
+ * Overlay: memberIndent / sessionsIndent for the repo-grouped tree. */
+
+.root {
+  --dsh-session-list-edge-inset: var(--dsh-sidebar-inline-padding);
+  --dsh-session-list-scrollbar-width: 8px;
+  --dsh-session-list-scrollbar-offset: 2px;
+  box-sizing: border-box;
+  min-height: 0;
+  padding-right: var(--dsh-session-list-edge-inset);
+  flex-direction: column;
+  flex: 1;
+  display: flex;
+}
+
+.root.rail {
+  padding-right: 0;
+}
+
+.iconButton {
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  color: var(--dsw-alias-label-secondary);
+  background: 0 0;
+  border: none;
+  border-radius: 50%;
+  flex: none;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  display: inline-flex;
+}
+
+.iconButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.sectionHeader {
+  box-sizing: border-box;
+  height: 36px;
+  color: var(--dsw-alias-label-tertiary);
+  border-radius: 12px;
+  flex: none;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding-left: 4px;
+  display: flex;
+  overflow: hidden;
+}
+
+.root:not(.rail) .sectionHeader {
+  margin-top: 2px;
+  margin-right: -4px;
+}
+
+.sectionLabel {
+  white-space: nowrap;
+  opacity: 1;
+  visibility: visible;
+  min-width: 0;
+  max-width: 45%;
+  transition: max-width 0.18s var(--ds-ease-in-out), margin-right 0.18s var(--ds-ease-in-out), opacity 0.12s var(--ds-ease-in-out), transform 0.18s var(--ds-ease-in-out), visibility 0s linear;
+  flex: none;
+  line-height: 20px;
+  overflow: hidden;
+}
+
+.sectionLabelHidden {
+  opacity: 0;
+  visibility: hidden;
+  max-width: 0;
+  margin-right: -4px;
+  transition-delay: 0s, 0s, 0s, 0s, 0.18s;
+  transform: translate(-4px);
+}
+
+.searchSlot {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 28px;
+  transition: max-width 0.18s var(--ds-ease-in-out), padding-left 0.18s var(--ds-ease-in-out);
+  flex: 1;
+  align-items: center;
+  margin-left: auto;
+  padding-left: 0;
+  display: flex;
+}
+
+.searchSlotExpanded {
+  max-width: 100%;
+  padding-left: 0;
+}
+
+.headerActions {
+  opacity: 1;
+  visibility: visible;
+  max-width: 60px;
+  transition: max-width 0.18s var(--ds-ease-in-out), opacity 0.12s var(--ds-ease-in-out), transform 0.18s var(--ds-ease-in-out), visibility 0s linear;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  display: flex;
+  overflow: hidden;
+}
+
+.headerActionsHidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  max-width: 0;
+  transition-delay: 0s, 0s, 0s, 0.18s;
+  transform: translate(4px);
+}
+
+.search {
+  box-sizing: border-box;
+  cursor: text;
+  width: 100%;
+  height: 28px;
+  color: var(--dsw-alias-label-secondary);
+  transition: width 0.18s var(--ds-ease-in-out), padding 0.18s var(--ds-ease-in-out), border-color 0.18s var(--ds-ease-in-out), background-color 0.18s var(--ds-ease-in-out);
+  background: 0 0;
+  border: none;
+  border-radius: 50%;
+  flex: none;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.searchExpanded {
+  border: 1px solid var(--dsw-alias-border-l2);
+  width: calc(100% + 4px);
+  height: 30px;
+  color: var(--dsw-alias-label-caption);
+  background: 0 0;
+  border-radius: 10px;
+  margin-inline: -2px;
+  padding: 0 4px 0 0;
+}
+
+.searchButton {
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  color: inherit;
+  background: 0 0;
+  border: none;
+  border-radius: 50%;
+  flex: none;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  display: inline-flex;
+}
+
+.searchExpanded .searchButton {
+  width: 28px;
+  height: 30px;
+}
+
+.searchButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.searchExpanded .searchButton:hover {
+  background: 0 0;
+}
+
+.searchInput {
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  transition: opacity 0.12s var(--ds-ease-in-out);
+  background: 0 0;
+  border: none;
+  outline: none;
+  flex: 1;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.searchExpanded .searchInput {
+  opacity: 1;
+  pointer-events: auto;
+  margin-left: -2px;
+}
+
+.searchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.clearButton {
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  color: var(--dsw-alias-label-secondary);
+  background: 0 0;
+  border: none;
+  border-radius: 50%;
+  flex: none;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  display: inline-flex;
+}
+
+.clearButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rail .sectionHeader {
+  justify-content: flex-start;
+  gap: 0;
+  margin-bottom: 12px;
+  padding-left: 0;
+}
+
+.rail .headerActions {
+  max-width: none;
+}
+
+.rail .iconButton {
+  width: 36px;
+  height: 36px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rail .search {
+  background: 0 0;
+  border-color: #0000;
+  gap: 0;
+  width: 36px;
+  height: 36px;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.rail .searchButton {
+  width: 36px;
+  height: 36px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rail .searchButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.listArea {
+  min-height: 0;
+  margin-left: -4px;
+  margin-right: calc(-1 * var(--dsh-session-list-edge-inset));
+  flex-direction: column;
+  flex: 1;
+  padding-left: 4px;
+  display: flex;
+  overflow: visible;
+}
+
+.rail .listArea {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+}
+
+.treeBody {
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.fade {
+  left: 0;
+  right: var(--dsh-session-list-edge-inset);
+  background: linear-gradient(to bottom, transparent, var(--dsw-specific-sidebar-fill));
+  pointer-events: none;
+  height: 24px;
+  position: absolute;
+  bottom: 0;
+}
+
+.wide {
+  animation: wide-in 0.2s var(--ds-ease-in-out);
+}
+
+@keyframes wide-in {
+  0% { opacity: 0; }
+}
+
+.list {
+  min-height: 0;
+  margin-left: -4px;
+  margin-right: var(--dsh-session-list-scrollbar-offset);
+  padding-left: 4px;
+  padding-right: calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));
+  scrollbar-gutter: stable;
+  flex: 1;
+  padding-bottom: 16px;
+  overflow-y: auto;
+}
+
+.flatList > * + *,
+.searchTree > [role=treeitem] + [role=treeitem],
+.groupSection > * + * {
+  margin-top: 2px;
+}
+
+.searchStatus,
+.searchWarning {
+  color: var(--dsw-alias-label-tertiary);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.searchWarning {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.groupSection {
+  position: relative;
+}
+
+.groupSection + .groupSection {
+  margin-top: 4px;
+}
+
+/* P3: workspace drag insertion markers (unused in P2). */
+.listTopDropIndicator,
+.workspaceDropBefore:before,
+.workspaceDropAfter:after {
+  content: "";
+  z-index: 1;
+  background:
+    linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat,
+    linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat,
+    linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;
+  pointer-events: none;
+  height: 12px;
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.listTopDropIndicator {
+  top: -8px;
+  left: 0;
+  right: var(--dsh-session-list-edge-inset);
+}
+
+.listTopDropActive > .workspaceDropBefore:first-child:before {
+  display: none;
+}
+
+.workspaceDropBefore:before {
+  top: -8px;
+}
+
+.workspaceDropAfter:after {
+  bottom: -8px;
+}
+
+.sessionOverflowButton {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  height: 28px;
+  color: var(--dsw-alias-label-tertiary);
+  background: 0 0;
+  border: none;
+  border-radius: 8px;
+  padding: 0 12px 0 28px;
+  font-size: 12px;
+}
+
+.groupSection > .sessionOverflowButton {
+  margin-top: 0;
+}
+
+.sessionOverflowButton:hover {
+  color: var(--dsw-alias-label-secondary);
+  background: 0 0;
+}
+
+.empty {
+  color: var(--dsw-alias-label-tertiary);
+  padding: 16px 12px;
+  font-size: 13px;
+}
+
+.renameInput {
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  width: 100%;
+  height: 44px;
+  color: var(--dsw-alias-label-primary);
+  background: 0 0;
+  border-radius: 22px;
+  outline: none;
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.renameInput:disabled {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.renameError {
+  color: var(--dsw-alias-state-error-primary);
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.deleteAction:not(:disabled) {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.deleteStatus {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.modalAction {
+  min-width: 72px;
+}
+
+.modalError,
+.menuStatus {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.modalError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.menuStatus {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Aggregation overlay: indent member workspaces and their sessions. */
+.memberIndent {
+  margin-left: 16px;
+}
+
+.sessionsIndent {
+  margin-left: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wide {
+    animation: none;
+  }
+
+  .search,
+  .sectionLabel,
+  .searchSlot,
+  .searchInput,
+  .headerActions {
+    transition: none;
+  }
+}
