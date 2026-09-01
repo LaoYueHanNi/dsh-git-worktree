@@ -12,7 +12,10 @@ import {
   IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
   IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { abbreviateHomePath } from '@deepseek-ai/dsh-client-runtime/client'
+// Host 0.1.2 moved the path display helpers to the workspace-path util (the
+// dead dsh-client-runtime used to export them); not in the platform module
+// table, so tsdown inlines it into the bundle.
+import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionNode } from './sidebar-groups.ts'
 import { createdLabel, hoverTimeLabel, timeLabel, type SearchResultNode } from './sidebar-search.ts'

@@ -20,7 +20,10 @@
  * @module git-worktree/client/card-form
  */
 
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+// Host 0.1.2 homes the settings scope contract here (settings-contract.ts);
+// until the alpha.3 adaptation this type was read from the dead
+// dsh-client-runtime's identical shape.
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 /** The field this card edits. */
 export const ROOT_FIELD = 'rootDir'
