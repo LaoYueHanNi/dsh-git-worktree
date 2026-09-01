@@ -13,7 +13,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import type { SessionListState, SnapshotStore, WorkspaceListState } from '@deepseek-ai/dsh-client-runtime/client'
+// Host 0.1.2 type homes: the session list state lives on the session
+// controller, the workspace snapshot on the workspace controller (the dead
+// dsh-client-runtime used to carry both under the old names).
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16, IconProjectAddOutline16,
   IconSearchOutline16, Menu, Modal, Toast, Tooltip,
@@ -46,8 +50,8 @@ export interface SidebarObservable<T> {
 
 /** The business face this entry injects; the component never touches ctx. */
 export interface GroupedSidebarInjected {
-  readonly workspacesList: Pick<SnapshotStore<WorkspaceListState>, 'getSnapshot' | 'subscribe'>
-  readonly sessionsList: Pick<SnapshotStore<SessionListState>, 'getSnapshot' | 'subscribe'>
+  readonly workspacesList: SidebarObservable<WorkspaceSnapshot>
+  readonly sessionsList: SidebarObservable<SessionListState>
   readonly openSession: (sessionId: string) => void
   readonly startSession: (workspaceId?: string) => void
   readonly loadFacts: (paths: readonly string[]) =>
@@ -78,7 +82,9 @@ export interface GroupedSidebarInjected {
   readonly ensureDirectory: (path: string) => Promise<void>
   readonly createWorkspace: (input: { path: string }) => Promise<{ workspaceId: string }>
   readonly pickDirectory: () => Promise<string | null>
-  readonly hostDescription: SidebarObservable<{ home?: string } | undefined>
+  /** Host account home (the native `hostInfo` inject hook's shape; the
+   * snapshot always stands, `home` absent until the first ready frame). */
+  readonly hostInfo: SidebarObservable<{ home: string | undefined }>
   readonly directoryFlow: SidebarObservable<boolean>
   /**
    * First facts attempt of this mount has settled (ok or fail). The settings
@@ -512,7 +518,7 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
   const { t } = props
   const workspaces = useSyncExternalStore(props.workspacesList.subscribe, props.workspacesList.getSnapshot)
   const sessions = useSyncExternalStore(props.sessionsList.subscribe, props.sessionsList.getSnapshot)
-  const host = useSyncExternalStore(props.hostDescription.subscribe, props.hostDescription.getSnapshot)
+  const host = useSyncExternalStore(props.hostInfo.subscribe, props.hostInfo.getSnapshot)
   const directoryFlowAvailable = useSyncExternalStore(props.directoryFlow.subscribe, props.directoryFlow.getSnapshot)
   const items = workspaces.items as readonly WorkspaceLike[]
   const home = host?.home

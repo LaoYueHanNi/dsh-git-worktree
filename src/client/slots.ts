@@ -1,8 +1,10 @@
 /**
  * Injected business faces: framework actions the entries themselves cannot
  * reach (workspace registration and directory picking live on the workspaces
- * service, injected through the client plugin context).
+ * and uiWorkspace services, injected through the client plugin context).
  */
+
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 
 export interface BranchChipInjected {
   /**
@@ -13,4 +15,13 @@ export interface BranchChipInjected {
    * @param path - absolute worktree directory.
    */
   adoptWorktree: (path: string) => Promise<void>
+  /**
+   * The framework's session-list snapshot store. Host 0.1.2 dropped the
+   * `useSessions` standard prop from session-scoped slots; the chip reads the
+   * current session's summary (its `cwd`) through this store instead.
+   */
+  sessionsList: Pick<{
+    getSnapshot(): SessionListState
+    subscribe(listener: () => void): () => void
+  }, 'getSnapshot' | 'subscribe'>
 }

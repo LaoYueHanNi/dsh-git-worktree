@@ -61,9 +61,11 @@ function cssModulesInline(pluginId: string): Plugin {
 /**
  * Browser platform words shared by the shell's frozen module table: these stay
  * external so the factory's `require` resolves them from the table at runtime.
- * Mirrors the platform list in @deepseek-ai/dsh-client-web/src/platform.ts plus
- * the runtime client exemption (runtime registers its factory before any
- * dependent bundle materializes).
+ * Mirrors PLATFORM_MODULES in @deepseek-ai/dsh-client-web/src/platform.ts
+ * (minus dsh-client-store, which this bundle never touches). Host 0.1.2 froze
+ * the table down to these names — the rc-era web-react/ui-attachment/
+ * schema-form/runtime entries are gone, so every other import (the
+ * workspace-path helpers included) is inlined into the bundle.
  */
 const CLIENT_EXTERNALS: readonly string[] = [
   'react',
@@ -72,11 +74,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
   'react-dom/client',
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-ui-attachment',
-  '@deepseek-ai/dsh-client-schema-form',
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 export default defineConfig({

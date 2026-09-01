@@ -1,7 +1,8 @@
 /**
  * dsh-git-worktree host half. Owns the worktree storage-root settings section
  * (the `git-worktree` namespace in the dsh settings document, registered
- * through installSettingsSection with the composition entry as its base
+ * through SettingsProvider.installSection with the composition entry as its
+ * base
  * layer) and — while a webServer service exists — the HTTP routes the browser
  * half fetches. A stored root edit takes effect live: the routes read the
  * section source per request, so no restart and no route re-registration.
@@ -25,7 +26,7 @@ export interface Config {
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export declare function validateConfig(config: Config): void;
 /** The settings namespace this plugin serves; its browser card spells the same string. */
-export declare const GIT_WORKTREE_NS: import("@deepseek-ai/dsh-settings").SettingsNamespace;
+export declare const GIT_WORKTREE_NS = "git-worktree";
 /** The settings-facing subset of the config: the worktree storage root and the sidebar grouping switch. */
 export interface SectionConfig {
     /** Worktree storage root; absent/blank selects `$DSH_HOME/gitworktree`. */

@@ -46,7 +46,7 @@
  * directory is fixed, so the group only exists while blank.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Button, IconBranchOutline16, Toast,
@@ -354,8 +354,15 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree, t }: BranchChipDockProps) {
-  const summary = useSessions(state => state.byId[sessionId])
+export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: BranchChipDockProps) {
+  // Host 0.1.2 dropped the `useSessions` standard prop from session-scoped
+  // slots; the session identity rides the owner share's snapshot, and the
+  // summary (for its `cwd`) reads through the injected session-list store.
+  const sessionId = session?.sessionId
+  const summary = useSyncExternalStore(
+    sessionsList.subscribe,
+    () => (sessionId === undefined ? undefined : sessionsList.getSnapshot().byId[sessionId]),
+  )
   const cwd = summary?.cwd
   const [repo, refresh] = useRepoStatus(cwd)
   const [menuOpen, setMenuOpen] = useState(false)
