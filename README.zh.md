@@ -49,6 +49,16 @@ dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 
 > 包声明了 `dsh.bundle`，`add` 会自动把插件挂进 profile 的层栈，无需手动改配置。编译产物 `lib/` 随 npm 包分发，安装开箱即用，无需任何构建步骤。需要 `web` profile（`dsh web`）。
 
+### 从 npm 安装 —— dsh 0.1.2-alpha.x 宿主
+
+上面的 `latest` 通道面向稳定宿主（rc 系列）。若你运行的是 dsh **0.1.2 alpha** 宿主，请改装专用兼容版本：
+
+```sh
+dsh plugin --profile web add @laoyuehanni/dsh-git-worktree@dsh-alpha
+```
+
+> `@dsh-alpha` 是 dist-tag（不是字面版本号），registry 会解析为最新的兼容构建——当前为 `0.4.1-dsh-0.1.2-alpha.3`。其 peer 范围锁定 `>=0.1.2-alpha.3 <0.2.0`，而稳定线保持在 rc peer 上：普通 `update` 不会把两条通道混装，`dsh plugin update` 也只会从对应通道拉取。宿主升回稳定线时，先移除此包，再按上一小节安装默认版本。
+
 ### 从本地目录安装（开发调试用）
 
 ```sh

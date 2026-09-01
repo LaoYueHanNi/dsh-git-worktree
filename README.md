@@ -49,6 +49,16 @@ dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 
 > The package declares `dsh.bundle`, so `add` wires the plugin into the profile's layer stack automatically — no config editing needed. The compiled `lib/` ships in the npm tarball, so installs work out of the box without any build step. Requires the `web` profile (`dsh web`).
 
+### From npm — dsh 0.1.2-alpha.x host
+
+The `latest` line above tracks the stable host (rc series). If you run a dsh **0.1.2 alpha** host, install the dedicated compatibility build instead:
+
+```sh
+dsh plugin --profile web add @laoyuehanni/dsh-git-worktree@dsh-alpha
+```
+
+> `@dsh-alpha` is a dist-tag (not a literal version), so the registry resolves it to the latest compatibility build — currently `0.4.1-dsh-0.1.2-alpha.3`. Its peer range is pinned to `>=0.1.2-alpha.3 <0.2.0`, while the stable line stays on the rc peers: the two channels never get mixed by a plain `update`, and `dsh plugin update` keeps pulling from the matching channel only. Upgrading your host back to the stable line? Remove this package first, then install the default one from the section above.
+
 ### From a local directory (development)
 
 ```sh
