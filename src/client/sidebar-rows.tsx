@@ -9,8 +9,8 @@
 import { useState, type ReactNode } from 'react'
 import {
   HoverCard, IconArchiveOutline20, IconBranchOutline16, IconEditOutline16,
-  IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16, IconPlusOutline16,
-  IconTrashOutline16, IconTriangleRightFill14, Menu, StateDot,
+  IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
+  IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -166,6 +166,132 @@ export function ProjectRowItem({ row, onToggle, onCreate, actions, home, t, badg
 
 function assertNever(value: never): never {
   throw new Error(`unknown pending interaction: ${String(value)}`)
+}
+
+/** Final path segment of an absolute directory ('' for the unknown-cwd cluster). */
+function pathBasename(path: string): string {
+  if (path === '') return ''
+  const parts = path.split(/[\\/]/)
+  return parts[parts.length - 1] ?? ''
+}
+
+/**
+ * Dashed folder glyph for virtual (unregistered) directory rows. The icon set
+ * ships no dashed variant, so this follows the WorktreeCheck precedent of a
+ * module-local SVG: at 16px a dash pattern is a far stronger "directory-shaped
+ * but not a registered workspace" mark than the outline/solid stroke contrast
+ * it replaces.
+ */
+function StrayFolderGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M1.75 4.4c0-.91.71-1.65 1.6-1.65h2.47c.45 0 .88.19 1.19.52l.79.86h4.85c.89 0 1.6.74 1.6 1.65v6.05c0 .91-.71 1.65-1.6 1.65H3.35c-.89 0-1.6-.74-1.6-1.65Z"
+        stroke="currentColor"
+        strokeWidth="1.15"
+        strokeDasharray="2 1.6"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+/**
+ * One virtual directory row of the stray (Ungrouped) section: DASHED folder
+ * (the real workspace rows' folder is solid — the dash pattern is the
+ * at-a-glance "this directory is not a registered workspace" mark) +
+ * directory basename + session-count badge; hover reveals the full path and,
+ * when a registered workspace holds the directory, that ownership (the
+ * sessions are its strays). The ⋯ menu exists only where registering the
+ * directory as a real workspace is possible; owned clusters carry no action
+ * yet (re-adoption is a later feature).
+ */
+export function StrayGroupRow({ path, belongsTo, count, expanded, onToggle, onRegister, registering, home, t }: {
+  path: string
+  /** Registered workspace title holding this directory; undefined = unregistered. */
+  belongsTo: string | undefined
+  count: number
+  expanded: boolean
+  onToggle: () => void
+  /** Present only while the directory has no registered workspace. */
+  onRegister?: () => void
+  registering?: boolean
+  home?: string | undefined
+  t: Translate
+}): ReactNode {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const label = path === '' ? t('stray.unknown') : pathBasename(path)
+  const canRegister = onRegister !== undefined
+  const items = canRegister
+    ? [{ id: 'register', label: t('stray.register'), icon: <IconFolderOpen16 /> }]
+    : []
+  const row = (
+    <div
+      className={cx(css.projectRow, css.strayRow, menuOpen && css.menuOpen)}
+      role="treeitem"
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
+      {/* One steady dashed glyph for both states: the chevron carries
+       * expand/collapse, the dash pattern stays the virtual-row mark. */}
+      <span className={cx(css.slot, css.folder)}>
+        <StrayFolderGlyph />
+      </span>
+      <span className={cx(css.slot, css.chevron)}>
+        <IconTriangleRightFill14 className={cx(css.arrow, expanded && css.arrowOpen)} />
+      </span>
+      <span className={css.projectText}>
+        <span className={css.title}>{label}</span>
+      </span>
+      <span className={css.repoCount}>{String(count)}</span>
+      {canRegister && (
+        <span className={css.rowActions}>
+          <Menu
+            open={menuOpen}
+            onClose={() => { setMenuOpen(false) }}
+            items={items}
+            onSelect={() => {
+              setMenuOpen(false)
+              onRegister?.()
+            }}
+            portal
+            closeOnPointerLeave
+            anchor={(
+              <button
+                type="button"
+                className={css.iconButton}
+                aria-label={t('stray.register.aria', { name: label })}
+                disabled={registering === true}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMenuOpen(v => !v)
+                }}
+              >
+                <IconEllipsisOutline16 />
+              </button>
+            )}
+          />
+        </span>
+      )}
+    </div>
+  )
+  return (
+    <HoverCard
+      anchor={row}
+      content={(
+        <div className={css.hoverContent}>
+          <div className={css.hoverTitle}>{label}</div>
+          {path !== '' && <div className={css.hoverPath}>{abbreviateHomePath(path, home)}</div>}
+          {belongsTo !== undefined && <div className={css.hoverStatus}>{t('stray.belongsTo', { name: belongsTo })}</div>}
+        </div>
+      )}
+      disabled={menuOpen}
+      copyText={path === '' ? undefined : path}
+      copyLabel={t('copy')}
+      copiedLabel={t('hover.copied')}
+    />
+  )
 }
 
 /** Session status presentation; pending interaction is primary and live activity outranks completion. */

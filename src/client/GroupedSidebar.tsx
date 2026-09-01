@@ -16,21 +16,21 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import type { SessionListState, SnapshotStore, WorkspaceListState } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16, IconProjectAddOutline16,
-  IconSearchOutline16, Menu, Modal, Tooltip,
+  IconSearchOutline16, Menu, Modal, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { OwnerOf, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceGitFacts } from '../wire.ts'
 import {
-  deriveFlat, deriveSidebarGroups, indexSubagentRunning, loadExpandState, loadViewPrefs,
+  deriveFlat, deriveSidebarGroups, deriveStrayGroups, indexSubagentRunning, loadExpandState, loadViewPrefs,
   orderedVisibleSessionIds, saveExpandState, saveViewPrefs, sessionNode,
   type SessionListLike, type SessionNode, type SidebarGroup, type SidebarGroupBy,
-  type SidebarMember, type SidebarOrderBy, type WorkspaceLike,
+  type SidebarMember, type SidebarOrderBy, type StrayGroup, type WorkspaceLike,
 } from './sidebar-groups.ts'
 import {
   COLLAPSED_SESSION_LIMIT, EXPAND_SLIDE_MS, SEARCH_DEBOUNCE_MS, SEARCH_QUERY_MAX_CODE_UNITS,
   deriveSearchResults, sanitizeSearchQuery, type ContentSearchHit,
 } from './sidebar-search.ts'
-import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './sidebar-rows.tsx'
+import { ProjectRowItem, SearchResultItem, SessionNodeItem, StrayGroupRow } from './sidebar-rows.tsx'
 import { PickFlowController } from './pick-flow.ts'
 import css from './GroupedSidebar.module.css'
 
@@ -283,8 +283,10 @@ function createdAtMs(createdAt: string | undefined): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
-function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, onToggle, expandTo, orderBy, now, home, onOpen, onRename, onFork, onArchive, onWorkspaceRename, onWorkspaceDelete, onWorktreeRemove, startSession, t }: {
+function GroupedTree({ groups, footer, sessions, archived, currentSessionId, expandMap, onToggle, expandTo, orderBy, now, home, onOpen, onRename, onFork, onArchive, onWorkspaceRename, onWorkspaceDelete, onWorktreeRemove, startSession, t }: {
   groups: readonly SidebarGroup[]
+  /** Tail section rendered inside the same scroll container (the stray cluster). */
+  footer?: ReactNode
   sessions: SessionListLike
   archived: readonly string[]
   currentSessionId: string | undefined
@@ -387,6 +389,7 @@ function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, 
             </div>
           )
         })}
+        {footer}
       </div>
       <span className={css.fade} />
     </div>
@@ -772,7 +775,83 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
     })()
   }
 
+  // Stray (Ungrouped) section: sessions no workspace account holds, clustered
+  // by their header cwd into virtual directory groups. Registration is the
+  // one action available without any host-side help — workspaces.create is a
+  // plain client call; afterwards NEW sessions land in the workspace, while
+  // the old strays stay loose (now marked as that workspace's strays) until
+  // re-adoption exists.
+  // `now` must be declared BEFORE straySection: that JSX evaluates eagerly at
+  // render (the .map callbacks run inline), so a forward reference to a later
+  // const throws a TDZ ReferenceError and takes the whole sidebar down.
   const now = Date.now()
+  const strayGroups = useMemo(() => deriveStrayGroups(items, sessionList, archived), [items, sessionList, archived])
+  const strayDescendants = useMemo(() => indexSubagentRunning(sessionList.byId), [sessionList.byId])
+  const straySectionKey = 'stray:section'
+  const strayContainsCurrent = strayGroups.some(group => group.sessions.some(session => session.id === sessions.current))
+  const straySectionOpen = expandMap[straySectionKey] ?? strayContainsCurrent
+  const strayTotal = strayGroups.reduce((sum, group) => sum + group.sessions.length, 0)
+  const [strayRegPath, setStrayRegPath] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  const registerStrayWorkspace = (path: string): void => {
+    if (strayRegPath !== null) return
+    setStrayRegPath(path)
+    props.createWorkspace({ path }).then(
+      () => { setStrayRegPath(null) },
+      (reason: unknown) => {
+        setStrayRegPath(null)
+        setToast({ seq: Date.now(), text: t('stray.registerFailed', { message: reason instanceof Error ? reason.message : String(reason) }) })
+      },
+    )
+  }
+  const straySection: ReactNode = strayGroups.length === 0 ? undefined : (
+    <div className={css.groupSection}>
+      <ProjectRowItem
+        row={{ key: straySectionKey, label: t('group.ungrouped'), expanded: straySectionOpen, containsCurrent: strayContainsCurrent }}
+        onToggle={() => { toggle(straySectionKey) }}
+        home={home}
+        t={t}
+        badge={String(strayTotal)}
+      />
+      {straySectionOpen && strayGroups.map((group) => {
+        const groupOpen = expandMap[group.key] ?? group.sessions.some(session => session.id === sessions.current)
+        return (
+          <div key={group.key} className={cx(css.groupSection, css.memberIndent)}>
+            <StrayGroupRow
+              path={group.path}
+              belongsTo={group.belongsTo}
+              count={group.sessions.length}
+              expanded={groupOpen}
+              onToggle={() => { toggle(group.key) }}
+              {...group.belongsTo === undefined && group.path !== ''
+                ? { onRegister: () => { registerStrayWorkspace(group.path) }, registering: strayRegPath === group.path }
+                : {}}
+              home={home}
+              t={t}
+            />
+            {groupOpen && (
+              <div className={css.sessionsIndent}>
+                {group.sessions.map(session => (
+                  <SessionNodeItem
+                    key={session.id}
+                    node={sessionNode(session, strayDescendants)}
+                    currentId={sessions.current}
+                    now={now}
+                    onOpen={props.openSession}
+                    onRename={onSessionRename}
+                    onFork={props.forkSession}
+                    onArchive={onSessionArchive}
+                    t={t}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+
   const wide = props.wide
 
   return (
@@ -927,6 +1006,7 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
             : (
               <GroupedTree
                 groups={groups}
+                footer={straySection}
                 sessions={sessionList}
                 archived={archived}
                 currentSessionId={sessions.current}
@@ -1092,6 +1172,7 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
         {wtRemoving && <div className={css.deleteStatus} role="status">{t('worktreeRemove.busy')}</div>}
         {wtRemoveError !== null && <div className={css.renameError} role="alert">{wtRemoveError}</div>}
       </Modal>
+      {toast !== null && <Toast key={toast.seq} text={toast.text} onDone={() => { setToast(null) }} />}
     </div>
   )
 }

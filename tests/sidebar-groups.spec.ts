@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  EXPAND_STORAGE_KEY, deriveSidebarGroups, loadExpandState, orderedVisibleSessionIds, saveExpandState, visibleSessionIds,
+  EXPAND_STORAGE_KEY, deriveSidebarGroups, deriveStrayGroups, loadExpandState, orderedVisibleSessionIds, saveExpandState, visibleSessionIds,
   type SessionListLike, type WorkspaceLike,
 } from '../src/client/sidebar-groups.ts'
 import type { WorkspaceGitFacts } from '../src/wire.ts'
@@ -147,6 +147,92 @@ describe('orderedVisibleSessionIds / indexSubagentRunning', () => {
     }
     expect(orderedVisibleSessionIds(workspace, recency, [], 'manual')).toEqual(['s1', 's5'])
     expect(orderedVisibleSessionIds(workspace, recency, [], 'updated')).toEqual(['s5', 's1'])
+  })
+})
+
+describe('deriveStrayGroups', () => {
+  /** Session summary shaped after the runtime projection. */
+  function sess(id: string, cwd: string | undefined, over: Partial<SessionListLike['byId'][string]> = {}): NonNullable<SessionListLike['byId'][string]> {
+    return { id, displayTitle: id, blank: false, cwd, ...over }
+  }
+
+  it('clusters loose sessions by cwd and skips accounted ones', () => {
+    const items = [ws('w1', 'E:\\repo', ['s-kept'])]
+    const list: SessionListLike = {
+      ids: ['s-kept', 's-loose-a', 's-loose-b', 's-loose-other'],
+      byId: {
+        's-kept': sess('s-kept', 'E:\\repo'),
+        's-loose-a': sess('s-loose-a', 'E:\\gone\\repo'),
+        's-loose-b': sess('s-loose-b', 'e:\\GONE\\repo'), // casing drift, same directory
+        's-loose-other': sess('s-loose-other', 'E:\\elsewhere'),
+      },
+      current: undefined,
+    }
+    const groups = deriveStrayGroups(items, list, [])
+    expect(groups.map(group => [group.path, group.sessions.map(s => s.id), group.belongsTo])).toEqual([
+      ['E:\\gone\\repo', ['s-loose-a', 's-loose-b'], undefined],
+      ['E:\\elsewhere', ['s-loose-other'], undefined],
+    ])
+    // One cluster per directory regardless of casing: the key is lowercased.
+    expect(groups[0]?.key).toBe(`stray:e:\\gone\\repo`)
+  })
+
+  it('marks a cluster whose directory matches a registered workspace as that workspace\'s strays', () => {
+    const items = [ws('w1', 'E:\\repo', ['s-kept'])]
+    const list: SessionListLike = {
+      ids: ['s-stray'],
+      byId: { 's-stray': sess('s-stray', 'E:\\REPO') },
+      current: undefined,
+    }
+    const groups = deriveStrayGroups(items, list, [])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.belongsTo).toBe(items[0]!.title)
+  })
+
+  it('applies the shared visibility rule (archived, subagent, non-current blank)', () => {
+    const list: SessionListLike = {
+      ids: ['s-archived', 's-sub', 's-blank', 's-blank-current', 's-live'],
+      byId: {
+        's-archived': sess('s-archived', 'E:\\a'),
+        's-sub': sess('s-sub', 'E:\\a', { origin: 'subagent' }),
+        's-blank': sess('s-blank', 'E:\\a', { blank: true }),
+        's-blank-current': sess('s-blank-current', 'E:\\a', { blank: true }),
+        's-live': sess('s-live', 'E:\\a'),
+      },
+      current: 's-blank-current',
+    }
+    const groups = deriveStrayGroups([], list, ['s-archived'])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.sessions.map(s => s.id)).toEqual(['s-blank-current', 's-live'])
+  })
+
+  it('collects header-less cwd sessions into one unknown-directory cluster', () => {
+    const list: SessionListLike = {
+      ids: ['s-no-cwd'],
+      byId: { 's-no-cwd': sess('s-no-cwd', undefined) },
+      current: undefined,
+    }
+    const groups = deriveStrayGroups([], list, [])
+    expect(groups).toEqual([{
+      kind: 'stray',
+      key: 'stray:?',
+      path: '',
+      belongsTo: undefined,
+      sessions: [list.byId['s-no-cwd']],
+    }])
+  })
+
+  it('answers empty when every session is accounted or hidden', () => {
+    const items = [ws('w1', 'E:\\repo', ['s1'])]
+    const list: SessionListLike = {
+      ids: ['s1', 's-archived'],
+      byId: {
+        s1: sess('s1', 'E:\\repo'),
+        's-archived': sess('s-archived', 'E:\\gone'),
+      },
+      current: undefined,
+    }
+    expect(deriveStrayGroups(items, list, ['s-archived'])).toEqual([])
   })
 })
 

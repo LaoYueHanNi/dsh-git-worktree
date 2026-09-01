@@ -173,6 +173,13 @@
   overflow: hidden;
 }
 
+/* Virtual (unregistered) directory rows read one weight lighter than real
+ * workspace rows — together with the dashed folder glyph, the whole row is
+ * distinguishable at a glance. */
+.strayRow .title {
+  color: var(--dsw-alias-label-secondary);
+}
+
 .renameInput {
   border: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-button-elevated-fill);

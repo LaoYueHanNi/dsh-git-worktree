@@ -396,3 +396,73 @@ export function deriveFlat(
   }
   return rows.map(session => sessionNode(session, descendants))
 }
+
+/** One virtual directory cluster of stray (unaccounted) sessions. */
+export interface StrayGroup {
+  readonly kind: 'stray'
+  /** Stable expansion key: `stray:<lowercased cwd>` (`stray:?` when unknown). */
+  readonly key: string
+  /** The sessions' cwd verbatim (first-seen casing); '' when a header has none. */
+  readonly path: string
+  /** Title of the registered workspace whose path matches (case-insensitive);
+   * undefined = no registered workspace holds this directory. */
+  readonly belongsTo: string | undefined
+  /** Visible stray sessions of the directory, in session-list order. */
+  readonly sessions: readonly SessionLike[]
+}
+
+/**
+ * Derive the stray-session clusters: sessions no workspace account holds
+ * (a deleted-then-recreated registration's leftovers, or history that
+ * appeared after first-boot grouping), clustered by their header cwd into
+ * VIRTUAL directory groups. The same visibility rule as everywhere else
+ * applies (archived hidden, subagent rows never listed, a blank visible
+ * only while it IS the current selection — deleting the current session's
+ * workspace registration must not make it vanish).
+ *
+ * Matching against registered workspace paths is case-insensitive
+ * (NTFS): one directory must never split into two clusters because of
+ * casing drift between a session header and the registry's realpath.
+ * @param items - workspace list items (their `sessionIds` projection IS the
+ * accounting; the registry guarantees one record per canonical path).
+ * @param sessions - session list snapshot.
+ * @param archivedSessionIds - registry-global archive set.
+ * @returns stray groups in first-appearance order; empty when nothing is loose.
+ */
+export function deriveStrayGroups(
+  items: readonly WorkspaceLike[],
+  sessions: SessionListLike,
+  archivedSessionIds: readonly string[],
+): readonly StrayGroup[] {
+  const accounted = new Set(items.flatMap(workspace => workspace.sessionIds))
+  const registered = new Map<string, string>()
+  for (const workspace of items) {
+    const key = workspace.path.toLowerCase()
+    if (!registered.has(key)) registered.set(key, workspace.title)
+  }
+  const archived = new Set(archivedSessionIds)
+  const clusters = new Map<string, StrayGroup>()
+  for (const id of sessions.ids) {
+    if (accounted.has(id)) continue
+    const summary = sessions.byId[id]
+    if (summary === undefined) continue
+    if (summary.origin === 'subagent') continue
+    if (archived.has(id)) continue
+    if (summary.blank && id !== sessions.current) continue
+    const path = summary.cwd ?? ''
+    const key = `stray:${path === '' ? '?' : path.toLowerCase()}`
+    const existing = clusters.get(key)
+    if (existing === undefined) {
+      clusters.set(key, {
+        kind: 'stray',
+        key,
+        path,
+        belongsTo: path === '' ? undefined : registered.get(path.toLowerCase()),
+        sessions: [summary],
+      })
+    } else {
+      clusters.set(key, { ...existing, sessions: [...existing.sessions, summary] })
+    }
+  }
+  return [...clusters.values()]
+}

@@ -119,6 +119,11 @@ export type GitWorktreeKey =
   | 'worktreeRemove.sessions.one'
   | 'worktreeRemove.sessions.other'
   | 'worktreeRemove.busy'
+  | 'stray.unknown'
+  | 'stray.belongsTo'
+  | 'stray.register'
+  | 'stray.register.aria'
+  | 'stray.registerFailed'
   | 'menu.fork'
   | 'menu.archiveSession'
   | 'sessions.count.one'
@@ -263,6 +268,11 @@ export const en: Record<GitWorktreeKey, string> = {
   'worktreeRemove.sessions.one': '{n} session in this workspace will be archived too.',
   'worktreeRemove.sessions.other': '{n} sessions in this workspace will be archived too.',
   'worktreeRemove.busy': 'Removing…',
+  'stray.unknown': '(unknown directory)',
+  'stray.belongsTo': 'Stray sessions of “{name}”',
+  'stray.register': 'Register as workspace',
+  'stray.register.aria': 'Register “{name}” as a workspace',
+  'stray.registerFailed': 'Registration failed: {message}',
   'menu.fork': 'Fork session',
   'menu.archiveSession': 'Archive session',
   'sessions.count.one': '{n} session',
@@ -408,6 +418,11 @@ export const zh: Record<GitWorktreeKey, string> = {
   'worktreeRemove.sessions.one': '该工作区下的 {n} 个会话将一并归档。',
   'worktreeRemove.sessions.other': '该工作区下的 {n} 个会话将一并归档。',
   'worktreeRemove.busy': '删除中…',
+  'stray.unknown': '（目录未知）',
+  'stray.belongsTo': '属于“{name}”的失联会话',
+  'stray.register': '注册为工作区',
+  'stray.register.aria': '将“{name}”注册为工作区',
+  'stray.registerFailed': '注册失败：{message}',
   'menu.fork': '分叉会话',
   'menu.archiveSession': '归档会话',
   'sessions.count.one': '{n} 个会话',
