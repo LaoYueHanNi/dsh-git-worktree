@@ -35,7 +35,7 @@ import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import { GroupedSidebar, type GroupedSidebarInjected } from './GroupedSidebar.tsx'
-import { requestGroupWorktrees } from './api.ts'
+import { requestGroupWorktrees, requestInspectWorktree, requestRemoveWorktree } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
 import type { BranchChipInjected } from './slots.ts'
 
@@ -214,6 +214,15 @@ export function apply(ctx: ClientContext): void {
       },
       archiveSession: async (sessionId) => {
         await ctx.workspaces.archiveSession(sessionId as SessionId)
+      },
+      inspectWorktree: async (path) => {
+        const result = await requestInspectWorktree(path)
+        if (!result.ok) throw new Error(result.error)
+        return { dirty: result.dirty, ahead: result.ahead }
+      },
+      removeWorktree: async (path, force) => {
+        const result = await requestRemoveWorktree(path, force)
+        if (!result.ok) throw new Error(result.error)
       },
       createWorkspace: (input) => ctx.workspaces.create(input),
       pickDirectory: () => ctx.workspaces.pickDirectory(),

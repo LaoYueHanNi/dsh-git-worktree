@@ -3,7 +3,7 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 import { type DirExists, type Exec } from './git.js';
-import type { CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, RepoStatus, RouteError, SwitchResult, UpdateResult } from './wire.js';
+import type { CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult } from './wire.js';
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
     exec: Exec;
@@ -19,7 +19,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
     status: number;
-    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | RouteError;
+    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | RouteError;
 }
 /**
  * POST /group — git belonging facts for a batch of workspace directories.
@@ -80,3 +80,24 @@ export declare function handleFetch(deps: RouteDeps, body: unknown): Promise<Rou
  * @param body - parsed request body.
  */
 export declare function handleUpdate(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
+/**
+ * POST /inspect — pre-delete facts for one worktree directory: the
+ * uncommitted-file count (those die with the folder) and the checked-out
+ * branch's ahead count (kept — the branch ref survives the removal).
+ * Deliberately repo-wide neutral: any directory inside a repository answers,
+ * so the dialog data stays meaningful even for odd shapes.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path }`.
+ */
+export declare function handleInspectWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
+/**
+ * POST /remove — delete one linked worktree: git's registration plus the
+ * folder in one stroke (`worktree remove`, `--force` past uncommitted
+ * changes the dialog already showed). DSH-side cleanup (archiving the
+ * workspace's sessions, dropping the workspace registration) is the
+ * browser's follow-up, by design: git first, so a refused removal leaves
+ * the workspace world untouched.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path, force? }`.
+ */
+export declare function handleRemoveWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;

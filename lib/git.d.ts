@@ -152,6 +152,40 @@ export interface UpdateOutcome {
 export declare function updateBranch(exec: Exec, cwd: string): Promise<UpdateOutcome>;
 /** Guard for route inputs: a non-empty absolute directory path. */
 export declare function isAbsoluteDir(value: string): boolean;
+/** Pre-delete facts of one worktree directory, for the remove-confirm dialog. */
+export interface WorktreeInspect {
+    /** Uncommitted-change file rows (`git status --porcelain` line count). */
+    dirty: number;
+    /** Commits ahead of the branch's upstream; undefined when no upstream. */
+    ahead: number | undefined;
+}
+/**
+ * Inspect one worktree directory for removal: how many files carry
+ * uncommitted changes (those ARE lost with the folder), and how many commits
+ * the checked-out branch leads its upstream by (informational only — the
+ * branch ref survives `worktree remove`, so those are kept).
+ * @param exec - executor seam.
+ * @param worktreePath - the worktree directory (absolute).
+ */
+export declare function inspectWorktree(exec: Exec, worktreePath: string): Promise<WorktreeInspect>;
+/**
+ * Remove one linked worktree: `git worktree remove` deletes the folder and
+ * the registration in one stroke. A stale registration (folder already gone
+ * behind git's back) resolves through `worktree prune` instead — the outcome
+ * the user asked for either way, which keeps the route idempotent.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param worktreePath - the linked worktree directory to delete (absolute).
+ * @param force - pass `--force` past uncommitted changes.
+ * @param dirExists - existence seam for the stale-registration branch.
+ * @returns the path plus whether only a stale registration was pruned.
+ * @throws GitError for the main worktree, an unregistered path, or a refused
+ * removal (git's own stderr verbatim).
+ */
+export declare function removeWorktree(exec: Exec, repoRoot: string, worktreePath: string, force: boolean, dirExists?: DirExists): Promise<{
+    path: string;
+    pruned: boolean;
+}>;
 /**
  * Lightweight git belonging probe for ONE workspace directory: the three
  * facts the sidebar grouping needs and nothing else (no branch list, no

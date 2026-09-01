@@ -64,7 +64,7 @@ export function ProjectRowItem({ row, onToggle, onCreate, actions, home, t, badg
   row: ProjectRowModel
   onToggle: () => void
   onCreate?: () => void
-  actions?: { rename: () => void; delete: () => void }
+  actions?: { rename: () => void; delete: () => void; removeWorktree?: () => void }
   home?: string | undefined
   t: Translate
   /** Aggregation-only count badge (repo group heads). */
@@ -72,8 +72,14 @@ export function ProjectRowItem({ row, onToggle, onCreate, actions, home, t, badg
 }): ReactNode {
   const active = row.expanded && row.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
+  // The worktree entry stays absent on non-linked rows and on linked rows the
+  // sidebar holds occupied (a running or currently-browsed session) — the
+  // affordance appears exactly where removal is safe to offer.
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
+    ...(actions?.removeWorktree !== undefined
+      ? [{ id: 'removeWorktree', label: t('worktreeRemove.menu'), icon: <IconTrashOutline16 />, danger: true }]
+      : []),
     { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
   ]
   const ownRow = (
@@ -101,9 +107,9 @@ export function ProjectRowItem({ row, onToggle, onCreate, actions, home, t, badg
             items={workspaceMenuItems}
             onSelect={(id) => {
               setMenuOpen(false)
-              if (id !== 'rename' && id !== 'delete') return
               if (id === 'rename') actions.rename()
-              else actions.delete()
+              else if (id === 'removeWorktree') actions.removeWorktree?.()
+              else if (id === 'delete') actions.delete()
             }}
             portal
             closeOnPointerLeave

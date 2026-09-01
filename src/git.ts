@@ -406,6 +406,72 @@ export function isAbsoluteDir(value: string): boolean {
   return value.trim() !== '' && isAbsolute(value)
 }
 
+/** Pre-delete facts of one worktree directory, for the remove-confirm dialog. */
+export interface WorktreeInspect {
+  /** Uncommitted-change file rows (`git status --porcelain` line count). */
+  dirty: number
+  /** Commits ahead of the branch's upstream; undefined when no upstream. */
+  ahead: number | undefined
+}
+
+/**
+ * Inspect one worktree directory for removal: how many files carry
+ * uncommitted changes (those ARE lost with the folder), and how many commits
+ * the checked-out branch leads its upstream by (informational only — the
+ * branch ref survives `worktree remove`, so those are kept).
+ * @param exec - executor seam.
+ * @param worktreePath - the worktree directory (absolute).
+ */
+export async function inspectWorktree(exec: Exec, worktreePath: string): Promise<WorktreeInspect> {
+  const status = await git(exec, worktreePath, ['status', '--porcelain'])
+  const dirty = status.split('\n').filter(line => line.trim() !== '').length
+  // No upstream (local-only branch) fails the rev-list — that is a normal
+  // answer, not an error: ahead stays undefined.
+  const aheadOut = await gitMaybe(exec, worktreePath, ['rev-list', '--count', '@{u}..HEAD'])
+  const parsed = aheadOut === undefined ? Number.NaN : Number(aheadOut.trim())
+  return { dirty, ahead: Number.isFinite(parsed) ? parsed : undefined }
+}
+
+/**
+ * Remove one linked worktree: `git worktree remove` deletes the folder and
+ * the registration in one stroke. A stale registration (folder already gone
+ * behind git's back) resolves through `worktree prune` instead — the outcome
+ * the user asked for either way, which keeps the route idempotent.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param worktreePath - the linked worktree directory to delete (absolute).
+ * @param force - pass `--force` past uncommitted changes.
+ * @param dirExists - existence seam for the stale-registration branch.
+ * @returns the path plus whether only a stale registration was pruned.
+ * @throws GitError for the main worktree, an unregistered path, or a refused
+ * removal (git's own stderr verbatim).
+ */
+export async function removeWorktree(
+  exec: Exec,
+  repoRoot: string,
+  worktreePath: string,
+  force: boolean,
+  dirExists: DirExists = fsDirExists,
+): Promise<{ path: string; pruned: boolean }> {
+  const target = normalize(worktreePath)
+  const worktrees = await listWorktrees(exec, repoRoot)
+  const registered = worktrees.find(w => w.path === target)
+  if (registered === undefined) {
+    throw new GitError(['worktree', 'remove'], 1, `"${target}" is not a registered worktree of this repository`)
+  }
+  if (registered.main) {
+    throw new GitError(['worktree', 'remove'], 1, 'cannot remove the main worktree')
+  }
+  if (!dirExists(target)) {
+    // Stale registration: the folder is already gone, so removal means
+    // clearing git's administrative record — exactly what prune does.
+    await git(exec, repoRoot, ['worktree', 'prune'])
+    return { path: target, pruned: true }
+  }
+  await git(exec, repoRoot, force ? ['worktree', 'remove', '--force', target] : ['worktree', 'remove', target])
+  return { path: target, pruned: false }
+}
+
 /**
  * Lightweight git belonging probe for ONE workspace directory: the three
  * facts the sidebar grouping needs and nothing else (no branch list, no

@@ -436,6 +436,25 @@
   line-height: 18px;
 }
 
+/* Pre-delete facts of the worktree-removal dialog: one line per fact, the
+ * destructive one (uncommitted files die with the folder) in error tone. */
+.removeFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.removeFact {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.removeFactWarn {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .modalAction {
   min-width: 72px;
 }

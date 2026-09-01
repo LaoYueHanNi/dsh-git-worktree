@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalize, resolve } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, probeRepo, probeWorkspaceGit, switchBranch, updateBranch,
+  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, switchBranch, updateBranch,
   type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -386,5 +386,74 @@ describe('probeWorkspaceGit', () => {
       { args: ['rev-parse', '--git-common-dir'], out: { code: 128, stderr: 'fatal: bad revision\n' } },
     ])
     expect(await probeWorkspaceGit(exec, REPO)).toBeUndefined()
+  })
+})
+
+describe('inspectWorktree', () => {
+  it('counts porcelain rows as dirty files and reads the ahead count', async () => {
+    const exec = scripted([
+      { args: ['status', '--porcelain'], out: { stdout: ' M a.ts\n?? b.ts\nM  c.ts\n' } },
+      { args: ['rev-list', '--count', '@{u}..HEAD'], out: { stdout: '2\n' } },
+    ])
+    expect(await inspectWorktree(exec, '/wt')).toEqual({ dirty: 3, ahead: 2 })
+  })
+
+  it('reports no upstream as undefined ahead, not an error', async () => {
+    const exec = scripted([
+      { args: ['status', '--porcelain'], out: { stdout: '' } },
+      { args: ['rev-list', '--count', '@{u}..HEAD'], out: { code: 128, stderr: "fatal: no upstream configured for branch 'dev'\n" } },
+    ])
+    expect(await inspectWorktree(exec, '/wt')).toEqual({ dirty: 0, ahead: undefined })
+  })
+})
+
+describe('removeWorktree', () => {
+  it('removes a live linked worktree, --force only when asked', async () => {
+    const plain = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')] },
+    ])
+    expect(await removeWorktree(plain, '/repo', '/root/repo/feat-x', false, () => true))
+      .toEqual({ path: p('/root/repo/feat-x'), pruned: false })
+
+    const forced = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', '--force', p('/root/repo/feat-x')] },
+    ])
+    expect(await removeWorktree(forced, '/repo', '/root/repo/feat-x', true, () => true))
+      .toEqual({ path: p('/root/repo/feat-x'), pruned: false })
+  })
+
+  it('prunes a stale registration instead of spawning remove', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'prune'] },
+    ])
+    expect(await removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => false))
+      .toEqual({ path: p('/root/repo/feat-x'), pruned: true })
+  })
+
+  it('refuses the main worktree and unregistered paths', async () => {
+    const main = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+    ])
+    await expect(removeWorktree(main, '/repo', '/repo', false, () => true))
+      .rejects.toThrow('cannot remove the main worktree')
+
+    const unknown = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+    ])
+    await expect(removeWorktree(unknown, '/repo', '/elsewhere', false, () => true))
+      .rejects.toThrow('is not a registered worktree')
+  })
+
+  it('surfaces a git refusal of the removal verbatim', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 128, stderr: 'fatal: unable to remove: file(s) locked\n' } },
+    ])
+    await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true))
+      .rejects.toThrow('locked')
   })
 })

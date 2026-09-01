@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
+  CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_GROUP, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -115,4 +115,23 @@ export function requestUpdate(repoPath: string): Promise<Call<UpdateResult>> {
  */
 export async function requestGroupWorktrees(paths: readonly string[]): Promise<Call<GroupWorkspacesResult>> {
   return post<GroupWorkspacesResult>(ROUTE_GROUP, { paths })
+}
+
+/**
+ * Pre-delete facts for one worktree directory: the uncommitted-file count
+ * (lost with the folder) and the branch's ahead count (kept).
+ * @param path - absolute worktree directory.
+ */
+export function requestInspectWorktree(path: string): Promise<Call<InspectWorktreeResult>> {
+  return post<InspectWorktreeResult>(ROUTE_INSPECT, { path })
+}
+
+/**
+ * Remove one linked worktree (git registration + folder). `force` rides
+ * `--force` past uncommitted changes the confirm dialog already showed.
+ * @param path - absolute worktree directory to delete.
+ * @param force - delete past uncommitted changes.
+ */
+export function requestRemoveWorktree(path: string, force: boolean): Promise<Call<RemoveWorktreeResult>> {
+  return post<RemoveWorktreeResult>(ROUTE_REMOVE, { path, force })
 }

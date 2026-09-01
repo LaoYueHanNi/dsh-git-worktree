@@ -62,6 +62,10 @@ export interface GroupedSidebarInjected {
   readonly renameWorkspace: (workspaceId: string, title: string) => Promise<void>
   readonly deleteWorkspace: (workspaceId: string) => Promise<void>
   readonly archiveSession: (sessionId: string) => Promise<void>
+  /** Pre-delete facts of one linked worktree folder (dirty + ahead counts). */
+  readonly inspectWorktree: (path: string) => Promise<{ dirty: number; ahead: number | undefined }>
+  /** Remove one linked worktree (git registration + folder); rejects with the host error text. */
+  readonly removeWorktree: (path: string, force: boolean) => Promise<void>
   readonly createWorkspace: (input: { path: string }) => Promise<{ workspaceId: string }>
   readonly pickDirectory: () => Promise<string | null>
   readonly hostDescription: SidebarObservable<{ home?: string } | undefined>
@@ -279,7 +283,7 @@ function createdAtMs(createdAt: string | undefined): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
-function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, onToggle, expandTo, orderBy, now, home, onOpen, onRename, onFork, onArchive, onWorkspaceRename, onWorkspaceDelete, startSession, t }: {
+function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, onToggle, expandTo, orderBy, now, home, onOpen, onRename, onFork, onArchive, onWorkspaceRename, onWorkspaceDelete, onWorktreeRemove, startSession, t }: {
   groups: readonly SidebarGroup[]
   sessions: SessionListLike
   archived: readonly string[]
@@ -296,6 +300,7 @@ function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, 
   onArchive: (id: string) => void
   onWorkspaceRename: (workspaceId: string, title: string) => void
   onWorkspaceDelete: (workspaceId: string, title: string) => void
+  onWorktreeRemove: (member: SidebarMember) => void
   startSession: (workspaceId?: string) => void
   t: Translate
 }): ReactNode {
@@ -343,6 +348,7 @@ function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, 
                     onArchive={onArchive}
                     onWorkspaceRename={onWorkspaceRename}
                     onWorkspaceDelete={onWorkspaceDelete}
+                    onWorktreeRemove={onWorktreeRemove}
                     startSession={startSession}
                     t={t}
                   />
@@ -374,6 +380,7 @@ function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, 
                 onArchive={onArchive}
                 onWorkspaceRename={onWorkspaceRename}
                 onWorkspaceDelete={onWorkspaceDelete}
+                onWorktreeRemove={onWorktreeRemove}
                 startSession={startSession}
                 t={t}
               />
@@ -386,7 +393,7 @@ function GroupedTree({ groups, sessions, archived, currentSessionId, expandMap, 
   )
 }
 
-function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, expandMap, onToggle, expandTo, descendants, expandedSessionGroups, setExpandedSessionGroups, now, home, onOpen, onRename, onFork, onArchive, onWorkspaceRename, onWorkspaceDelete, startSession, t }: {
+function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, expandMap, onToggle, expandTo, descendants, expandedSessionGroups, setExpandedSessionGroups, now, home, onOpen, onRename, onFork, onArchive, onWorkspaceRename, onWorkspaceDelete, onWorktreeRemove, startSession, t }: {
   member: SidebarMember
   indent: boolean
   sessionIds: readonly string[]
@@ -406,6 +413,7 @@ function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, e
   onArchive: (id: string) => void
   onWorkspaceRename: (workspaceId: string, title: string) => void
   onWorkspaceDelete: (workspaceId: string, title: string) => void
+  onWorktreeRemove: (member: SidebarMember) => void
   startSession: (workspaceId?: string) => void
   t: Translate
 }): ReactNode {
@@ -421,6 +429,14 @@ function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, e
     if (summary !== undefined) nodes.push(sessionNode(summary, descendants))
   }
   const created = createdAtMs(member.workspace.createdAt)
+  // Removal is offered only on linked worktrees the sidebar holds FREE: a
+  // running session's cwd is about to vanish (its failure would surface
+  // mid-task), and the currently-browsed session's directory disappearing
+  // under it is the same hole. Occupied rows simply don't show the action —
+  // archive or switch away first, then remove.
+  const hasRunning = member.workspace.sessionIds.some(id => sessions.byId[id]?.running === true)
+  const occupied = containsCurrent || hasRunning
+  const canRemoveWorktree = member.label.type === 'linked' && !occupied
   const body = (
     <>
       <ProjectRowItem
@@ -440,6 +456,7 @@ function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, e
         actions={{
           rename: () => { onWorkspaceRename(member.workspace.workspaceId, member.workspace.title) },
           delete: () => { onWorkspaceDelete(member.workspace.workspaceId, member.workspace.title) },
+          ...canRemoveWorktree ? { removeWorktree: () => { onWorktreeRemove(member) } } : {},
         }}
         home={home}
         t={t}
@@ -694,6 +711,67 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
     })
   }
 
+  // Worktree removal state. `archivedSet` decides which of the workspace's
+  // sessions the flow will archive (everything visible: not archived, not
+  // blank, not a subagent row); blank rows hold nothing worth archiving and
+  // an Ungrouped blank stays hidden anyway, while subagent rows are never
+  // the user's to manage here.
+  const [wtRemoveTarget, setWtRemoveTarget] = useState<SidebarMember | null>(null)
+  const [wtInspect, setWtInspect] = useState<
+    | { status: 'loading' }
+    | { status: 'ready'; dirty: number; ahead: number | undefined }
+    | { status: 'error'; error: string }
+  >({ status: 'loading' })
+  const [wtRemoving, setWtRemoving] = useState(false)
+  const [wtRemoveError, setWtRemoveError] = useState<string | null>(null)
+  useEffect(() => {
+    if (wtRemoveTarget === null) return
+    setWtInspect({ status: 'loading' })
+    let live = true
+    void props.inspectWorktree(wtRemoveTarget.workspace.path).then(
+      (facts) => { if (live) setWtInspect({ status: 'ready', dirty: facts.dirty, ahead: facts.ahead }) },
+      (reason: unknown) => { if (live) setWtInspect({ status: 'error', error: reason instanceof Error ? reason.message : String(reason) }) },
+    )
+    return () => { live = false }
+  }, [wtRemoveTarget])
+  const archivedSet = useMemo(() => new Set<string>(archived), [archived])
+  const wtArchiveIds = wtRemoveTarget === null ? [] : wtRemoveTarget.workspace.sessionIds.filter((id) => {
+    const summary = sessionList.byId[id]
+    return summary !== undefined && !archivedSet.has(id) && !summary.blank && summary.origin !== 'subagent'
+  })
+  const closeWtRemove = (): void => {
+    if (wtRemoving) return
+    setWtRemoveTarget(null)
+    setWtRemoveError(null)
+  }
+  const confirmWtRemove = (): void => {
+    if (wtRemoving || wtRemoveTarget === null || wtInspect.status !== 'ready') return
+    const target = wtRemoveTarget
+    setWtRemoving(true)
+    setWtRemoveError(null)
+    // Git first: a refused removal (locked files on Windows, a git error)
+    // leaves the workspace world untouched and the dialog retries cleanly.
+    // Only after the folder is really gone does the DSH side follow —
+    // archive the workspace's sessions (they'd otherwise surface under
+    // Ungrouped), then drop the registration itself.
+    void (async () => {
+      try {
+        await props.removeWorktree(target.workspace.path, wtInspect.dirty > 0)
+        for (const sessionId of wtArchiveIds) {
+          await props.archiveSession(sessionId).catch((reason: unknown) => {
+            console.warn('session archive rejected during worktree removal:', reason)
+          })
+        }
+        await props.deleteWorkspace(target.workspace.workspaceId)
+        setWtRemoving(false)
+        setWtRemoveTarget(null)
+      } catch (reason: unknown) {
+        setWtRemoving(false)
+        setWtRemoveError(reason instanceof Error ? reason.message : String(reason))
+      }
+    })()
+  }
+
   const now = Date.now()
   const wide = props.wide
 
@@ -871,6 +949,10 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
                   setDeleteTarget({ workspaceId, title })
                   setDeleteError(null)
                 }}
+                onWorktreeRemove={(member) => {
+                  setWtRemoveTarget(member)
+                  setWtRemoveError(null)
+                }}
                 startSession={props.startSession}
                 t={t}
               />
@@ -964,6 +1046,51 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
       >
         {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
+      </Modal>
+      <Modal
+        open={wtRemoveTarget !== null}
+        onClose={closeWtRemove}
+        closeLabel={t('close')}
+        title={t('worktreeRemove.title')}
+        {...wtRemoveTarget === null ? {} : { description: t('worktreeRemove.desc', { path: wtRemoveTarget.workspace.path }) }}
+        footer={(
+          <>
+            <Button variant="outline" disabled={wtRemoving} onClick={closeWtRemove}>{t('cancel')}</Button>
+            <Button
+              variant="outline"
+              className={css.deleteAction}
+              disabled={wtRemoving || wtInspect.status !== 'ready'}
+              onClick={confirmWtRemove}
+            >
+              {t('worktreeRemove.menu')}
+            </Button>
+          </>
+        )}
+      >
+        {wtRemoveTarget?.label.type === 'linked' && wtRemoveTarget.label.branch !== null && (
+          <div className={css.removeFact}>{t('worktreeRemove.descBranch', { branch: wtRemoveTarget.label.branch })}</div>
+        )}
+        {wtInspect.status === 'loading' && <div className={css.deleteStatus} role="status">{t('worktreeRemove.inspecting')}</div>}
+        {wtInspect.status === 'error' && <div className={css.renameError} role="alert">{wtInspect.error}</div>}
+        {wtInspect.status === 'ready' && (
+          <div className={css.removeFacts}>
+            <div className={cx(css.removeFact, wtInspect.dirty > 0 && css.removeFactWarn)}>
+              {wtInspect.dirty > 0
+                ? t(wtInspect.dirty === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: wtInspect.dirty })
+                : t('worktreeRemove.clean')}
+            </div>
+            {wtInspect.ahead !== undefined && wtInspect.ahead > 0 && (
+              <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: wtInspect.ahead })}</div>
+            )}
+            {wtArchiveIds.length > 0 && (
+              <div className={css.removeFact}>
+                {t(wtArchiveIds.length === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: wtArchiveIds.length })}
+              </div>
+            )}
+          </div>
+        )}
+        {wtRemoving && <div className={css.deleteStatus} role="status">{t('worktreeRemove.busy')}</div>}
+        {wtRemoveError !== null && <div className={css.renameError} role="alert">{wtRemoveError}</div>}
       </Modal>
     </div>
   )

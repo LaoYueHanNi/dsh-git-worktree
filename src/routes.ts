@@ -5,11 +5,11 @@
 
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, isAbsoluteDir, probeRepo, probeWorkspaceGit, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, GroupWorkspacesResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, RemoveWorktreeBody, RemoveWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -28,7 +28,7 @@ export interface RouteDeps {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -106,6 +106,12 @@ function gitFailure(error: GitError): RouteOutcome {
     // texts (a remote that vanished mid-fetch: `Repository '...' not
     // found`) carry no quoted branch and stay 500 host faults.
     || error.stderr.includes('branch "')
+    // Removal refusals from git.ts are caller-side state the same way: the
+    // main worktree (git refuses it too, but the route answers a clean 400
+    // before ever spawning git) and a path the repository never registered
+    // (a stale sidebar row racing a terminal-side removal).
+    || error.stderr.includes('cannot remove the main worktree')
+    || error.stderr.includes('is not a registered worktree')
   return fail(usage ? 400 : 500, error.message)
 }
 
@@ -329,6 +335,58 @@ export async function handleUpdate(deps: RouteDeps, body: unknown): Promise<Rout
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const outcome = await updateBranch(deps.exec, facts.repoRoot)
     const result: UpdateResult = { branch: outcome.branch, updated: outcome.updated }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /inspect — pre-delete facts for one worktree directory: the
+ * uncommitted-file count (those die with the folder) and the checked-out
+ * branch's ahead count (kept — the branch ref survives the removal).
+ * Deliberately repo-wide neutral: any directory inside a repository answers,
+ * so the dialog data stays meaningful even for odd shapes.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path }`.
+ */
+export async function handleInspectWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<InspectWorktreeBody>(body, ['path'])
+  if (isOutcome(parsed)) return parsed
+  const { path } = parsed
+  if (!isAbsoluteDir(path)) return fail(400, '"path" must be an absolute directory')
+  try {
+    const facts = await probeRepo(deps.exec, path, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${path}" is not inside a git repository`)
+    const inspected = await inspectWorktree(deps.exec, path)
+    const result: InspectWorktreeResult = { dirty: inspected.dirty, ...inspected.ahead === undefined ? {} : { ahead: inspected.ahead } }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /remove — delete one linked worktree: git's registration plus the
+ * folder in one stroke (`worktree remove`, `--force` past uncommitted
+ * changes the dialog already showed). DSH-side cleanup (archiving the
+ * workspace's sessions, dropping the workspace registration) is the
+ * browser's follow-up, by design: git first, so a refused removal leaves
+ * the workspace world untouched.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path, force? }`.
+ */
+export async function handleRemoveWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<RemoveWorktreeBody>(body, ['path'], ['force'])
+  if (isOutcome(parsed)) return parsed
+  const { path, force } = parsed
+  if (!isAbsoluteDir(path)) return fail(400, '"path" must be an absolute directory')
+  try {
+    const facts = await probeRepo(deps.exec, path, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${path}" is not inside a git repository`)
+    const result = await removeWorktree(deps.exec, facts.repoRoot, path, force === true, deps.dirExists)
     return { status: 200, body: result }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)

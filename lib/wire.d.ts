@@ -20,6 +20,10 @@ export declare const ROUTE_FETCH = "/plugin/git-worktree/fetch";
 export declare const ROUTE_UPDATE = "/plugin/git-worktree/update";
 /** POST ROUTE_PREFIX/group — git belonging facts for a batch of workspace paths. */
 export declare const ROUTE_GROUP = "/plugin/git-worktree/group";
+/** POST ROUTE_PREFIX/inspect — pre-delete facts for one worktree directory. */
+export declare const ROUTE_INSPECT = "/plugin/git-worktree/inspect";
+/** POST ROUTE_PREFIX/remove — delete one linked worktree (git registration + folder). */
+export declare const ROUTE_REMOVE = "/plugin/git-worktree/remove";
 /** One selectable branch row. */
 export interface BranchEntry {
     /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -155,4 +159,35 @@ export interface GroupWorkspacesBody {
 export interface GroupWorkspacesResult {
     /** Git facts per path; null marks a path outside any git repository. */
     facts: Record<string, WorkspaceGitFacts | null>;
+}
+/** POST inspect request body. */
+export interface InspectWorktreeBody {
+    /** The worktree directory to inspect (absolute). */
+    path: string;
+}
+/** POST inspect response body — the facts the remove-confirm dialog shows. */
+export interface InspectWorktreeResult {
+    /** Uncommitted changes in the directory (staged + unstaged + untracked
+     * file rows of `git status --porcelain`). */
+    dirty: number;
+    /** Commits the checked-out branch is ahead of its upstream; absent = no
+     * upstream. Purely informational: the branch ref survives the removal, so
+     * these commits are NOT lost. */
+    ahead?: number;
+}
+/** POST remove request body. */
+export interface RemoveWorktreeBody {
+    /** The linked worktree directory to delete (absolute). */
+    path: string;
+    /** True: force past uncommitted changes (the confirm dialog already
+     * showed the dirty count). */
+    force?: boolean;
+}
+/** POST remove response body. */
+export interface RemoveWorktreeResult {
+    /** The removed worktree directory. */
+    path: string;
+    /** True when only a stale registration was pruned (the directory was
+     * already gone); false when `git worktree remove` deleted a live folder. */
+    pruned: boolean;
 }

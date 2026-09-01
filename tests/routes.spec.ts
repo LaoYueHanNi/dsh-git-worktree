@@ -4,7 +4,7 @@ import { join, normalize, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleFetch, handleGroupWorktrees, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleFetch, handleGroupWorktrees, handleInspectWorktree, handleRemoveWorktree, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -501,5 +501,96 @@ describe('handleGroupWorktrees', () => {
     if (!('facts' in outcome.body)) throw new Error('expected facts body')
     expect(outcome.body.facts[PLAIN]).toBeNull()
     expect(outcome.body.facts[REPO]).not.toBeNull()
+  })
+})
+
+describe('handleInspectWorktree', () => {
+  it('rejects a malformed body, unknown keys, and a relative path', async () => {
+    expect((await handleInspectWorktree(deps(), undefined)).status).toBe(400)
+    expect((await handleInspectWorktree(deps(), { path: '/repo', extra: 1 })).status).toBe(400)
+    expect((await handleInspectWorktree(deps(), { path: 'repo/sub' })).status).toBe(400)
+    expect((await handleInspectWorktree(deps(), { path: '  ' })).status).toBe(400)
+  })
+
+  it('answers the dirty and ahead counts inside a repository', async () => {
+    const exec = scripted({
+      ...REPO_CALLS,
+      'status --porcelain': { stdout: ' M a.ts\n?? b.ts\n' },
+      'rev-list --count': { stdout: '4\n' },
+    })
+    const outcome = await handleInspectWorktree(deps({ exec }), { path: '/repo' })
+    expect(outcome).toEqual({ status: 200, body: { dirty: 2, ahead: 4 } })
+  })
+
+  it('omits ahead when the branch has no upstream', async () => {
+    const exec = scripted({
+      ...REPO_CALLS,
+      'status --porcelain': { stdout: '' },
+      'rev-list --count': { code: 128, stderr: "fatal: no upstream configured for branch 'main'\n" },
+    })
+    const outcome = await handleInspectWorktree(deps({ exec }), { path: '/repo' })
+    expect(outcome).toEqual({ status: 200, body: { dirty: 0 } })
+  })
+
+  it('answers 400 outside a repository', async () => {
+    const exec = scripted({ 'rev-parse --show-toplevel': { code: 128, stderr: 'fatal: not a git repository\n' } })
+    expect((await handleInspectWorktree(deps({ exec }), { path: '/plain' })).status).toBe(400)
+  })
+})
+
+describe('handleRemoveWorktree', () => {
+  /** The linked worktree of REPO_CALLS' porcelain, platform-normalized. */
+  const LINKED = p('/root/repo/feat-x')
+
+  it('rejects a malformed body, unknown keys, a mistyped force, and a relative path', async () => {
+    expect((await handleRemoveWorktree(deps(), undefined)).status).toBe(400)
+    expect((await handleRemoveWorktree(deps(), { path: '/repo', extra: 1 })).status).toBe(400)
+    expect((await handleRemoveWorktree(deps(), { path: '/repo', force: 'yes' })).status).toBe(400)
+    expect((await handleRemoveWorktree(deps(), { path: 'repo' })).status).toBe(400)
+  })
+
+  it('removes a live linked worktree with or without force', async () => {
+    const plain = scripted({ ...REPO_CALLS, 'worktree remove': {} })
+    const outcome = await handleRemoveWorktree(deps({ exec: plain }), { path: LINKED })
+    expect(outcome).toEqual({ status: 200, body: { path: LINKED, pruned: false } })
+
+    const forced = scripted({ ...REPO_CALLS, 'worktree remove': {} })
+    expect((await handleRemoveWorktree(deps({ exec: forced }), { path: LINKED, force: true })).status).toBe(200)
+  })
+
+  it('prunes a stale registration and reports pruned', async () => {
+    const exec = scripted({ ...REPO_CALLS, 'worktree prune': {} })
+    const outcome = await handleRemoveWorktree(deps({ exec, dirExists: () => false }), { path: LINKED })
+    expect(outcome).toEqual({ status: 200, body: { path: LINKED, pruned: true } })
+  })
+
+  it('refuses the main worktree with 400, not a spawned git failure', async () => {
+    const outcome = await handleRemoveWorktree(deps(), { path: '/repo' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('main worktree')
+  })
+
+  it('refuses a path the repository never registered with 400', async () => {
+    const outcome = await handleRemoveWorktree(deps(), { path: '/repo/sub' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('not a registered worktree')
+  })
+
+  it('answers 400 outside a repository', async () => {
+    const exec = scripted({ 'rev-parse --show-toplevel': { code: 128, stderr: 'fatal: not a git repository\n' } })
+    expect((await handleRemoveWorktree(deps({ exec }), { path: '/plain' })).status).toBe(400)
+  })
+
+  it('surfaces a refused removal as the error envelope', async () => {
+    const exec = scripted({
+      ...REPO_CALLS,
+      'worktree remove': { code: 128, stderr: 'fatal: unable to remove: file(s) locked\n' },
+    })
+    const outcome = await handleRemoveWorktree(deps({ exec }), { path: LINKED })
+    expect(outcome.status).toBe(500)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('locked')
   })
 })

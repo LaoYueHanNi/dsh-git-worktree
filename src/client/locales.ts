@@ -107,6 +107,18 @@ export type GitWorktreeKey =
   | 'delete.workspace'
   | 'delete.desc'
   | 'delete.pending'
+  | 'worktreeRemove.menu'
+  | 'worktreeRemove.title'
+  | 'worktreeRemove.desc'
+  | 'worktreeRemove.descBranch'
+  | 'worktreeRemove.inspecting'
+  | 'worktreeRemove.dirty.one'
+  | 'worktreeRemove.dirty.other'
+  | 'worktreeRemove.clean'
+  | 'worktreeRemove.ahead'
+  | 'worktreeRemove.sessions.one'
+  | 'worktreeRemove.sessions.other'
+  | 'worktreeRemove.busy'
   | 'menu.fork'
   | 'menu.archiveSession'
   | 'sessions.count.one'
@@ -239,6 +251,18 @@ export const en: Record<GitWorktreeKey, string> = {
   'delete.workspace': 'Delete workspace',
   'delete.desc': 'This removes “{name}” from the workspace list. The folder and session logs will be kept. Its sessions will appear under Ungrouped.',
   'delete.pending': 'Deleting workspace…',
+  'worktreeRemove.menu': 'Remove worktree',
+  'worktreeRemove.title': 'Remove worktree',
+  'worktreeRemove.desc': 'This removes the worktree from git and deletes the folder “{path}”.',
+  'worktreeRemove.descBranch': 'The branch {branch} is kept.',
+  'worktreeRemove.inspecting': 'Inspecting worktree…',
+  'worktreeRemove.dirty.one': '{n} uncommitted file will be deleted with the folder.',
+  'worktreeRemove.dirty.other': '{n} uncommitted files will be deleted with the folder.',
+  'worktreeRemove.clean': 'No uncommitted changes.',
+  'worktreeRemove.ahead': '{n} commits ahead of upstream, kept on the branch.',
+  'worktreeRemove.sessions.one': '{n} session in this workspace will be archived too.',
+  'worktreeRemove.sessions.other': '{n} sessions in this workspace will be archived too.',
+  'worktreeRemove.busy': 'Removing…',
   'menu.fork': 'Fork session',
   'menu.archiveSession': 'Archive session',
   'sessions.count.one': '{n} session',
@@ -372,6 +396,18 @@ export const zh: Record<GitWorktreeKey, string> = {
   'delete.workspace': '删除工作区',
   'delete.desc': '将把“{name}”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。',
   'delete.pending': '正在删除工作区…',
+  'worktreeRemove.menu': '删除工作树',
+  'worktreeRemove.title': '删除工作树',
+  'worktreeRemove.desc': '将从 git 移除该工作树并删除目录“{path}”。',
+  'worktreeRemove.descBranch': '分支 {branch} 将保留。',
+  'worktreeRemove.inspecting': '正在检查工作树…',
+  'worktreeRemove.dirty.one': '{n} 个未提交文件将随目录一并删除。',
+  'worktreeRemove.dirty.other': '{n} 个未提交文件将随目录一并删除。',
+  'worktreeRemove.clean': '无未提交改动。',
+  'worktreeRemove.ahead': '分支领先上游 {n} 个提交，提交将保留在分支上。',
+  'worktreeRemove.sessions.one': '该工作区下的 {n} 个会话将一并归档。',
+  'worktreeRemove.sessions.other': '该工作区下的 {n} 个会话将一并归档。',
+  'worktreeRemove.busy': '删除中…',
   'menu.fork': '分叉会话',
   'menu.archiveSession': '归档会话',
   'sessions.count.one': '{n} 个会话',
