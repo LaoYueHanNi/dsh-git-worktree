@@ -1,6 +1,6 @@
 {
   "name": "@laoyuehanni/dsh-git-worktree",
-  "version": "0.4.2",
+  "version": "0.4.2-dsh-0.1.2-alpha.3",
   "description": "DSH plugin: branch visibility and git worktree isolation for Web UI sessions",
   "keywords": [
     "dsh",
@@ -46,7 +46,8 @@
   ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "access": "public",
+    "tag": "dsh-alpha"
   },
   "dsh": {
     "bundle": {
