@@ -201,31 +201,39 @@ function StrayFolderGlyph({ size = 16 }: { size?: number }) {
  * One virtual directory row of the stray (Ungrouped) section: DASHED folder
  * (the real workspace rows' folder is solid — the dash pattern is the
  * at-a-glance "this directory is not a registered workspace" mark) +
- * directory basename + session-count badge; hover reveals the full path and,
- * when a registered workspace holds the directory, that ownership (the
- * sessions are its strays). The ⋯ menu exists only where registering the
- * directory as a real workspace is possible; owned clusters carry no action
- * yet (re-adoption is a later feature).
+ * directory basename + session-count badge; hover reveals the full path plus
+ * one guidance line — ownership when a registered workspace holds the
+ * directory, or the rebuild hint when it is a missing worktree storage slot.
+ * The ⋯ menu carries exactly one action: register (directory probed real and
+ * unregistered) or rebuild (missing but host-confirmed as a storage slot).
  */
-export function StrayGroupRow({ path, belongsTo, count, expanded, onToggle, onRegister, registering, home, t }: {
+export function StrayGroupRow({ path, belongsTo, count, expanded, onToggle, onRegister, registering, onRebuild, rebuilding, missingDir, worktreeSlot, home, t }: {
   path: string
   /** Registered workspace title holding this directory; undefined = unregistered. */
   belongsTo: string | undefined
   count: number
   expanded: boolean
   onToggle: () => void
-  /** Present only while the directory has no registered workspace. */
+  /** Present only while the directory is unregistered AND probed to exist. */
   onRegister?: () => void
   registering?: boolean
+  /** Present only for a missing path the host confirmed as a storage slot. */
+  onRebuild?: () => void
+  rebuilding?: boolean
+  /** True when the host probed the directory GONE: hover explains the state. */
+  missingDir?: boolean
+  /** True when the gone path sits directly in the worktree storage root. */
+  worktreeSlot?: boolean
   home?: string | undefined
   t: Translate
 }): ReactNode {
   const [menuOpen, setMenuOpen] = useState(false)
   const label = path === '' ? t('stray.unknown') : pathBasename(path)
-  const canRegister = onRegister !== undefined
-  const items = canRegister
+  const items = onRegister !== undefined
     ? [{ id: 'register', label: t('stray.register'), icon: <IconFolderOpen16 /> }]
-    : []
+    : onRebuild !== undefined
+      ? [{ id: 'rebuild', label: t('stray.rebuild'), icon: <IconFolderOpen16 /> }]
+      : []
   const row = (
     <div
       className={cx(css.projectRow, css.strayRow, menuOpen && css.menuOpen)}
@@ -245,15 +253,16 @@ export function StrayGroupRow({ path, belongsTo, count, expanded, onToggle, onRe
         <span className={css.title}>{label}</span>
       </span>
       <span className={css.repoCount}>{String(count)}</span>
-      {canRegister && (
+      {items.length > 0 && (
         <span className={css.rowActions}>
           <Menu
             open={menuOpen}
             onClose={() => { setMenuOpen(false) }}
             items={items}
-            onSelect={() => {
+            onSelect={(id) => {
               setMenuOpen(false)
-              onRegister?.()
+              if (id === 'register') onRegister?.()
+              if (id === 'rebuild') onRebuild?.()
             }}
             portal
             closeOnPointerLeave
@@ -261,8 +270,8 @@ export function StrayGroupRow({ path, belongsTo, count, expanded, onToggle, onRe
               <button
                 type="button"
                 className={css.iconButton}
-                aria-label={t('stray.register.aria', { name: label })}
-                disabled={registering === true}
+                aria-label={onRegister !== undefined ? t('stray.register.aria', { name: label }) : t('stray.rebuild.aria', { name: label })}
+                disabled={registering === true || rebuilding === true}
                 onClick={(e) => {
                   e.stopPropagation()
                   setMenuOpen(v => !v)
@@ -284,6 +293,8 @@ export function StrayGroupRow({ path, belongsTo, count, expanded, onToggle, onRe
           <div className={css.hoverTitle}>{label}</div>
           {path !== '' && <div className={css.hoverPath}>{abbreviateHomePath(path, home)}</div>}
           {belongsTo !== undefined && <div className={css.hoverStatus}>{t('stray.belongsTo', { name: belongsTo })}</div>}
+          {missingDir === true && worktreeSlot === true && <div className={css.hoverStatus}>{t('stray.worktreeSlot')}</div>}
+          {missingDir === true && worktreeSlot !== true && <div className={css.hoverStatus}>{t('stray.missingDir')}</div>}
         </div>
       )}
       disabled={menuOpen}

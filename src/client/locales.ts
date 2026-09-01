@@ -121,6 +121,12 @@ export type GitWorktreeKey =
   | 'worktreeRemove.busy'
   | 'stray.unknown'
   | 'stray.belongsTo'
+  | 'stray.missingDir'
+  | 'stray.worktreeSlot'
+  | 'stray.rebuild'
+  | 'stray.rebuild.aria'
+  | 'stray.rebuildDone'
+  | 'stray.rebuildFailed'
   | 'stray.register'
   | 'stray.register.aria'
   | 'stray.registerFailed'
@@ -270,6 +276,12 @@ export const en: Record<GitWorktreeKey, string> = {
   'worktreeRemove.busy': 'Removing…',
   'stray.unknown': '(unknown directory)',
   'stray.belongsTo': 'Stray sessions of “{name}”',
+  'stray.missingDir': 'Directory no longer exists — registering is unavailable',
+  'stray.worktreeSlot': 'A worktree storage slot: rebuild this directory (e.g. git worktree add) and its historical sessions reattach automatically',
+  'stray.rebuild': 'Rebuild empty directory',
+  'stray.rebuild.aria': 'Rebuild the directory “{name}”',
+  'stray.rebuildDone': 'Directory rebuilt; its historical sessions will reattach automatically',
+  'stray.rebuildFailed': 'Rebuild failed: {message}',
   'stray.register': 'Register as workspace',
   'stray.register.aria': 'Register “{name}” as a workspace',
   'stray.registerFailed': 'Registration failed: {message}',
@@ -420,6 +432,12 @@ export const zh: Record<GitWorktreeKey, string> = {
   'worktreeRemove.busy': '删除中…',
   'stray.unknown': '（目录未知）',
   'stray.belongsTo': '属于“{name}”的失联会话',
+  'stray.missingDir': '目录已不存在，无法注册',
+  'stray.worktreeSlot': '工作树存放位：重建此目录（如 git worktree add）后，其历史会话将自动归位',
+  'stray.rebuild': '重建空目录',
+  'stray.rebuild.aria': '重建目录“{name}”',
+  'stray.rebuildDone': '目录已重建，其历史会话将自动归位',
+  'stray.rebuildFailed': '重建失败：{message}',
   'stray.register': '注册为工作区',
   'stray.register.aria': '将“{name}”注册为工作区',
   'stray.registerFailed': '注册失败：{message}',

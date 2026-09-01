@@ -3,7 +3,7 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 import { type DirExists, type Exec } from './git.js';
-import type { CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult } from './wire.js';
+import type { CreateBranchResult, CreateWorktreeResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult } from './wire.js';
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
     exec: Exec;
@@ -15,11 +15,20 @@ export interface RouteDeps {
     envHome: () => string | undefined;
     /** Worktree-registration existence seam (tests substitute). */
     dirExists?: DirExists;
+    /** Directory probe seam over fs.stat (true = exists AND is a directory);
+     * tests substitute. */
+    statDirectory?: (path: string) => Promise<boolean>;
+    /** Recursive mkdir seam (fs.mkdir recursive); tests substitute. */
+    mkdirRecursive?: (path: string) => Promise<void>;
 }
+/** Real fs-backed directory probe: exists and is a directory. */
+export declare function fsStatDirectory(path: string): Promise<boolean>;
+/** Real fs-backed recursive mkdir. */
+export declare function fsMkdirRecursive(path: string): Promise<void>;
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
     status: number;
-    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | RouteError;
+    body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | RouteError;
 }
 /**
  * POST /group — git belonging facts for a batch of workspace directories.
@@ -101,3 +110,26 @@ export declare function handleInspectWorktree(deps: RouteDeps, body: unknown): P
  * @param body - parsed request body: `{ path, force? }`.
  */
 export declare function handleRemoveWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
+/**
+ * POST /exists — batch directory-existence probe over plain fs (no git): true
+ * per path that exists AND is a directory. The browser gates the
+ * register-as-workspace action on this, so a missing folder (deleted, moved,
+ * or a corrupted session-header cwd) is answered by THIS route — the DSH
+ * workspace API never sees an unregistrable path.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ paths }`.
+ */
+export declare function handlePathExists(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;
+/**
+ * POST /ensure-directory — recreate a MISSING worktree storage slot
+ * (`mkdir -p`). Strictly gated to paths sitting DIRECTLY inside the resolved
+ * worktree storage root: those slots were planned and created by this plugin,
+ * so rebuilding the empty folder is self-healing (historical sessions
+ * reattach automatically once realpath matches again — DSH keeps the
+ * workspace accounting and filters membership by the session header's cwd).
+ * Anything else is outside this plugin's territory and is refused, so a
+ * corrupted session-header cwd can never be materialized as stray folders.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path }`.
+ */
+export declare function handleEnsureDirectory(deps: RouteDeps, body: unknown): Promise<RouteOutcome>;

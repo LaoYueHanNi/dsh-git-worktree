@@ -3,13 +3,13 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 
-import { join } from 'node:path'
-import { mkdir } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import { mkdir, stat } from 'node:fs/promises'
 import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, RemoveWorktreeBody, RemoveWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, RemoveWorktreeBody, RemoveWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -23,12 +23,31 @@ export interface RouteDeps {
   envHome: () => string | undefined
   /** Worktree-registration existence seam (tests substitute). */
   dirExists?: DirExists
+  /** Directory probe seam over fs.stat (true = exists AND is a directory);
+   * tests substitute. */
+  statDirectory?: (path: string) => Promise<boolean>
+  /** Recursive mkdir seam (fs.mkdir recursive); tests substitute. */
+  mkdirRecursive?: (path: string) => Promise<void>
+}
+
+/** Real fs-backed directory probe: exists and is a directory. */
+export async function fsStatDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** Real fs-backed recursive mkdir. */
+export async function fsMkdirRecursive(path: string): Promise<void> {
+  await mkdir(path, { recursive: true })
 }
 
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -390,6 +409,87 @@ export async function handleRemoveWorktree(deps: RouteDeps, body: unknown): Prom
     return { status: 200, body: result }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /exists — batch directory-existence probe over plain fs (no git): true
+ * per path that exists AND is a directory. The browser gates the
+ * register-as-workspace action on this, so a missing folder (deleted, moved,
+ * or a corrupted session-header cwd) is answered by THIS route — the DSH
+ * workspace API never sees an unregistrable path.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ paths }`.
+ */
+export async function handlePathExists(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return fail(400, 'request body must be a JSON object')
+  const paths = (body as Record<string, unknown>).paths
+  if (!Array.isArray(paths)) return fail(400, 'body key "paths" must be an array of absolute directories')
+  const unknownKeys = Object.keys(body as Record<string, unknown>).filter(key => key !== 'paths')
+  if (unknownKeys.length > 0) return fail(400, `unknown body key "${unknownKeys[0]}"`)
+  const distinct: string[] = []
+  for (const candidate of paths) {
+    if (typeof candidate !== 'string' || !isAbsoluteDir(candidate)) return fail(400, 'body key "paths" must be an array of absolute directories')
+    if (!distinct.includes(candidate)) distinct.push(candidate)
+  }
+  if (distinct.length > GROUP_PATHS_LIMIT) return fail(400, `body key "paths" accepts at most ${String(GROUP_PATHS_LIMIT)} distinct directories`)
+  const statDirectory = deps.statDirectory ?? fsStatDirectory
+  const exists: PathExistsResult['exists'] = {}
+  await Promise.all(distinct.map(async (path) => {
+    // One bad path must not sink the batch: a probe that throws reads as
+    // "not a directory" — exactly the gating answer the client needs.
+    exists[path] = await statDirectory(path).catch(() => false)
+  }))
+  // Rebuildability is a STORAGE-SLOT fact, not a general one: only a missing
+  // path sitting DIRECTLY inside the resolved worktree root is a slot this
+  // plugin planned, so recreating the empty directory is safe self-healing
+  // (its sessions reattach by realpath once the folder is back). Paths
+  // outside the root are the user's own territory — never rebuilt here.
+  const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+  const rebuildable: PathExistsResult['rebuildable'] = {}
+  for (const path of distinct) {
+    if (exists[path]) continue
+    rebuildable[path] = dirname(resolve(path)) === resolve(rootDir)
+  }
+  return { status: 200, body: { exists, ...Object.values(rebuildable).some(Boolean) ? { rebuildable } : {} } }
+}
+
+/**
+ * POST /ensure-directory — recreate a MISSING worktree storage slot
+ * (`mkdir -p`). Strictly gated to paths sitting DIRECTLY inside the resolved
+ * worktree storage root: those slots were planned and created by this plugin,
+ * so rebuilding the empty folder is self-healing (historical sessions
+ * reattach automatically once realpath matches again — DSH keeps the
+ * workspace accounting and filters membership by the session header's cwd).
+ * Anything else is outside this plugin's territory and is refused, so a
+ * corrupted session-header cwd can never be materialized as stray folders.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path }`.
+ */
+export async function handleEnsureDirectory(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<EnsureDirectoryBody>(body, ['path'])
+  if (isOutcome(parsed)) return parsed
+  const { path } = parsed
+  if (!isAbsoluteDir(path)) return fail(400, '"path" must be an absolute directory')
+  const configured = deps.sectionRootDir()?.trim()
+  if (configured !== undefined && configured !== '' && !isAbsoluteConfigPath(configured)) {
+    return fail(400, `configured rootDir "${String(deps.sectionRootDir())}" is not an absolute path`)
+  }
+  const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+  const canonical = resolve(path)
+  // Exactly one level below the root, compared on resolved forms so `..`
+  // and spelling drift cannot escape the slot boundary.
+  if (dirname(canonical) !== resolve(rootDir)) {
+    return fail(400, `"${canonical}" is outside the worktree storage root "${resolve(rootDir)}"`)
+  }
+  const mkdirRecursive = deps.mkdirRecursive ?? fsMkdirRecursive
+  try {
+    const statDirectory = deps.statDirectory ?? fsStatDirectory
+    if (await statDirectory(canonical)) return { status: 200, body: { created: true } }
+    await mkdirRecursive(canonical)
+    return { status: 200, body: { created: true } }
+  } catch (error) {
     return fail(500, error instanceof Error ? error.message : String(error))
   }
 }

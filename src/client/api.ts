@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
+  CreateBranchResult, CreateWorktreeResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -134,4 +134,24 @@ export function requestInspectWorktree(path: string): Promise<Call<InspectWorktr
  */
 export function requestRemoveWorktree(path: string, force: boolean): Promise<Call<RemoveWorktreeResult>> {
   return post<RemoveWorktreeResult>(ROUTE_REMOVE, { path, force })
+}
+
+/**
+ * Batch directory-existence probe (true = exists AND is a directory). The
+ * sidebar gates register-as-workspace on this so a missing folder never
+ * reaches the DSH workspace API.
+ * @param paths - absolute directories to probe.
+ */
+export function requestPathExists(paths: readonly string[]): Promise<Call<PathExistsResult>> {
+  return post<PathExistsResult>(ROUTE_EXISTS, { paths })
+}
+
+/**
+ * Recreate a missing worktree storage slot (`mkdir -p`). The host gates this
+ * to paths directly inside the storage root; historical sessions reattach
+ * automatically once the directory is back.
+ * @param path - the missing slot directory (absolute).
+ */
+export function requestEnsureDirectory(path: string): Promise<Call<EnsureDirectoryResult>> {
+  return post<EnsureDirectoryResult>(ROUTE_ENSURE_DIRECTORY, { path })
 }

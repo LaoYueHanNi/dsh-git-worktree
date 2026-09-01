@@ -35,6 +35,12 @@ export const ROUTE_INSPECT = `${ROUTE_PREFIX}/inspect`
 /** POST ROUTE_PREFIX/remove — delete one linked worktree (git registration + folder). */
 export const ROUTE_REMOVE = `${ROUTE_PREFIX}/remove`
 
+/** POST ROUTE_PREFIX/exists — batch directory-existence probe (fs, no git). */
+export const ROUTE_EXISTS = `${ROUTE_PREFIX}/exists`
+
+/** POST ROUTE_PREFIX/ensure-directory — mkdir -p a missing worktree storage slot. */
+export const ROUTE_ENSURE_DIRECTORY = `${ROUTE_PREFIX}/ensure-directory`
+
 /** One selectable branch row. */
 export interface BranchEntry {
   /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -221,4 +227,37 @@ export interface RemoveWorktreeResult {
   /** True when only a stale registration was pruned (the directory was
    * already gone); false when `git worktree remove` deleted a live folder. */
   pruned: boolean
+}
+
+/** POST exists request body. */
+export interface PathExistsBody {
+  /** Absolute directories to probe (deduped server-side). */
+  paths: string[]
+}
+
+/** POST exists response body — one entry per DISTINCT requested path; true =
+ * the path exists AND is a directory. The client gates the register action on
+ * this, so a missing folder never reaches the DSH workspace API. */
+export interface PathExistsResult {
+  exists: Record<string, boolean>
+  /** Per MISSING path: true when it sits DIRECTLY inside the plugin's
+   * worktree storage root — a slot this plugin planned, so rebuilding the
+   * empty directory is safe (historical sessions reattach automatically once
+   * realpath matches again). Absent paths and directories outside the root
+   * never appear here. */
+  rebuildable?: Record<string, boolean>
+}
+
+/** POST ensure-directory request body. */
+export interface EnsureDirectoryBody {
+  /** The missing directory to create (absolute; must sit directly inside the
+   * worktree storage root). */
+  path: string
+}
+
+/** POST ensure-directory response body. */
+export interface EnsureDirectoryResult {
+  /** Always true on 200 — the directory now exists (created, or already
+   * present as a directory). */
+  created: boolean
 }

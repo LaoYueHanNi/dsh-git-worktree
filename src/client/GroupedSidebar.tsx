@@ -66,6 +66,16 @@ export interface GroupedSidebarInjected {
   readonly inspectWorktree: (path: string) => Promise<{ dirty: number; ahead: number | undefined }>
   /** Remove one linked worktree (git registration + folder); rejects with the host error text. */
   readonly removeWorktree: (path: string, force: boolean) => Promise<void>
+  /** Batch directory-existence probe; `rebuildable` marks missing paths the
+   * host confirmed as worktree storage slots. undefined = the probe itself
+   * failed (every action withheld — the client must not guess). */
+  readonly probeDirectories: (paths: readonly string[]) => Promise<{
+    exists: Readonly<Record<string, boolean>>
+    rebuildable?: Readonly<Record<string, boolean>>
+  } | undefined>
+  /** Rebuild a missing worktree storage slot (`mkdir -p`, host-gated to the
+   * storage root); rejects with the host error text. */
+  readonly ensureDirectory: (path: string) => Promise<void>
   readonly createWorkspace: (input: { path: string }) => Promise<{ workspaceId: string }>
   readonly pickDirectory: () => Promise<string | null>
   readonly hostDescription: SidebarObservable<{ home?: string } | undefined>
@@ -787,6 +797,33 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
   const now = Date.now()
   const strayGroups = useMemo(() => deriveStrayGroups(items, sessionList, archived), [items, sessionList, archived])
   const strayDescendants = useMemo(() => indexSubagentRunning(sessionList.byId), [sessionList.byId])
+  // Directory pre-flight for register-as-workspace: the browser cannot stat,
+  // so the host's /exists route answers per unregistered cluster path. Only a
+  // probed-true directory offers the action — a missing folder (deleted,
+  // moved, or a corrupted session-header cwd) never reaches the DSH workspace
+  // API; the row explains itself in hover instead.
+  const strayProbePaths = useMemo(
+    () => [...new Set(strayGroups.filter(group => group.belongsTo === undefined && group.path !== '').map(group => group.path))],
+    [strayGroups],
+  )
+  const strayProbeSignature = strayProbePaths.join('\n')
+  const [strayDirExists, setStrayDirExists] = useState<Readonly<Record<string, boolean>> | undefined>(undefined)
+  const [straySlotRebuildable, setStraySlotRebuildable] = useState<Readonly<Record<string, boolean>> | undefined>(undefined)
+  useEffect(() => {
+    if (strayProbePaths.length === 0) return
+    let live = true
+    void props.probeDirectories(strayProbePaths).then(
+      (result) => {
+        if (!live) return
+        // A failed probe (undefined) withholds every action: without the
+        // host's fs answer the client must not guess.
+        setStrayDirExists(result?.exists)
+        setStraySlotRebuildable(result?.rebuildable)
+      },
+      () => { if (live) { setStrayDirExists(undefined); setStraySlotRebuildable(undefined) } },
+    )
+    return () => { live = false }
+  }, [strayProbeSignature])
   const straySectionKey = 'stray:section'
   const strayContainsCurrent = strayGroups.some(group => group.sessions.some(session => session.id === sessions.current))
   const straySectionOpen = expandMap[straySectionKey] ?? strayContainsCurrent
@@ -804,6 +841,29 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
       },
     )
   }
+  const [strayRebuildPath, setStrayRebuildPath] = useState<string | null>(null)
+  const rebuildStrayDirectory = (path: string): void => {
+    if (strayRebuildPath !== null) return
+    setStrayRebuildPath(path)
+    // mkdir -p on a missing slot is pure self-healing: the workspace keeps its
+    // accounting, and DSH's membership projection reattaches the sessions by
+    // realpath as soon as the folder answers again.
+    void props.ensureDirectory(path).then(
+      () => {
+        setStrayRebuildPath(null)
+        setToast({ seq: Date.now(), text: t('stray.rebuildDone') })
+        void props.probeDirectories([path]).then((result) => {
+          if (result === undefined) return
+          setStrayDirExists(current => ({ ...current, ...result.exists }))
+          setStraySlotRebuildable(current => ({ ...current, ...result.rebuildable }))
+        })
+      },
+      (reason: unknown) => {
+        setStrayRebuildPath(null)
+        setToast({ seq: Date.now(), text: t('stray.rebuildFailed', { message: reason instanceof Error ? reason.message : String(reason) }) })
+      },
+    )
+  }
   const straySection: ReactNode = strayGroups.length === 0 ? undefined : (
     <div className={css.groupSection}>
       <ProjectRowItem
@@ -815,6 +875,14 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
       />
       {straySectionOpen && strayGroups.map((group) => {
         const groupOpen = expandMap[group.key] ?? group.sessions.some(session => session.id === sessions.current)
+        // Registerable only after the host probed the directory real: absent
+        // probe data or an explicit false withholds the action entirely (the
+        // DSH create API must never receive an unregistrable path). A missing
+        // path that IS a storage slot offers the rebuild instead — pure
+        // mkdir self-healing; everything else stays action-free.
+        const registrable = group.belongsTo === undefined && group.path !== '' && strayDirExists?.[group.path] === true
+        const missingDir = group.belongsTo === undefined && group.path !== '' && strayDirExists?.[group.path] === false
+        const rebuildable = missingDir && straySlotRebuildable?.[group.path] === true
         return (
           <div key={group.key} className={cx(css.groupSection, css.memberIndent)}>
             <StrayGroupRow
@@ -823,9 +891,13 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
               count={group.sessions.length}
               expanded={groupOpen}
               onToggle={() => { toggle(group.key) }}
-              {...group.belongsTo === undefined && group.path !== ''
+              missingDir={missingDir}
+              worktreeSlot={rebuildable}
+              {...registrable
                 ? { onRegister: () => { registerStrayWorkspace(group.path) }, registering: strayRegPath === group.path }
-                : {}}
+                : rebuildable
+                  ? { onRebuild: () => { rebuildStrayDirectory(group.path) }, rebuilding: strayRebuildPath === group.path }
+                  : {}}
               home={home}
               t={t}
             />

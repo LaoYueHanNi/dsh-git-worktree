@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, normalize, resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleFetch, handleGroupWorktrees, handleInspectWorktree, handleRemoveWorktree, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -592,5 +592,89 @@ describe('handleRemoveWorktree', () => {
     expect(outcome.status).toBe(500)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('locked')
+  })
+})
+
+describe('handlePathExists', () => {
+  it('rejects a malformed body, unknown keys, and non-absolute paths', async () => {
+    expect((await handlePathExists(deps(), undefined)).status).toBe(400)
+    expect((await handlePathExists(deps(), { paths: '/repo' })).status).toBe(400)
+    expect((await handlePathExists(deps(), { paths: ['/repo'], extra: 1 })).status).toBe(400)
+    expect((await handlePathExists(deps(), { paths: ['repo'] })).status).toBe(400)
+  })
+
+  it('probes each distinct path and answers true only for real directories', async () => {
+    const statDirectory = vi.fn(async (path: string) => path === p('/repo'))
+    const outcome = await handlePathExists(deps({ statDirectory }), { paths: [p('/repo'), p('/gone'), p('/repo')] })
+    expect(outcome).toEqual({ status: 200, body: { exists: { [p('/repo')]: true, [p('/gone')]: false } } })
+    // Deduped server-side: one stat per distinct path.
+    expect(statDirectory).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads a throwing probe as not-a-directory instead of failing the batch', async () => {
+    const statDirectory = vi.fn(async (path: string) => {
+      if (path === p('/boom')) throw new Error('EACCES')
+      return true
+    })
+    const outcome = await handlePathExists(deps({ statDirectory }), { paths: [p('/boom'), p('/ok')] })
+    expect(outcome).toEqual({ status: 200, body: { exists: { [p('/boom')]: false, [p('/ok')]: true } } })
+  })
+
+  it('caps distinct paths at 256', async () => {
+    const paths = Array.from({ length: 257 }, (_v, i) => resolve(`/p/${String(i)}`))
+    expect((await handlePathExists(deps(), { paths })).status).toBe(400)
+  })
+
+  it('marks a missing path directly under the storage root as rebuildable', async () => {
+    // Default root: /home/u/.dsh/gitworktree (resolveRootDir's home fallback).
+    const ROOT = join('/home/u', '.dsh', 'gitworktree')
+    const SLOT = join(ROOT, 'repo-feat-x')
+    const statDirectory = vi.fn(async () => false)
+    const outcome = await handlePathExists(deps({ statDirectory }), {
+      paths: [SLOT, p('/elsewhere/gone'), join(ROOT, 'deep', 'nested')],
+    })
+    expect(outcome.status).toBe(200)
+    if (!('rebuildable' in outcome.body) || outcome.body.rebuildable === undefined) throw new Error('expected rebuildable')
+    // Keys echo the requested path verbatim; only the VALUE comparison is
+    // resolved (drive letters on Windows must not fork the key space).
+    expect(outcome.body.rebuildable[SLOT]).toBe(true)
+    expect(outcome.body.rebuildable[p('/elsewhere/gone')]).toBe(false)
+    // Deeper than one level under the root is outside the slot boundary.
+    expect(outcome.body.rebuildable[join(ROOT, 'deep', 'nested')]).toBe(false)
+  })
+
+  it('omits rebuildable when every probed path exists', async () => {
+    const statDirectory = vi.fn(async () => true)
+    const outcome = await handlePathExists(deps({ statDirectory }), { paths: [p('/repo')] })
+    expect(outcome).toEqual({ status: 200, body: { exists: { [p('/repo')]: true } } })
+  })
+})
+
+describe('handleEnsureDirectory', () => {
+  /** The default storage root below the fake home (platform separators). */
+  const ROOT = join('/home/u', '.dsh', 'gitworktree')
+
+  it('rejects a non-absolute path and paths outside the storage root', async () => {
+    expect((await handleEnsureDirectory(deps(), { path: 'repo-x' })).status).toBe(400)
+    expect((await handleEnsureDirectory(deps(), { path: p('/elsewhere/repo-x') })).status).toBe(400)
+    // `..` cannot escape: resolved form decides, not spelling.
+    expect((await handleEnsureDirectory(deps(), { path: join(ROOT, '..', 'escape') })).status).toBe(400)
+    // Deeper than one level is refused too.
+    expect((await handleEnsureDirectory(deps(), { path: join(ROOT, 'a', 'b') })).status).toBe(400)
+  })
+
+  it('creates a missing slot and reports created', async () => {
+    const mkdirRecursive = vi.fn(async () => {})
+    const target = join(ROOT, 'repo-feat-x')
+    const outcome = await handleEnsureDirectory(deps({ mkdirRecursive, statDirectory: async () => false }), { path: target })
+    expect(outcome).toEqual({ status: 200, body: { created: true } })
+    expect(mkdirRecursive).toHaveBeenCalledWith(resolve(target))
+  })
+
+  it('answers created without mkdir when the slot already exists', async () => {
+    const mkdirRecursive = vi.fn(async () => {})
+    const outcome = await handleEnsureDirectory(deps({ mkdirRecursive, statDirectory: async () => true }), { path: join(ROOT, 'repo-feat-x') })
+    expect(outcome).toEqual({ status: 200, body: { created: true } })
+    expect(mkdirRecursive).not.toHaveBeenCalled()
   })
 })

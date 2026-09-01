@@ -12,7 +12,8 @@ Status: implemented
 
 - **聚类**（`deriveStrayGroups` 纯函数）：会话减去所有 workspace 的 `sessionIds` 记账，套用全局可见性规则（归档隐藏、subagent 不列、非当前 blank 隐藏——删除当前会话自身的工作区注册不能让它消失），余下按 cwd 聚簇。聚类键与注册匹配均**大小写不敏感**（NTFS：会话头与注册表 realpath 的大小写漂移不得把一个目录裂成两簇）；无 cwd 的头部归入单个"目录未知"簇。区头复用"未分组"词条 + 总数徽标，展开状态走既有 expandMap。
 - **归属标注**：簇的目录若匹配某个已注册 workspace 的路径（该注册曾删除又重建的典型残留），hover 标注"属于「X」的失联会话"——它是收复（re-attach，后续功能）的天然 UI 锚点。
-- **注册为工作区**：未匹配注册的簇，行菜单提供"注册为工作区"（`workspaces.create({path})`，纯 client 调用，无需 host 注入）。注册后**新会话**自动记账（DSH 在 session.create/fork 时自动 attach）；旧失联会话仍失联（标注转为归属），待将来收复功能一键归位。注册失败（目录已不存在等）Toast 透出 DSH 拒绝原因。
+- **消失目录的重建指引（2026-09-01 修订，二段）**：rc.2 源码确认 DSH 成员投影 = 记账 ∩ realpath(cwd)（`entity.ts:101-103`、`index.ts:572-590`），**目录消失但注册还在时记账保留**——目录一回来成员自动归位，无需收复。据此 `/exists` 对 missing 路径顺带判定 `dirname === rootDir`（`rebuildable`）：命中者 hover 明示"工作树存放位：重建此目录（如 git worktree add）后，其历史会话将自动归位"，菜单提供**「重建空目录」**（`POST /ensure-directory`，`mkdir -p`）；未命中者维持"目录已不存在，无法注册"。mkdir 严格限定**存放位直下一层**（resolve 后 dirname 精确比较，`..` 与拼写漂移无法逃逸）——存放位是本插件规划的目录，重建属自愈；路径之外是用户领地，绝不代建，损坏的会话头 cwd（如 `OYW.dsh` 粘连）也因此永远无法被物化成游离目录。重建成功后重新预检：目录回来的簇若注册还在，成员投影自动恢复（UI 随 DSH 快照刷新）；若注册也没了（记账清空的场景 a），"注册为工作区"入口自然出现，回到注册流程。
+- **注册为工作区**：未匹配注册的簇，行菜单提供"注册为工作区"（`workspaces.create({path})`，纯 client 调用，无需 host 注入）。**存在性预检（2026-09-01 修订）**：注册动作只有在 host 的 `/exists` 路由（纯 fs 批量 stat，无 git）确认目录真实存在后才提供——浏览器侧无法 stat，坏路径（目录已删/移动、或会话头 cwd 本身损坏如 `OYW.dsh` 粘连）不再把 ENOENT 从 DSH create API 原样抛给用户；探测为 false 的簇 withheld 菜单项，hover 明示"目录已不存在，无法注册"；探测自身失败时同样不提供动作（宁可少给，不把未校验的路径打给接口）。注册后**新会话**自动记账（DSH 在 session.create/fork 时自动 attach）；旧失联会话仍失联（标注转为归属），待将来收复功能一键归位。预检与实际之间的竞态窗口仍由 Toast 兜底透出。
 - **渲染位置**：作为 `GroupedTree` 的尾插槽进同一滚动容器（`footer` prop），不并列第二个滚动区。
 
 ## Alternatives considered
@@ -20,7 +21,7 @@ Status: implemented
 - **只补平铺未分组桶（对齐原生）**——丢了会话头里的目录归属信息，用户面对一锅无序会话无从判断"这堆是什么"；虚拟组几乎同样便宜（纯函数聚类）。否。
 - **失联簇直接并入匹配的真实工作区行下**——语义正确但要在 MemberBlock 内嵌"失联子区"，组件复杂度陡增，且真实组的渲染（hover/菜单/blank 行为）与失联会话的语义冲突；独立虚拟组 + 归属标注达到同等信息量。否。
 - **注册动作顺带把旧会话 attach 回去**——client 面没有 attachSession（DSH 只在 session.create/fork 内部使用），需要 host 注入 `workspaceRegistry` 的先导实验；本轮不把半恢复绑在未验证的注入上。留作后续。
-- **cwd 指向不存在目录的簇加"目录已不存在"标注**——client 无文件系统探测能力；注册动作对非目录路径的拒绝文案已天然给出信号。否。
+- **cwd 指向不存在目录的簇加"目录已不存在"标注**——初判 client 无文件系统探测能力，否（2026-09-01 修订：插件 host 半边有 fs，`/exists` 批量 stat 路由落地后本条翻转为 implemented——预检门槛 + hover 明示）。
 
 ## Consequences
 
