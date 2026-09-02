@@ -181,7 +181,7 @@
 }
 
 .renameInput {
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 0.5px solid var(--dsw-alias-border-l4);
   background: var(--dsw-alias-button-elevated-fill);
   min-width: 0;
   color: inherit;

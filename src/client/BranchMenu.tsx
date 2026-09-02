@@ -2,8 +2,9 @@
  * BranchMenu: the branch picker popup anchored to the composer branch chip.
  * The base Menu primitive exposes neither a height cap nor a search field,
  * so with many branches its portal list fills the viewport — this popup
- * replaces it with an owner-styled card: Menu's card chrome (r12, inverted
- * hairline, shadow-lv3, --dsw-specific-menu, see .menuCard) on a
+ * replaces it with an owner-styled card: Menu's card chrome (r20,
+ * elevation-prominent hairline, --dsw-specific-menu, see .menuCard;
+ * alpha.3 hosts fall back to shadow-lv3) on a
  * portal-fixed posture, with owner requirements baked in:
  *
  *   1. the card is capped at min(420px, 60vh) and only the branch rows

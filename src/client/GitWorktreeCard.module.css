@@ -6,8 +6,8 @@
 
 .card {
   list-style: none;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 16px;
   background: var(--dsw-alias-bg-layer-3);
   transition: border-color .16s, background .16s;
 }
@@ -70,6 +70,7 @@
 .pending {
   flex: none;
   border-radius: 999px;
+  corner-shape: round;
   padding: 1px 8px;
   font-size: 11px;
   line-height: 17px;
@@ -90,7 +91,7 @@
 }
 
 .body {
-  border-top: 1px solid var(--dsw-alias-border-l2);
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
   margin: 0 16px;
   padding: 12px 0 8px;
   display: flex;
@@ -126,7 +127,7 @@
   line-height: 20px;
   color: var(--dsw-alias-label-primary);
   background-color: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: 6px;
   appearance: none;
 }
@@ -155,7 +156,7 @@
 .browse {
   appearance: none;
   flex: none;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 0.5px solid var(--dsw-alias-border-l3);
   border-radius: 6px;
   padding: 4px 10px;
   font: inherit;
@@ -195,7 +196,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 8px 0 4px;
-  border-top: 1px solid var(--dsw-alias-border-l2);
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
 
 .failed {
@@ -210,7 +211,7 @@
 .discard,
 .save {
   appearance: none;
-  border: 1px solid transparent;
+  border: 0.5px solid transparent;
   border-radius: 8px;
   padding: 5px 14px;
   font: inherit;
