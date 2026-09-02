@@ -96,6 +96,24 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 const NS = 'git-worktree'
 
 /**
+ * The host service stores (ctx.workspaces.list, ctx.sessions.list) expose
+ * getSnapshot/subscribe as PROTOTYPE methods of the controller's model
+ * instance; a detached method reference loses its receiver and crashes inside
+ * React's bare useSyncExternalStore call (the framework's own hooks wrap the
+ * source and always call through the object). Every store crosses the inject
+ * boundary as a closure-bounded literal instead — the same shape the
+ * hand-built hostInfo/directoryFlow sources below already use.
+ */
+function boundStore<T>(
+  source: { getSnapshot(): T; subscribe(listener: () => void): () => void },
+): { getSnapshot(): T; subscribe(listener: () => void): () => void } {
+  return {
+    getSnapshot: () => source.getSnapshot(),
+    subscribe: listener => source.subscribe(listener),
+  }
+}
+
+/**
  * Namespace of the git-worktree settings section. Spelled here rather than
  * imported: a client package must not depend on a Host package.
  */
@@ -114,7 +132,7 @@ export function apply(ctx: ClientContext): void {
       const workspace = await ctx.workspaces.create({ path })
       ctx.uiWorkspace.startSession(workspace.workspaceId)
     },
-    sessionsList: ctx.sessions.list,
+    sessionsList: boundStore(ctx.sessions.list),
   })
 
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
@@ -199,8 +217,8 @@ export function apply(ctx: ClientContext): void {
     const epoch = ++seatEpoch
     seatReady = new Promise<void>((resolve) => { seatReadyResolve = resolve })
     const injectFace = (): GroupedSidebarInjected => ({
-      workspacesList: ctx.workspaces.list,
-      sessionsList: ctx.sessions.list,
+      workspacesList: boundStore(ctx.workspaces.list),
+      sessionsList: boundStore(ctx.sessions.list),
       openSession: (sessionId: string) => {
         ctx.sessions.open(sessionId as SessionId)
       },

@@ -13,6 +13,7 @@ Status: implemented
 - 下限锚在 alpha.4 而非 alpha.5：两个 tag 之间插件消费的全部包源码零差异（diff 验证），alpha.5 产物上的类型与测试验证传递覆盖 alpha.4——零差异面不是未验证面，排斥 alpha.4 换不来任何确定性收益。
 - BranchChip 迁移：props 解构 `sessionId` 并经 `useSession(snapshot => snapshot.blank)` 读生命周期位，summary（`cwd`）仍走注入的 sessionsList store 不变；`session.blank` 的 5 处引用随之替换。
 - `@deepseek-ai/dsh-client-ui-session` 进 devDependencies，client 入口补一条 type-only import 拉标准 props 合并——merge 声明的所有者必须进依赖闭包，否则 `skipLibCheck` 掩盖 d.ts 断链、组件处只落一个难定位的隐式 any（[alpha.3 迁移](2026-09-01-migrate-to-dsh-0.1.2-alpha.3.md)补 `dsh-client-store`/`dsh-api-remotes` 的同一教训）。
+- 注入 store 统一闭包保 receiver：`ctx.workspaces.list`/`ctx.sessions.list` 是控制器 model 实例、`getSnapshot`/`subscribe` 为原型方法，脱离对象的方法引用在 React 裸调用 `useSyncExternalStore` 时 `this` 丢失（alpha.5 宿主上 GroupedSidebar 首渲染即崩）；一律经 `boundStore` 包成闭包字面量过注入边界——与 `hostInfo`/`directoryFlow` 手工源的既有形状对齐。
 - 版本号取 `0.4.2-dsh-0.1.2-alpha.5`（独立 chore 提交），`publishConfig.tag` 已固化 `dsh-alpha` 不动。
 
 ## Alternatives considered
@@ -24,4 +25,4 @@ Status: implemented
 ## Consequences
 
 - 换来：类型面全量对齐 npm 在售 alpha.5 产物（typecheck 干净、194 项测试全绿）；BranchChip 的 session 身份依赖面收窄到标准 props；client bundle 重建随提交。
-- 代价：alpha.4 之前的宿主（alpha.3 含）不被本分支支持，peer 直接拒绝——alpha.3 宿主继续由 0.4.2-dsh-0.1.2-alpha.3（tag `0.4.2-dsh-0.1.2-alpha.3`）服务；devDependencies 多一项 `dsh-client-ui-session`（发布类型的活依赖，非死引用）。
+- 代价：alpha.4 之前的宿主（alpha.3 含）不被本分支支持，peer 直接拒绝——alpha.3 宿主继续由 0.4.2-dsh-0.1.2-alpha.3（tag `0.4.2-dsh-0.1.2-alpha.3`）服务；devDependencies 多一项 `dsh-client-ui-session`（发布类型的活依赖，非死引用）。receiver 丢失一类破坏不被类型面与既有测试所见（FakeCtx 的 store mock 天然是闭包形状），运行时才暴露——本次即以宿主运行时崩溃定位。
