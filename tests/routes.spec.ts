@@ -452,16 +452,12 @@ describe('handleGroupWorktrees', () => {
 
   /** Main checkout answers: own toplevel, shared .git, branch main. */
   const MAIN_CALLS = {
-    'rev-parse --show-toplevel': { stdout: `${REPO.replace(/\\/g, '/')}\n` },
-    'rev-parse --git-common-dir': { stdout: '.git\n' },
-    'branch --show-current': { stdout: 'main\n' },
+    'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: `${REPO.replace(/\\/g, '/')}\n.git\nmain\n` },
   } satisfies Record<string, Partial<ExecResult>>
 
   /** Linked worktree answers: its own toplevel, common dir back to REPO. */
   const LINKED_CALLS = {
-    'rev-parse --show-toplevel': { stdout: `${WT.replace(/\\/g, '/')}\n` },
-    'rev-parse --git-common-dir': { stdout: '../../repo/.git\n' },
-    'branch --show-current': { stdout: 'feat-x\n' },
+    'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: `${WT.replace(/\\/g, '/')}\n../../repo/.git\nfeat-x\n` },
   } satisfies Record<string, Partial<ExecResult>>
 
   it('rejects a malformed body, relative paths, and unknown keys', async () => {
@@ -492,7 +488,7 @@ describe('handleGroupWorktrees', () => {
     const PLAIN = resolve('/plain')
     const exec = cwdScripted({
       [PLAIN]: {
-        'rev-parse --show-toplevel': { code: 128, stderr: 'fatal: not a git repository\n' },
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { code: 128, stderr: 'fatal: not a git repository\n' },
       },
       [REPO]: MAIN_CALLS,
     })

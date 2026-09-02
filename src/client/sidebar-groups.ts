@@ -292,6 +292,132 @@ export function saveViewPrefs(prefs: SidebarViewPrefs): void {
   }
 }
 
+/** localStorage key of the grouping switch's last-known value (browser-local). */
+export const GROUP_BOOT_STORAGE_KEY = 'dsh-git-worktree.sidebar.groupSidebar'
+
+/**
+ * Read the grouping switch's last-known value. The seat mounts from this on
+ * startup so the sidebar renders grouped IMMEDIATELY, without waiting for the
+ * settings document to cross from the Host — the settings scope is the
+ * authority and corrects a stale value once it lands. undefined = no record
+ * (first visit; the composition default "on" is used).
+ */
+export function loadGroupSidebarBoot(): boolean | undefined {
+  if (typeof localStorage === 'undefined') return undefined
+  try {
+    const raw = localStorage.getItem(GROUP_BOOT_STORAGE_KEY)
+    if (raw === '1') return true
+    if (raw === '0') return false
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Persist the grouping switch's last-known value; write failures stay silent. */
+export function saveGroupSidebarBoot(enabled: boolean): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(GROUP_BOOT_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    // A missed cache write costs one startup flash, nothing more.
+  }
+}
+
+/** localStorage key of the last successful /group facts batch (browser-local). */
+export const FACTS_STORAGE_KEY = 'dsh-git-worktree.sidebar.facts.v1'
+
+/** One cached facts batch: the path signature it answered plus the facts. */
+export interface FactsCacheEntry {
+  /** Sorted-path signature the facts belong to (mismatch = stale). */
+  signature: string
+  /** Per-path git facts; null = outside any git repository. */
+  facts: Readonly<Record<string, WorkspaceGitFacts | null>>
+}
+
+/** Parse one WorkspaceGitFacts value; undefined = malformed. */
+function parseWorkspaceGitFacts(value: unknown): WorkspaceGitFacts | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.repoRoot !== 'string' || record.repoRoot === '') return undefined
+  if (typeof record.repoName !== 'string') return undefined
+  if (record.branch !== null && typeof record.branch !== 'string') return undefined
+  if (typeof record.main !== 'boolean') return undefined
+  return {
+    repoRoot: record.repoRoot,
+    repoName: record.repoName,
+    branch: record.branch,
+    main: record.main,
+  }
+}
+
+/** Parse a facts map; any malformed entry discards the whole batch. */
+function parseFactsRecord(value: unknown): Readonly<Record<string, WorkspaceGitFacts | null>> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const out: Record<string, WorkspaceGitFacts | null> = {}
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry === null) {
+      out[key] = null
+      continue
+    }
+    const parsed = parseWorkspaceGitFacts(entry)
+    if (parsed === undefined) return null
+    out[key] = parsed
+  }
+  return out
+}
+
+/**
+ * Read the last successful /group facts batch. The sidebar consults this
+ * whenever the workspace path signature is known (including the frame the
+ * pending-empty baseline becomes the real list), so a page refresh never
+ * flashes the degraded flat list while git probes run; the fresh probe
+ * overwrites both the view and this cache. A poisoned entry (wrong value
+ * shape) discards the whole batch rather than grouping under `repo:undefined`.
+ */
+export function loadFactsCache(): FactsCacheEntry | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(FACTS_STORAGE_KEY)
+    if (raw === null) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    if (typeof record.signature !== 'string') return null
+    const facts = parseFactsRecord(record.facts)
+    if (facts === null) return null
+    return { signature: record.signature, facts }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Pick the facts batch that belongs to `signature`. Live (in-memory) hits
+ * win; otherwise a matching cache batch. The grouped tree must paint the
+ * moment the workspace path set is known — not only at `useState` init,
+ * when the list is still the pending empty snapshot (signature `""`).
+ */
+export function factsForSignature(
+  signature: string,
+  live: FactsCacheEntry | null,
+  cached: FactsCacheEntry | null,
+): FactsCacheEntry | null {
+  if (live !== null && live.signature === signature) return live
+  if (cached !== null && cached.signature === signature) return cached
+  return null
+}
+
+/** Persist one /group facts batch; write failures (quota, privacy mode) stay silent. */
+export function saveFactsCache(entry: FactsCacheEntry): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(FACTS_STORAGE_KEY, JSON.stringify(entry))
+  } catch {
+    // A missed cache write costs one startup flash, nothing more.
+  }
+}
+
 /** Recency comparator: newest first, id as the deterministic tiebreak. */
 export function byRecency(a: { id: string; updatedAt: number }, b: { id: string; updatedAt: number }): number {
   if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt

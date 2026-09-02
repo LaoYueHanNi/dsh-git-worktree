@@ -58,8 +58,11 @@ function fail(status: number, error: string): RouteOutcome {
 /** Upper bound on distinct paths one /group request may probe. */
 const GROUP_PATHS_LIMIT = 256
 
-/** Probes per in-flight batch — polite on Windows, where each git call is a process spawn. */
-const GROUP_BATCH_SIZE = 8
+/** Probes per in-flight batch — polite on Windows, where each git call is a
+ * process spawn. The probe itself is a single `rev-parse` per directory, so
+ * the batch can ride wider than the old three-spawn shape without stacking
+ * an unreasonable number of concurrent git processes. */
+const GROUP_BATCH_SIZE = 16
 
 /**
  * POST /group — git belonging facts for a batch of workspace directories.

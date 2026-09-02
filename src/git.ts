@@ -477,6 +477,14 @@ export async function removeWorktree(
  * facts the sidebar grouping needs and nothing else (no branch list, no
  * worktree list — {@link probeRepo} stays the full-facts path for the chip).
  *
+ * All three facts come from ONE `git rev-parse` invocation: the sidebar
+ * probes every registered workspace on each mount, and on Windows every git
+ * call is a process spawn, so three sequential spawns per directory made the
+ * startup probe cost scale with the workspace count directly. `rev-parse`
+ * evaluates each flag in turn and prints one line per answer, so
+ * `--show-toplevel`, `--git-common-dir`, and `--abbrev-ref HEAD` fold into a
+ * single process.
+ *
  * `repoRoot` — the grouping key — is derived from `--git-common-dir`, which
  * names the SHARED `<repo>/.git` from every worktree of the repository: the
  * main checkout reports it directly, a linked worktree reports the path back
@@ -484,27 +492,31 @@ export async function removeWorktree(
  * together, wherever the linked folder physically lives.
  * `main` is decided without `worktree list`: a directory is the main worktree
  * exactly when its own toplevel holds that shared .git.
- * `branch` normalizes detached/unborn HEAD to null HERE so no consumer
- * downstream ever string-compares against git's synthetic `'HEAD'`.
+ * `branch` uses `--abbrev-ref HEAD`, whose detached/unborn output is git's
+ * synthetic `HEAD` — normalized to null HERE so no consumer downstream ever
+ * string-compares against it (the same contract the old `branch
+ * --show-current` empty output mapped to).
  * @param exec - executor seam.
  * @param path - absolute directory the workspace reports.
  * @returns the facts, or undefined outside any git repository (a missing git
  * binary surfaces the same way — a non-zero exit through the seam).
  */
 export async function probeWorkspaceGit(exec: Exec, path: string): Promise<WorkspaceGitFacts | undefined> {
-  const top = await gitMaybe(exec, path, ['rev-parse', '--show-toplevel'])
-  if (top === undefined || top.trim() === '') return undefined
-  const toplevel = normalize(top.trim())
-  const commonDir = await gitMaybe(exec, path, ['rev-parse', '--git-common-dir'])
-  if (commonDir === undefined || commonDir.trim() === '') return undefined
+  const out = await gitMaybe(exec, path, ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'])
+  if (out === undefined) return undefined
+  const lines = out.split('\n').map(line => line.trim())
+  const top = lines[0] ?? ''
+  const commonDir = lines[1] ?? ''
+  const branchName = lines[2] ?? ''
+  if (top === '' || commonDir === '') return undefined
+  const toplevel = normalize(top)
   // Git outputs carry forward slashes on Windows — normalize every derived
   // path so consumers can compare against join()-built ones.
-  const gitDir = normalize(resolve(path, commonDir.trim()))
-  const branchName = (await gitMaybe(exec, path, ['branch', '--show-current']))?.trim() ?? ''
+  const gitDir = normalize(resolve(path, commonDir))
   return {
     repoRoot: dirname(gitDir),
     repoName: basename(dirname(gitDir)),
-    branch: branchName === '' ? null : branchName,
+    branch: branchName === '' || branchName === 'HEAD' ? null : branchName,
     main: normalize(resolve(toplevel, '.git')) === gitDir,
   }
 }

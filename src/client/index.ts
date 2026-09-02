@@ -12,7 +12,10 @@
  * The grouping seat registers DYNAMICALLY: the settings scope drives a
  * register/dispose cycle, so flipping the card's switch swaps the sidebar
  * browser without a page reload (the native browser owns the default cell,
- * this entry shadows it at a lower priority while enabled).
+ * this entry shadows it at a lower priority while enabled). On startup the
+ * seat mounts from the last-known switch value mirrored to localStorage, so
+ * a refresh renders the grouped tree immediately; the settings document
+ * corrects the value once it lands.
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -37,6 +40,7 @@ import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import { GroupedSidebar, type GroupedSidebarInjected } from './GroupedSidebar.tsx'
 import { requestEnsureDirectory, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestRemoveWorktree } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
+import { loadGroupSidebarBoot, saveGroupSidebarBoot } from './sidebar-groups.ts'
 import type { BranchChipInjected } from './slots.ts'
 
 export type { BranchChipInjected } from './slots.ts'
@@ -102,11 +106,18 @@ export function apply(ctx: ClientContext): void {
   const groupingScope = ctx.settingsScope.bind<SectionValue>({ namespace: GIT_WORKTREE_NS })
 
   // Seat apply is a Promise the settings card awaits: `scope.set` only
-  // stores the document. Enable waits until GroupedSidebar's first /group
-  // probe settles (until then the tree is visually the native flat list);
-  // disable waits until the occupant is disposed and a frame has painted
-  // so the native browser can commit. Subscribe still drives apply for
-  // startup and out-of-band writes.
+  // stores the document. Enable waits until GroupedSidebar reports ready
+  // (a matching facts cache paints immediately; a cache miss waits for
+  // the first /group). Disable waits until the occupant is disposed and
+  // a frame has painted so the native browser can commit. Subscribe still
+  // drives apply for startup and out-of-band writes.
+  //
+  // Startup mounts the seat from the LAST-KNOWN switch value (mirrored to
+  // localStorage by the boot cache) instead of waiting for the settings
+  // document to cross from the Host: without it every refresh renders the
+  // native browser first and swaps to the grouped tree seconds later. The
+  // ready snapshot remains the authority and corrects a stale cache
+  // through the normal change path.
   const SEAT_READY_TIMEOUT_MS = 20_000
   const SNAPSHOT_WAIT_MS = 8_000
   let groupingDisposer: (() => void) | undefined
@@ -160,22 +171,11 @@ export function apply(ctx: ClientContext): void {
     })
   }
 
-  const syncGroupingSeat = (): Promise<void> => {
-    const snapshot = groupingScope.getSnapshot()
-    if (snapshot.status !== 'ready') return seatReady
-    const enabled = snapshot.value?.groupSidebar ?? true
-    if (enabled === groupingEnabled) return seatReady
-    groupingEnabled = enabled
-    if (groupingDisposer !== undefined) {
-      groupingDisposer()
-      groupingDisposer = undefined
-    }
+  /** Inject the `sidebar.workspaces` occupant (priority -1 shadows the native
+   * browser at priority 0) and arm its readiness epoch. */
+  const registerGroupingSeat = (): void => {
     const epoch = ++seatEpoch
     seatReady = new Promise<void>((resolve) => { seatReadyResolve = resolve })
-    if (!enabled) {
-      void afterPaint().then(() => { if (epoch === seatEpoch) finishSeat() })
-      return seatReady
-    }
     const injectFace = (): GroupedSidebarInjected => ({
       workspacesList: ctx.workspaces.list,
       sessionsList: ctx.sessions.list,
@@ -248,6 +248,41 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     }, GroupedSidebar))
     seatTimer = window.setTimeout(() => { if (epoch === seatEpoch) finishSeat() }, SEAT_READY_TIMEOUT_MS)
+  }
+
+  const syncGroupingSeat = (): Promise<void> => {
+    const snapshot = groupingScope.getSnapshot()
+    if (snapshot.status !== 'ready') {
+      // Startup fast path: the settings document has not crossed from the
+      // Host yet. Mount from the last-known value immediately (absent = the
+      // composition default "on"); the ready snapshot corrects it through
+      // the normal change path once it lands.
+      if (groupingEnabled === undefined) {
+        groupingEnabled = loadGroupSidebarBoot() ?? true
+        if (groupingEnabled) registerGroupingSeat()
+      }
+      return seatReady
+    }
+    const enabled = snapshot.value?.groupSidebar ?? true
+    if (enabled === groupingEnabled) {
+      // The Host is the authority: refresh the boot cache so the next
+      // startup mounts from the value it actually stored.
+      saveGroupSidebarBoot(enabled)
+      return seatReady
+    }
+    groupingEnabled = enabled
+    saveGroupSidebarBoot(enabled)
+    if (groupingDisposer !== undefined) {
+      groupingDisposer()
+      groupingDisposer = undefined
+    }
+    const epoch = ++seatEpoch
+    seatReady = new Promise<void>((resolve) => { seatReadyResolve = resolve })
+    if (!enabled) {
+      void afterPaint().then(() => { if (epoch === seatEpoch) finishSeat() })
+      return seatReady
+    }
+    registerGroupingSeat()
     return seatReady
   }
 

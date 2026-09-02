@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  EXPAND_STORAGE_KEY, deriveSidebarGroups, deriveStrayGroups, loadExpandState, orderedVisibleSessionIds, saveExpandState, visibleSessionIds,
+  EXPAND_STORAGE_KEY, FACTS_STORAGE_KEY, GROUP_BOOT_STORAGE_KEY, deriveSidebarGroups, deriveStrayGroups, factsForSignature, loadExpandState, loadFactsCache, loadGroupSidebarBoot, orderedVisibleSessionIds, saveExpandState, saveFactsCache, saveGroupSidebarBoot, visibleSessionIds,
   type SessionListLike, type WorkspaceLike,
 } from '../src/client/sidebar-groups.ts'
 import type { WorkspaceGitFacts } from '../src/wire.ts'
@@ -257,5 +257,125 @@ describe('expand state storage', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('grouping boot cache', () => {
+  it('round-trips the last-known switch value and tolerates absence and garbage', () => {
+    // No localStorage in the node environment: reads answer undefined and
+    // writes no-op.
+    expect(loadGroupSidebarBoot()).toBeUndefined()
+    expect(() => saveGroupSidebarBoot(true)).not.toThrow()
+
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    })
+    try {
+      expect(loadGroupSidebarBoot()).toBeUndefined()
+      saveGroupSidebarBoot(false)
+      expect(loadGroupSidebarBoot()).toBe(false)
+      saveGroupSidebarBoot(true)
+      expect(loadGroupSidebarBoot()).toBe(true)
+      store.set(GROUP_BOOT_STORAGE_KEY, 'junk')
+      expect(loadGroupSidebarBoot()).toBeUndefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('facts cache', () => {
+  const facts: Record<string, WorkspaceGitFacts | null> = {
+    'E:\\repo': { repoRoot: 'E:\\repo', repoName: 'repo', branch: 'main', main: true },
+    'E:\\plain': null,
+  }
+
+  it('round-trips the last /group batch and tolerates absence and garbage', () => {
+    // No localStorage in the node environment: reads answer null and writes no-op.
+    expect(loadFactsCache()).toBeNull()
+    expect(() => saveFactsCache({ signature: 'E:\\repo', facts })).not.toThrow()
+
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    })
+    try {
+      expect(loadFactsCache()).toBeNull()
+      saveFactsCache({ signature: 'E:\\repo\nE:\\plain', facts })
+      expect(loadFactsCache()).toEqual({ signature: 'E:\\repo\nE:\\plain', facts })
+      store.set(FACTS_STORAGE_KEY, '{not json')
+      expect(loadFactsCache()).toBeNull()
+      store.set(FACTS_STORAGE_KEY, '{"signature":1,"facts":{}}')
+      expect(loadFactsCache()).toBeNull()
+      store.set(FACTS_STORAGE_KEY, '{"signature":"s","facts":"x"}')
+      expect(loadFactsCache()).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('discards a batch when any path value is not a WorkspaceGitFacts or null', () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    })
+    try {
+      store.set(FACTS_STORAGE_KEY, JSON.stringify({
+        signature: 'E:\\repo',
+        facts: { 'E:\\repo': 'oops' },
+      }))
+      expect(loadFactsCache()).toBeNull()
+      store.set(FACTS_STORAGE_KEY, JSON.stringify({
+        signature: 'E:\\repo',
+        facts: { 'E:\\repo': { repoRoot: 'E:\\repo', repoName: 'repo', branch: 1, main: true } },
+      }))
+      expect(loadFactsCache()).toBeNull()
+      store.set(FACTS_STORAGE_KEY, JSON.stringify({
+        signature: 'E:\\repo',
+        facts: { 'E:\\repo': { repoRoot: '', repoName: 'repo', branch: 'main', main: true } },
+      }))
+      expect(loadFactsCache()).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps known fields and drops extras on a well-shaped entry', () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    })
+    try {
+      store.set(FACTS_STORAGE_KEY, JSON.stringify({
+        signature: 'E:\\repo',
+        facts: {
+          'E:\\repo': { repoRoot: 'E:\\repo', repoName: 'repo', branch: 'main', main: true, extra: true },
+        },
+      }))
+      expect(loadFactsCache()).toEqual({
+        signature: 'E:\\repo',
+        facts: { 'E:\\repo': { repoRoot: 'E:\\repo', repoName: 'repo', branch: 'main', main: true } },
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('paints from cache once the path signature is known, even if live state still holds a previous snapshot', () => {
+    const cached = { signature: 'E:\\repo\nE:\\plain', facts }
+    expect(factsForSignature('', null, cached)).toBeNull()
+    expect(factsForSignature('E:\\repo\nE:\\plain', null, cached)).toEqual(cached)
+    expect(factsForSignature('E:\\repo\nE:\\plain', { signature: '', facts: {} }, cached)).toEqual(cached)
+    const live = {
+      signature: 'E:\\repo\nE:\\plain',
+      facts: { 'E:\\repo': { repoRoot: 'E:\\repo', repoName: 'repo', branch: 'dev', main: true }, 'E:\\plain': null },
+    }
+    expect(factsForSignature('E:\\repo\nE:\\plain', live, cached)).toEqual(live)
+    expect(factsForSignature('E:\\other', live, cached)).toBeNull()
   })
 })

@@ -21,8 +21,8 @@ import {
 import type { OwnerOf, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceGitFacts } from '../wire.ts'
 import {
-  deriveFlat, deriveSidebarGroups, deriveStrayGroups, indexSubagentRunning, loadExpandState, loadViewPrefs,
-  orderedVisibleSessionIds, saveExpandState, saveViewPrefs, sessionNode,
+  deriveFlat, deriveSidebarGroups, deriveStrayGroups, factsForSignature, indexSubagentRunning, loadExpandState, loadFactsCache, loadViewPrefs,
+  orderedVisibleSessionIds, saveExpandState, saveFactsCache, saveViewPrefs, sessionNode,
   type SessionListLike, type SessionNode, type SidebarGroup, type SidebarGroupBy,
   type SidebarMember, type SidebarOrderBy, type StrayGroup, type WorkspaceLike,
 } from './sidebar-groups.ts'
@@ -81,9 +81,10 @@ export interface GroupedSidebarInjected {
   readonly hostDescription: SidebarObservable<{ home?: string } | undefined>
   readonly directoryFlow: SidebarObservable<boolean>
   /**
-   * First facts attempt of this mount has settled (ok or fail). The settings
-   * card spinner waits on this so it does not hide while the tree still
-   * looks like the native flat list.
+   * This mount can paint the grouped tree (a matching facts cache counts)
+   * or the first /group attempt has settled. The settings card spinner
+   * waits on this so it does not hide while a cache-miss still looks like
+   * the native flat list.
    */
   readonly onReady?: () => void
 }
@@ -518,31 +519,74 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
   const home = host?.home
 
   const signature = useMemo(() => [...items].map(item => item.path).sort().join('\n'), [items])
+  // Facts follow the path signature, not the mount instant: the first render
+  // is usually an empty pending list (signature ""), so a useState
+  // initializer would miss the cache and never re-read it. Re-read whenever
+  // the signature changes; a matching batch paints the grouped tree on THAT
+  // frame, then the fresh probe refreshes underneath.
+  const cachedBatch = useMemo(() => loadFactsCache(), [signature])
   const [factsState, setFactsState] = useState<FactsState>(null)
+  const factsEntry = factsForSignature(signature, factsState, cachedBatch)
+  const facts = factsEntry?.facts
+  const hasFactsForSignature = factsEntry !== null
   const readyOnce = useRef(false)
   const signalReady = (): void => {
     if (readyOnce.current) return
     readyOnce.current = true
     props.onReady?.()
   }
+  /** Signatures this mount already sent a probe for (once per signature). */
+  const probedSignature = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (factsState?.signature === signature) {
+    // Already probed for this signature (or the empty list proved truly
+    // empty): nothing left to do but report readiness.
+    if (probedSignature.current === signature) {
       signalReady()
       return
     }
+    // The workspace baseline has not landed yet (phase pending, empty list):
+    // probe nothing — the real items arrive through the subscription and
+    // this effect reruns with the real signature.
+    if (items.length === 0) {
+      if (workspaces.phase === 'ready') {
+        probedSignature.current = signature
+        signalReady()
+      }
+      return
+    }
+    // A cached (or already-live) batch covers this signature: it paints the
+    // grouped tree NOW, so readiness reports immediately while the fresh
+    // probe still runs underneath.
+    if (hasFactsForSignature) signalReady()
     let live = true
     void props.loadFacts(items.map(item => item.path)).then(
       (facts) => {
         if (!live) return
-        if (facts !== undefined) setFactsState({ signature, facts })
+        // The signature is marked probed only once the probe SETTLES, so a
+        // StrictMode mount→cleanup→remount replay (first probe dropped by
+        // the cleanup) re-issues it instead of leaving the tree on stale
+        // facts forever.
+        probedSignature.current = signature
+        if (facts !== undefined) {
+          setFactsState({ signature, facts })
+          saveFactsCache({ signature, facts })
+        }
+        // A failed probe keeps whatever rendered (the cached batch, or the
+        // degraded flat list). probedSignature is still set: a later
+        // sessions-only snapshot must not re-issue /group (that used to
+        // hammer git on every rename). A new path signature or a remount
+        // retries.
         signalReady()
       },
-      () => { if (live) signalReady() },
+      () => {
+        if (!live) return
+        probedSignature.current = signature
+        signalReady()
+      },
     )
     return () => { live = false }
-  }, [signature, factsState?.signature, props.loadFacts, items])
+  }, [signature, items, props.loadFacts, workspaces.phase, hasFactsForSignature])
 
-  const facts = factsState?.signature === signature ? factsState.facts : undefined
   const groups = useMemo(() => deriveSidebarGroups(items, facts), [items, facts])
   const sessionList = sessions as unknown as SessionListLike
   const archived = workspaces.archivedSessionIds

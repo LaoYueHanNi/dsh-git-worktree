@@ -10,13 +10,13 @@ Status: implemented
 
 本插件占用 `sidebar.workspaces` seat（原生浏览器是默认占用者，本条目以 `priority: -1` 在其默认 cell 之上获胜），把左侧浏览区做成与原生 `dsh-client-ui-workspace` 功能与外观 1:1 的替换品，并在其上按 git 仓库聚合工作树。设置卡开关「聚合工作区」可随时切回原生。
 
-- **分组完全派生**：逐 workspace path 经 `/plugin/git-worktree/group` 探测 `rev-parse --show-toplevel` + `--git-common-dir` + `branch --show-current`；`--git-common-dir` 的 `dirname` 即分组键 `repoRoot`。不存任何关系数据。
+- **分组完全派生**：逐 workspace path 经 `/plugin/git-worktree/group` 探测一次合并的 `rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD`；`--git-common-dir` 的 `dirname` 即分组键 `repoRoot`。不存任何关系数据。
 - **单成员组降级为普通行**：组内只有 1 个 git workspace（或探测失败/非 git）时渲染为 plain 行（原生 title）。多成员组头显示仓库 basename，右侧徽标为该组**可见会话总数**；主 checkout 标 `主仓库（branch）`（detached/unborn 省略括号），linked 行显示分支名（无分支兜底 workspace title）。
 - **排序锚定**：组渲染在组内首个成员的注册位置；组内主 worktree 在前、linked 按注册顺序。
 - **行为与外观 1:1**：会话可见性、打开/新建、搜索、行内菜单、StateDot、相对时间、HoverCard、ViewOptions、rail 双按钮、三个对话框均移植自原生打包产物（`@deepseek-ai/dsh-client-ui-workspace` 的 Rows + WorkspaceBrowser + 字典），控件走已有 primitives，不自绘。纯逻辑在 `sidebar-search.ts` / `sidebar-groups.ts`（含本地 `indexSubagentRunning`，避免测试加载 runtime 浏览器包）。视图偏好 `groupBy`+`orderBy` 用本插件 localStorage，默认 workspace+updated。
-- **逃生开关**：settings namespace `git-worktree` 的 `groupSidebar: boolean`（默认开）。勾选框读 `CardForm` 快照，立即写穿、不走 `rootDir` 的暂存/保存；禁止做成 inject 时拍死的 props。写穿不等于侧栏已换完：开启等 GroupedSidebar 第一次 `/group` 结束（`onReady`），关闭等 occupant dispose + 一帧绘制；20s 超时兜底。
+- **逃生开关**：settings namespace `git-worktree` 的 `groupSidebar: boolean`（默认开）。勾选框读 `CardForm` 快照，立即写穿、不走 `rootDir` 的暂存/保存；禁止做成 inject 时拍死的 props。写穿不等于侧栏已换完：开启等 GroupedSidebar `onReady`（路径签名命中 facts 缓存即就绪，否则等第一次 `/group` 结束），关闭等 occupant dispose + 一帧绘制；20s 超时兜底。
 - **目录选择**：原生已声明 `sidebar.workspaces.directoryFlow`，本插件不再声明该 hole（SlotCore 第二次声明会抛错；抢先声明会让关开关后无逃生）。Add 仍按 occupancy 显示，实际走 `workspaces.pickDirectory` + `createWorkspace`；选择流程是边缘触发的（`PickFlowController`）：仅 open 上升沿启动一次选择器，父组件重渲染只刷新回调、不会重新拉起，关闭或卸载作废在途回调——防的是「sessions 推送触发重渲染导致选择器反复弹出、用户的选择被 live 标志吞掉」。
-- **探测**：`/group` 对去重 path 每批 8 个并行、上限 256；单个 path 失败只把该项置 `null`，整体恒 200。facts 未就绪/请求失败时分组降级为平铺，搜索/菜单仍可用。
+- **探测**：`/group` 对去重 path 每批 16 个并行、上限 256；单个 path 失败只把该项置 `null`，整体恒 200。facts 未就绪/请求失败时分组降级为平铺（路径签名一旦与上次成功批次一致即先渲染缓存——含基线从 pending 空列表落到真实路径的那一帧，后台刷新——见 [侧边栏分组座位的启动快路径与 facts 缓存](./2026-09-02-sidebar-startup-latency.md)），搜索/菜单仍可用。
 
 ## Alternatives considered
 
@@ -33,4 +33,4 @@ Status: implemented
 
 - 得：同仓库工作区在左侧聚成一棵树，会话归属可读；搜索/菜单/状态/样式与原生同形同文；零冗余分组状态；关掉开关或卸载即恢复原生列表。
 - 代价：添加工作区走 OS 目录选择器，不是原生 in-app directoryFlow UI；不持久化手动拖拽顺序；视图偏好与原生 store v5 不共享；组头徽标只出现在多成员仓库组。预抢占的 single cell 若与未来其他插件冲突，由优先级裁决，开关仍可逃生。
-- 边界：分支标签随 facts 路径集合刷新，切分支不即时反映；`/group` 每 path 3 条 git 命令、批内并行，17+ 工作区量级实测无感；内容搜索 RPC 失败 → `search.unavailable` + 仅本地匹配；fork/archive 失败静默、rename/delete 失败弹错（与原生一致）。
+- 边界：分支标签随 facts 路径集合刷新，切分支不即时反映；`/group` 每 path 1 条 git 命令、批内并行，17+ 工作区量级实测无感；内容搜索 RPC 失败 → `search.unavailable` + 仅本地匹配；fork/archive 失败静默、rename/delete 失败弹错（与原生一致）。
