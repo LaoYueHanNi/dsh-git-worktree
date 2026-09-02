@@ -14,7 +14,7 @@ Status: implemented
 - BranchChip 迁移：props 解构 `sessionId` 并经 `useSession(snapshot => snapshot.blank)` 读生命周期位，summary（`cwd`）仍走注入的 sessionsList store 不变；`session.blank` 的 5 处引用随之替换。
 - `@deepseek-ai/dsh-client-ui-session` 进 devDependencies，client 入口补一条 type-only import 拉标准 props 合并——merge 声明的所有者必须进依赖闭包，否则 `skipLibCheck` 掩盖 d.ts 断链、组件处只落一个难定位的隐式 any（[alpha.3 迁移](2026-09-01-migrate-to-dsh-0.1.2-alpha.3.md)补 `dsh-client-store`/`dsh-api-remotes` 的同一教训）。
 - 注入 store 统一闭包保 receiver：`ctx.workspaces.list`/`ctx.sessions.list` 是控制器 model 实例、`getSnapshot`/`subscribe` 为原型方法，脱离对象的方法引用在 React 裸调用 `useSyncExternalStore` 时 `this` 丢失（alpha.5 宿主上 GroupedSidebar 首渲染即崩）；一律经 `boundStore` 包成闭包字面量过注入边界——与 `hostInfo`/`directoryFlow` 手工源的既有形状对齐。
-- 版本号取 `0.4.2-dsh-0.1.2-alpha.5`（独立 chore 提交），`publishConfig.tag` 已固化 `dsh-alpha` 不动。
+- 版本号取 `0.4.3-dsh-0.1.2-alpha.5`（独立 chore 提交）：分支 rebase 到 main 0.4.3 之上（携带侧边栏分组启动提速），版本叠加基线随之为 0.4.3；`publishConfig.tag` 固化 `dsh-alpha`（[alpha.3 迁移](2026-09-01-migrate-to-dsh-0.1.2-alpha.3.md)定下的渠道不变量）。
 
 ## Alternatives considered
 
