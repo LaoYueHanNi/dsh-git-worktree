@@ -16,9 +16,9 @@ export interface BranchChipInjected {
    */
   adoptWorktree: (path: string) => Promise<void>
   /**
-   * The framework's session-list snapshot store. Host 0.1.2 dropped the
-   * `useSessions` standard prop from session-scoped slots; the chip reads the
-   * current session's summary (its `cwd`) through this store instead.
+   * The framework's session-list snapshot store. The chip reads the current
+   * session's summary (its `cwd`) through this store — the session identity
+   * itself rides the ui-session standard props (`sessionId` + `useSession`).
    */
   sessionsList: Pick<{
     getSnapshot(): SessionListState

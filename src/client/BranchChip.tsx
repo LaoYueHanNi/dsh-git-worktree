@@ -79,7 +79,10 @@ function WorktreeCheck({ size = 12 }: { size?: number }) {
   )
 }
 
-/** Full props: owner share + standard kit + injected adopt verb + locale seat. */
+/** Full props: session standard kit (sessionId + useSession) + injected
+ * adopt verb + locale seat. Host 0.1.2-alpha.4 removed the InputZone owner
+ * share from the composer input slots; the session identity rides the
+ * standard props declared by ui-session. */
 export type BranchChipDockProps =
   PropsRuntime<'conversation.input.left'>
   & BranchChipInjected
@@ -354,14 +357,15 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: BranchChipDockProps) {
-  // Host 0.1.2 dropped the `useSessions` standard prop from session-scoped
-  // slots; the session identity rides the owner share's snapshot, and the
-  // summary (for its `cwd`) reads through the injected session-list store.
-  const sessionId = session?.sessionId
+export function BranchChipDock({ sessionId, useSession, adoptWorktree, sessionsList, t }: BranchChipDockProps) {
+  // The session identity rides the standard props (sessionId and the
+  // useSession selector, merged by ui-session); the blank/lifecycle flag
+  // reads through the selector, and the summary (for its `cwd`) still comes
+  // from the injected session-list store.
+  const blank = useSession(snapshot => snapshot.blank)
   const summary = useSyncExternalStore(
     sessionsList.subscribe,
-    () => (sessionId === undefined ? undefined : sessionsList.getSnapshot().byId[sessionId]),
+    () => sessionsList.getSnapshot().byId[sessionId],
   )
   const cwd = summary?.cwd
   const [repo, refresh] = useRepoStatus(cwd)
@@ -393,11 +397,11 @@ export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: Bran
     // it) can start the session while the cutout dialog still floats over a
     // withdrawn toggle. Switch confirms stay: in-place branch switching is
     // a started-session feature.
-    if (!session.blank) {
+    if (!blank) {
       setWorktreeMode(false)
       setConfirm(current => current !== null && current.kind !== 'switch' ? null : current)
     }
-  }, [session.blank])
+  }, [blank])
 
   // External branch changes (terminal, other tools) never reach this chip
   // on their own — the status fetch runs on mount, on cwd change, and after
@@ -571,7 +575,7 @@ export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: Bran
     // a picker — every other branch lives behind the main checkout. A BLANK
     // one shows the full list for reading; its picks are answered with the
     // main-checkout hint (see onSelect).
-    if (inLinkedWorktree && !session.blank) {
+    if (inLinkedWorktree && !blank) {
       const current = facts.branches.find(b => b.kind === 'local' && b.name === facts.currentBranch)
       return current === undefined
         ? []
@@ -583,7 +587,7 @@ export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: Bran
           }]
     }
     return buildBranchRows(facts.branches, facts.worktrees, facts.currentBranch, inLinkedWorktree)
-  }, [facts, inLinkedWorktree, session.blank])
+  }, [facts, inLinkedWorktree, blank])
   // Every already-taken LOCAL name feeds the new-branch namespaces (cutout
   // prefill and the duplicate checks): local rows and worktree rows alike
   // (a worktree row IS a checked-out branch), while a remote row is no
@@ -676,7 +680,7 @@ export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: Bran
          * already inside a linked worktree gets neither the toggle nor the
          * in-place new-branch tool (its directory identity is not ours to
          * move). */}
-        {session.blank && !inLinkedWorktree && (
+        {blank && !inLinkedWorktree && (
           <>
             <span className={css.divider} aria-hidden="true" />
             <button
@@ -717,7 +721,7 @@ export function BranchChipDock({ session, adoptWorktree, sessionsList, t }: Bran
         currentBranch={facts.currentBranch}
         confirm={confirmBundle}
         canCreate={!worktreeMode && !inLinkedWorktree}
-        canAdopt={session.blank}
+        canAdopt={blank}
         busy={busy}
         onCreate={(name) => { void doCreateBranch(name) }}
         onFetch={() => { void doFetch() }}

@@ -40,6 +40,11 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // ('settings.plugin.item') into this program. The value face stays
 // uncompromised: cross-plugin collaboration goes through the slot system.
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+// Type-only: pulls the ui-session SessionStandardProps merge (sessionId and
+// the useSession selector) into this program — host 0.1.2-alpha.4 removed the
+// InputZone owner share from the composer input slots, so the session
+// identity rides the standard props it declares.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: pulls the ui-workspace service merge (ctx.uiWorkspace) into this
 // program — host 0.1.2 keeps session start and directory picking there while
 // `workspaces` is the pure Workspace-row controller.
