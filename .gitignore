@@ -1,5 +1,7 @@
 node_modules/
 .pnpm-store/
+# Build output — enters the npm tarball via prepublishOnly, never the repo (see docs/decisions/)
+lib/
 *.tsbuildinfo
 .DS_Store
 

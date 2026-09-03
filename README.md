@@ -21,6 +21,8 @@ Repo: <https://github.com/LaoYueHanNi/dsh-git-worktree>
 > ```
 >
 > Worktree folders under `~/.dsh/gitworktree/` and the plugin's settings are untouched by the migration — everything carries over.
+>
+> **GitHub direct installs have ended.** The repository no longer carries prebuilt `lib/` output: dsh installs git-hosted plugins through pnpm, which blocks build-on-install, so a fresh `github:` spec has no artifacts to load. Install from npm instead — see the commands above.
 
 ## Features
 
@@ -92,12 +94,7 @@ npm test                # vitest (60 tests)
 node scripts/smoke.mjs  # real-git smoke over the built lib
 ```
 
-> **No `prepare` script — by design.** The compiled `lib/` output is committed to the repo and ships in the npm tarball. pnpm ≥ 10 refuses to run dependency build scripts unless they are allowlisted, so a `prepare` script would surface as a skipped or failed install step for pnpm users. Shipping prebuilt output instead keeps `dsh plugin add @laoyuehanni/dsh-git-worktree` working out of the box. **After changing anything under `src/`, always rebuild and commit the updated `lib/`** (and release a new version), or installs will get stale output:
-
-```sh
-npm run build && npm run build:client
-git add lib/
-```
+> **No `prepare` script — by design.** pnpm ≥ 10 refuses to run dependency build scripts unless they are allowlisted, so a `prepare` would surface as a skipped or failed install step for dsh's pnpm-based installs. Instead, `lib/` never enters the repo: `npm publish` runs `prepublishOnly` and builds the output fresh into the tarball, keeping registry installs working out of the box. For local development just rebuild on disk — the output stays untracked, there is no `git add lib/` step anymore.
 
 Temporary mount — effective for this launch only, no profile changes. Create a `cordis.yml` next to the repo pointing at the built host half (Windows needs the `file:///` form):
 

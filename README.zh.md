@@ -21,6 +21,8 @@
 > ```
 >
 > 迁移不影响数据：`~/.dsh/gitworktree/` 下的 worktree 目录与插件设置完整保留。
+>
+> **GitHub 直装已终止。** 仓库不再携带构建好的 `lib/` 产物：dsh 经 pnpm 安装 git 托管插件，而 pnpm 会拦截安装期构建，新的 `github:` 安装无产物可加载。请改从 npm 安装——命令见上。
 
 ## 功能
 
@@ -92,12 +94,7 @@ npm test                # vitest（60 项测试）
 node scripts/smoke.mjs  # 基于构建产物的真实 git 冒烟
 ```
 
-> **刻意不设 `prepare` 脚本。** 编译产物 `lib/` 已提交进仓库，并随 npm 包分发。pnpm ≥ 10 默认拒绝执行依赖的构建脚本，除非加入白名单，因此若保留 `prepare`，pnpm 用户的安装会出现被跳过或失败的步骤。改为分发预构建产物后，`dsh plugin add @laoyuehanni/dsh-git-worktree` 才能开箱即用。**改动 `src/` 下的任何文件后，务必重新构建并提交更新后的 `lib/`**（并发布新版本），否则别人安装到的是旧产物：
-
-```sh
-npm run build && npm run build:client
-git add lib/
-```
+> **刻意不设 `prepare` 脚本。** pnpm ≥ 10 默认拒绝执行依赖的构建脚本，除非加入白名单，因此若保留 `prepare`，dsh 基于 pnpm 的安装会出现被跳过或失败的步骤。改为让 `lib/` 完全不入库：`npm publish` 经 `prepublishOnly` 现场构建产物打进 tarball，registry 安装照旧开箱即用。本地开发只需在磁盘上重新构建——产物不再跟踪，也没有 `git add lib/` 这一步了。
 
 临时挂载 —— 仅当次启动生效，不动 profile。在仓库旁建一个 `cordis.yml` 指向构建出的 host 半边（Windows 需要 `file:///` 形式）：
 
