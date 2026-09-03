@@ -88,7 +88,7 @@ Build the plugin once:
 ```sh
 npm install
 npm run build && npm run build:client
-npm test                # vitest (60 tests)
+npm test                # vitest
 node scripts/smoke.mjs  # real-git smoke over the built lib
 ```
 

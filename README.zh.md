@@ -88,7 +88,7 @@ dsh plugin --profile web remove @laoyuehanni/dsh-git-worktree
 ```sh
 npm install
 npm run build && npm run build:client
-npm test                # vitest（60 项测试）
+npm test                # vitest
 node scripts/smoke.mjs  # 基于构建产物的真实 git 冒烟
 ```
 

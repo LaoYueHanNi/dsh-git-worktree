@@ -22,6 +22,16 @@ export interface Config {
     /** Sidebar git grouping on/off; absent = on (the composition-entry layer's default). */
     groupSidebar?: boolean;
 }
+/**
+ * Cordis resolves the composition entry's config through this schema before
+ * `apply` runs (official plugin-config convention: export the `Config` type
+ * and a same-named Schemastery schema). It fills the `groupSidebar` default;
+ * `rootDir` passes through untouched — its absence stays observable so the
+ * settings section keeps spelling the resolved default. Constraints the
+ * schema cannot express still fail loudly in validateConfig below (absolute
+ * path; unknown keys — schemastery keeps extras instead of rejecting them).
+ */
+export declare const Config: z<Config>;
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export declare function validateConfig(config: Config): void;
 /** The settings namespace this plugin serves; its browser card spells the same string. */

@@ -45,6 +45,20 @@ export interface Config {
   groupSidebar?: boolean
 }
 
+/**
+ * Cordis resolves the composition entry's config through this schema before
+ * `apply` runs (official plugin-config convention: export the `Config` type
+ * and a same-named Schemastery schema). It fills the `groupSidebar` default;
+ * `rootDir` passes through untouched — its absence stays observable so the
+ * settings section keeps spelling the resolved default. Constraints the
+ * schema cannot express still fail loudly in validateConfig below (absolute
+ * path; unknown keys — schemastery keeps extras instead of rejecting them).
+ */
+export const Config: z<Config> = z.object({
+  rootDir: z.string(),
+  groupSidebar: z.boolean().default(true),
+})
+
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: Config): void {
   const unknown = Object.keys(config).find(key => key !== 'rootDir' && key !== 'groupSidebar')
@@ -181,90 +195,35 @@ export function apply(ctx: Context, config: Config = {}): void {
       req.on('error', rejectPromise)
     })
 
+    /** One exact POST route: bounded JSON body in, one RouteOutcome out. A
+     * body-level failure (too large, invalid JSON) answers 400 and leaves
+     * the server alive; handler outcomes carry their own status codes. */
+    const postRoute = (path: string, label: string, handle: (deps: RouteDeps, body: unknown) => Promise<RouteOutcome>): void => {
+      webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path, handler: async (req: IncomingMessage, res: ServerResponse) => {
+        try {
+          send(res, await handle(deps(), await readJson(req)))
+        } catch (error) {
+          send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
+        }
+      } }), `git-worktree: ${label} route`)
+    }
+
+    // The one query-driven route; every mutation is a POST body.
     webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_STATUS, handler: async (req: IncomingMessage, res: ServerResponse) => {
       /* v8 ignore next -- node:http always sets url on server requests. */
       const query = new URL(req.url ?? '/', 'http://x').searchParams
       send(res, await handleStatus(deps(), query.get('path') ?? undefined))
     } }), 'git-worktree: status route')
 
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_WORKTREE, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleCreateWorktree(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: worktree route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_SWITCH, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleSwitch(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: switch route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_BRANCH, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleCreateBranch(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: branch route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_FETCH, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleFetch(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: fetch route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_GROUP, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleGroupWorktrees(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: group route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_UPDATE, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleUpdate(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: update route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_INSPECT, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleInspectWorktree(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: inspect route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_REMOVE, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleRemoveWorktree(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: remove route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_EXISTS, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handlePathExists(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: exists route')
-
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_ENSURE_DIRECTORY, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        send(res, await handleEnsureDirectory(deps(), await readJson(req)))
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    } }), 'git-worktree: ensure-directory route')
+    postRoute(ROUTE_WORKTREE, 'worktree', handleCreateWorktree)
+    postRoute(ROUTE_SWITCH, 'switch', handleSwitch)
+    postRoute(ROUTE_BRANCH, 'branch', handleCreateBranch)
+    postRoute(ROUTE_FETCH, 'fetch', handleFetch)
+    postRoute(ROUTE_GROUP, 'group', handleGroupWorktrees)
+    postRoute(ROUTE_UPDATE, 'update', handleUpdate)
+    postRoute(ROUTE_INSPECT, 'inspect', handleInspectWorktree)
+    postRoute(ROUTE_REMOVE, 'remove', handleRemoveWorktree)
+    postRoute(ROUTE_EXISTS, 'exists', handlePathExists)
+    postRoute(ROUTE_ENSURE_DIRECTORY, 'ensure-directory', handleEnsureDirectory)
   })
 }
