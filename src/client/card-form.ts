@@ -20,7 +20,7 @@
  * @module git-worktree/client/card-form
  */
 
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 /** The field this card edits. */
 export const ROOT_FIELD = 'rootDir'

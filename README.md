@@ -44,7 +44,7 @@ Repo: <https://github.com/LaoYueHanNi/dsh-git-worktree>
 dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 ```
 
-> The package declares `dsh.bundle`, so `add` wires the plugin into the profile's layer stack automatically — no config editing needed. Requires the `web` profile (`dsh web`).
+> The package declares `dsh.bundle`, so `add` wires the plugin into the profile's layer stack automatically — no config editing needed. Requires the `web` profile (`dsh web`) and a dsh **0.1.2-rc.1** (or later 0.1.2) host.
 
 Running a dsh **0.1.2 alpha** host? Install the dedicated compatibility build instead:
 
@@ -52,7 +52,7 @@ Running a dsh **0.1.2 alpha** host? Install the dedicated compatibility build in
 dsh plugin --profile web add @laoyuehanni/dsh-git-worktree@dsh-alpha
 ```
 
-> `@dsh-alpha` is a dist-tag resolving to the latest compatibility build (currently `0.4.1-dsh-0.1.2-alpha.3`) with peers pinned to the alpha line — a plain `update` never mixes the two channels. Back on the stable host? Remove this package first, then install the default line above.
+> `@dsh-alpha` is a dist-tag resolving to the latest alpha-host compatibility build (currently `0.4.3-dsh-0.1.2-alpha.5`) with peers pinned to the alpha line — a plain `update` never mixes the two channels. On 0.1.2-rc.1 or later, use the default line above.
 
 ## Update
 

@@ -8,7 +8,7 @@ README（双语各 112 行）的功能条目每条 5-10 句，塞满实现细节
 
 ## Decision
 
-对齐 dsh-token-usage 项目同日决策（其 docs/decisions/implemented/2026-09-03-readme-scope.md，本仓库外）：README 只承载项目背景、功能介绍（只讲用户可见行为，每条 1-3 句，不讲实现来源）、安装（npm 默认线 + `@dsh-alpha` 兼容线）/更新/移除、开发。IMPORTANT 块压缩为三段式：直装终止一句 + `add` 命令 + 旧版迁移一句指引（命令不再展开）。原 Install 的 `link:` 小节并入 Development 去重，构建块改为「构建一次、装符号链接、迭代」并挂 `link:` 安装；prepare 脚本论证压缩为一句。功能条目的实现细节全部删除——`docs/decisions/` 为唯一权威，README 不复述。两处事实漂移随重写修正；测试数改为不带数字的注释避免再过时。
+对齐 dsh-token-usage 项目同日决策（其 docs/decisions/implemented/2026-09-03-readme-scope.md，本仓库外）：README 只承载项目背景、功能介绍（只讲用户可见行为，每条 1-3 句，不讲实现来源）、安装（npm 默认线面向 0.1.2-rc.1 + `@dsh-alpha` 兼容线面向 alpha 宿主，当前 `0.4.3-dsh-0.1.2-alpha.5`）/更新/移除、开发。IMPORTANT 块压缩为三段式：直装终止一句 + `add` 命令 + 旧版迁移一句指引（命令不再展开）。原 Install 的 `link:` 小节并入 Development 去重，构建块改为「构建一次、装符号链接、迭代」并挂 `link:` 安装；prepare 脚本论证压缩为一句。功能条目的实现细节全部删除——`docs/decisions/` 为唯一权威，README 不复述。两处事实漂移随重写修正；测试数改为不带数字的注释避免再过时。
 
 ## Alternatives considered
 

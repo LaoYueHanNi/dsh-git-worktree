@@ -27,6 +27,7 @@
   background: 0 0;
   border: none;
   border-radius: 50%;
+  corner-shape: round;
   flex: none;
   justify-content: center;
   align-items: center;
@@ -127,6 +128,7 @@
   background: 0 0;
   border: none;
   border-radius: 50%;
+  corner-shape: round;
   flex: none;
   align-items: center;
   gap: 0;
@@ -137,7 +139,7 @@
 }
 
 .searchExpanded {
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 0.5px solid var(--dsw-alias-border-l4);
   width: calc(100% + 4px);
   height: 30px;
   color: var(--dsw-alias-label-caption);
@@ -155,6 +157,7 @@
   background: 0 0;
   border: none;
   border-radius: 50%;
+  corner-shape: round;
   flex: none;
   justify-content: center;
   align-items: center;
@@ -208,6 +211,7 @@
   background: 0 0;
   border: none;
   border-radius: 50%;
+  corner-shape: round;
   flex: none;
   justify-content: center;
   align-items: center;
@@ -402,7 +406,7 @@
 
 .renameInput {
   box-sizing: border-box;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 0.5px solid var(--dsw-alias-border-l4);
   width: 100%;
   height: 44px;
   color: var(--dsw-alias-label-primary);

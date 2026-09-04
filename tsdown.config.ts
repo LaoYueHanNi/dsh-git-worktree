@@ -61,9 +61,9 @@ function cssModulesInline(pluginId: string): Plugin {
 /**
  * Browser platform words shared by the shell's frozen module table: these stay
  * external so the factory's `require` resolves them from the table at runtime.
- * Mirrors the platform list in @deepseek-ai/dsh-client-web/src/platform.ts plus
- * the runtime client exemption (runtime registers its factory before any
- * dependent bundle materializes).
+ * 0.1.2 table: react / jsx / react-dom / cordis / ui-slots / primitives.
+ * `abbreviateHomePath` is not on the table, so tsdown inlines
+ * `@deepseek-ai/dsh-util-workspace-path`.
  */
 const CLIENT_EXTERNALS: readonly string[] = [
   'react',
@@ -72,11 +72,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
   'react-dom/client',
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-ui-attachment',
-  '@deepseek-ai/dsh-client-schema-form',
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 export default defineConfig({

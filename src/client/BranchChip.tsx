@@ -52,6 +52,9 @@ import {
   Button, IconBranchOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: merges SessionStandardProps / GlobalStandardProps (`sessionId`,
+// `useSessions`) into the input-left runtime kit.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { branchNameIssue, localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
 import { fetchStatus, requestCreateBranch, requestFetch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
@@ -354,8 +357,9 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ session, sessionId, useSessions, adoptWorktree, t }: BranchChipDockProps) {
+export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, t }: BranchChipDockProps) {
   const summary = useSessions(state => state.byId[sessionId])
+  const session = useSession(s => s)
   const cwd = summary?.cwd
   const [repo, refresh] = useRepoStatus(cwd)
   const [menuOpen, setMenuOpen] = useState(false)

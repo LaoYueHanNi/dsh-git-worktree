@@ -6,8 +6,8 @@
  * the sidebar-grouping switch is on — the `sidebar.workspaces` occupant
  * that clusters same-repository workspaces into one tree. Repo facts and
  * worktree creation flow through the host half's own routes; session hopping
- * uses the framework's workspaces service; the card's browse button rides the
- * same service's native directory picker (`ctx.workspaces.pickDirectory`).
+ * uses the framework's uiWorkspace navigation; the card's browse button rides
+ * the same service's native directory picker (`ctx.uiWorkspace.pickDirectory`).
  *
  * The grouping seat registers DYNAMICALLY: the settings scope drives a
  * register/dispose cycle, so flipping the card's switch swaps the sidebar
@@ -18,8 +18,19 @@
  * corrects the value once it lands.
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: the branded Session id host 0.1.2 publishes on the session types
+// subpath (the dead dsh-client-runtime used to carry it).
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+// Type-only: the branded Workspace id from the Workspace controller package.
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+// Type-only: pulls ctx.sessions (ISessions) — must load the client face, not
+// the Host `@deepseek-ai/dsh-session` SessionStore.
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+// Type-only: the Remote client merge (ctx.remote.$host Host facts) and the
+// connection merge, both behind the gateway/connection client faces.
+import type {} from '@deepseek-ai/dsh-api-gateway/client'
+import type {} from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the ui-conversation SlotMap merge (input region entries).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the ui-sidebar SlotMap merge ('sidebar.workspaces' and its
@@ -32,6 +43,15 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // ('settings.plugin.item') into this program. The value face stays
 // uncompromised: cross-plugin collaboration goes through the slot system.
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+// Type-only: pulls the ui-workspace service merge (ctx.uiWorkspace) into this
+// program — host 0.1.2 keeps session start and directory picking there while
+// `workspaces` is the pure Workspace-row controller.
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+// Type-only: pulls the ui-renderer merge (ctx.slots, the SlotRegistry) into
+// this program — the slots service Context declaration lives on ui-renderer.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+// Type-only: session-domain slot kit (conversation.input.left owner share).
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { BranchChipDock } from './BranchChip.tsx'
@@ -81,9 +101,10 @@ const NS = 'git-worktree'
  */
 const GIT_WORKTREE_NS = 'git-worktree'
 
-/** Required services: the slot ledger, session/workspace runtime, copy, and
- * the settings scope backing the plugin configuration card. */
-export const inject = ['slots', 'sessions', 'workspaces', 'locale', 'connection', 'remote', 'settingsScope']
+/** Required services: the slot ledger, session/workspace runtimes, the
+ * workspace navigation/directory face, copy, and the settings scope backing
+ * the plugin configuration card. */
+export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'locale', 'connection', 'remote', 'settingsScope']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'git-worktree: dictionaries')
@@ -91,7 +112,7 @@ export function apply(ctx: ClientContext): void {
   const chipInjected = (): BranchChipInjected => ({
     adoptWorktree: async (path) => {
       const workspace = await ctx.workspaces.create({ path })
-      ctx.workspaces.startSession(workspace.workspaceId)
+      ctx.uiWorkspace.startSession(workspace.workspaceId)
     },
   })
 
@@ -183,7 +204,7 @@ export function apply(ctx: ClientContext): void {
         ctx.sessions.open(sessionId as SessionId)
       },
       startSession: (workspaceId?: string) => {
-        ctx.workspaces.startSession(workspaceId as WorkspaceId | undefined)
+        ctx.uiWorkspace.startSession(workspaceId as WorkspaceId | undefined)
       },
       loadFacts: async (paths: readonly string[]) => {
         const result = await requestGroupWorktrees(paths)
@@ -233,8 +254,14 @@ export function apply(ctx: ClientContext): void {
         if (!result.ok) throw new Error(result.error)
       },
       createWorkspace: (input) => ctx.workspaces.create(input),
-      pickDirectory: () => ctx.workspaces.pickDirectory(),
-      hostDescription: (ctx.get('connection') as { hostDescription: GroupedSidebarInjected['hostDescription'] }).hostDescription,
+      pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
+      // Host facts ride the remote `$host` read (identity-stable
+      // RemoteHostFacts). Invalidation follows the official ui-workspace
+      // hostInfo: `connection/reset` (not connection.generation.subscribe).
+      hostInfo: {
+        getSnapshot: () => ctx.remote.$host,
+        subscribe: (listener) => ctx.on('connection/reset', listener),
+      },
       directoryFlow: {
         getSnapshot: () => ctx.slots.entries('sidebar.workspaces.directoryFlow').length > 0,
         subscribe: (listener) => ctx.slots.subscribe('sidebar.workspaces.directoryFlow', listener),
@@ -308,7 +335,7 @@ export function apply(ctx: ClientContext): void {
       ...form.actions(),
       // The shell's own directory picker (the workspace flows' chooser):
       // resolves the chosen absolute path, or null when the user dismisses.
-      pickDirectory: () => ctx.workspaces.pickDirectory(),
+      pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
     }),
   }, GitWorktreeCard))
 

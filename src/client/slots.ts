@@ -1,7 +1,9 @@
 /**
  * Injected business faces: framework actions the entries themselves cannot
- * reach (workspace registration and directory picking live on the workspaces
- * service, injected through the client plugin context).
+ * reach (workspace registration lives on workspaces; session start and
+ * directory picking live on uiWorkspace). Session identity and the list
+ * snapshot ride the standard kit (`sessionId` / `useSessions`) that
+ * ui-session merges onto session-scoped slots.
  */
 
 export interface BranchChipInjected {

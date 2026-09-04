@@ -1,8 +1,8 @@
 /**
  * dsh-git-worktree host half. Owns the worktree storage-root settings section
  * (the `git-worktree` namespace in the dsh settings document, registered
- * through installSettingsSection with the composition entry as its base
- * layer) and — while a webServer service exists — the HTTP routes the browser
+ * through SettingsProvider.installSection with the composition entry as its
+ * base layer) and — while a webServer service exists — the HTTP routes the browser
  * half fetches. A stored root edit takes effect live: the routes read the
  * section source per request, so no restart and no route re-registration.
  *
@@ -17,10 +17,14 @@ import { homedir } from 'node:os'
 import { rename } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 // Type-only: pulls the webServer Context declaration merge into this program.
 import type {} from '@deepseek-ai/dsh-host-webserver'
+// Type-only: pulls the settings Context declaration merge (`ctx.settings`) —
+// host 0.1.2 moved section installation onto the provider itself
+// (`SettingsProvider.installSection`); the free `installSettingsSection` /
+// `settingsNamespace` helpers of 0.1.1 are gone.
+import type {} from '@deepseek-ai/dsh-settings'
 import { childProcessExec } from './git.js'
 import {
   handleCreateBranch, handleCreateWorktree, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleStatus, handleSwitch, handleUpdate,
@@ -75,7 +79,7 @@ export function validateConfig(config: Config): void {
 }
 
 /** The settings namespace this plugin serves; its browser card spells the same string. */
-export const GIT_WORKTREE_NS = settingsNamespace('git-worktree')
+export const GIT_WORKTREE_NS = 'git-worktree'
 
 /** The settings-facing subset of the config: the worktree storage root and the sidebar grouping switch. */
 export interface SectionConfig {
@@ -122,22 +126,29 @@ export function apply(ctx: Context, config: Config = {}): void {
     envHome: () => process.env.DSH_HOME,
   })
 
-  installSettingsSection(ctx, GIT_WORKTREE_NS, sectionSchema, sectionOf(config), {
-    validate: value => {
-      validateRootDir(value.rootDir)
-      if (value.groupSidebar !== undefined && typeof value.groupSidebar !== 'boolean') {
-        throw new Error('groupSidebar must be a boolean')
-      }
-    },
-    setSource: (source) => { sectionSource = source },
-    onChange: () => {
-      // The storage root takes effect live: the routes read the section
-      // source per request, so a committed edit needs no action here.
-    },
+  // Host 0.1.2 hosts section installation on the provider itself: the same
+  // composition-entry base, validate, setSource, and onChange hooks ride
+  // `SettingsProvider.installSection`, reached through a settings injection.
+  // The registration is an effect on this plugin's fiber either way, so a
+  // late-attaching settings service is handled by the injection itself.
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, GIT_WORKTREE_NS, sectionSchema, sectionOf(config), {
+      validate: value => {
+        validateRootDir(value.rootDir)
+        if (value.groupSidebar !== undefined && typeof value.groupSidebar !== 'boolean') {
+          throw new Error('groupSidebar must be a boolean')
+        }
+      },
+      setSource: (source) => { sectionSource = source },
+      onChange: () => {
+        // The storage root takes effect live: the routes read the section
+        // source per request, so a committed edit needs no action here.
+      },
+    })
   })
 
   // One-shot legacy migration: the pre-0.3 plugin persisted its own
-  // ~/.dsh/git-work-tree/settings.json. Registered after installSettingsSection
+  // ~/.dsh/git-work-tree/settings.json. Registered after installSection
   // so the namespace is on the ledger by the time this fiber runs; a failure
   // (or a user layer that already chose) leaves both documents exactly as
   // they are, and the next startup retries.
