@@ -198,8 +198,6 @@ export function apply(ctx: ClientContext): void {
     const epoch = ++seatEpoch
     seatReady = new Promise<void>((resolve) => { seatReadyResolve = resolve })
     const injectFace = (): GroupedSidebarInjected => ({
-      workspacesList: ctx.workspaces.list,
-      sessionsList: ctx.sessions.list,
       openSession: (sessionId: string) => {
         ctx.sessions.open(sessionId as SessionId)
       },
@@ -255,16 +253,19 @@ export function apply(ctx: ClientContext): void {
       },
       createWorkspace: (input) => ctx.workspaces.create(input),
       pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
-      // Host facts ride the remote `$host` read (identity-stable
-      // RemoteHostFacts). Invalidation follows the official ui-workspace
-      // hostInfo: `connection/reset` (not connection.generation.subscribe).
-      hostInfo: {
-        getSnapshot: () => ctx.remote.$host,
-        subscribe: (listener) => ctx.on('connection/reset', listener),
-      },
-      directoryFlow: {
-        getSnapshot: () => ctx.slots.entries('sidebar.workspaces.directoryFlow').length > 0,
-        subscribe: (listener) => ctx.slots.subscribe('sidebar.workspaces.directoryFlow', listener),
+      // hostInfo / directoryFlow ride the reserved `hooks` compartment so the
+      // renderer binds them with bindSnapshotSelector (same as native
+      // ui-workspace). Workspace/session lists are NOT injected: the occupant
+      // reads the root kit's useWorkspaces / useSessions.
+      hooks: {
+        hostInfo: {
+          getSnapshot: () => ctx.remote.$host,
+          subscribe: (listener) => ctx.on('connection/reset', listener),
+        },
+        directoryFlow: {
+          getSnapshot: () => ctx.slots.entries('sidebar.workspaces.directoryFlow').length > 0,
+          subscribe: (listener) => ctx.slots.subscribe('sidebar.workspaces.directoryFlow', listener),
+        },
       },
       onReady: () => { if (epoch === seatEpoch) finishSeat() },
     })

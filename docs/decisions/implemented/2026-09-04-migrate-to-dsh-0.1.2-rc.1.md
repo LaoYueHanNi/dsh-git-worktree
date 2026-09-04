@@ -17,6 +17,7 @@ Status: implemented
 5. **视觉**：自绘复刻面跟宿主 0.1.2 hairline / elevation / round 对齐（elevation token 带 `shadow-lv3` fallback）。
 6. **依赖**：peer/dev 的 `@deepseek-ai/dsh-*` 升 `^0.1.2-rc.1`；删 `dsh-client-runtime`；补 gateway / session-controller / workspace-controller / connection / store / renderer / workspace / session / util-workspace-path / `dsh-workspace`（`/types` 子路径，避免误加载 Host `SessionStore`）；cordis dev `^4.0.2`。`.npmrc` `auto-install-peers=false`。tsdown `CLIENT_EXTERNALS` 裁到 0.1.2 冻结平台表。
 7. **发布通道**：`publishConfig` 不加 `tag: dsh-alpha`（main 是默认线）。README 默认安装面向 0.1.2-rc.1；`@dsh-alpha` 仍指向已发布的 `0.4.3-dsh-0.1.2-alpha.5`。启动快路径与 lib 不入库维持 main 现状。
+8. **聚合侧栏订阅走官方 kit**：`ctx.workspaces.list` 是 `ClientWorkspaceModel`（`getSnapshot` 读 `this.refreshSnapshot`）。GroupedSidebar 不再自建 `useSyncExternalStore`；workspace/session 列表读 root 标准 kit 的 `useWorkspaces` / `useSessions`（ui-workspace / ui-session 的 `provideRoot`，renderer `bindSnapshotSelector` 已绑 this）。`hostInfo` / `directoryFlow` 放 inject 的 `hooks` 隔间，同样由框架绑成 `useHostInfo` / `useDirectoryFlow`。
 
 ## Alternatives considered
 
@@ -24,6 +25,8 @@ Status: implemented
 - **hostInfo 沿用 alpha.5 的 `connection.generation.subscribe`** —— rc.1 里 generation 仍在，但官方 ui-workspace 与 cookbook 已改 `connection/reset`；跟官方走，避免下一次宿主收掉 generation 公开面再迁一次。否决。
 - **双版本特性检测（installSettingsSection 与 installSection、pickDirectory 两套并存）** —— 宿主已断代，长期两套路径不值；`uiWorkspace` 加入 inject 会让旧宿主上插件整体不启动。否决：main 不再兼容 0.1.0-rc.7 / 0.1.1-rc.2。
 - **本提交升版本号并 publish** —— 发版升号由用户发起且应作独立 chore；本提交只切兼容面。否决。
+- **inject 里塞 `workspacesList` / `sessionsList` 再自建 uSES（含 `bindObservable` 包 this）** —— 能修 `refreshSnapshot` 崩溃，但重复了 renderer 已经做的绑定，且 Occupant 拿不到官方 selector 语义。否决：跟原生 WorkspaceBrowser 同构，走 root kit。
+- **`.bind(list)` 保留 this** —— 能修崩溃，但把宿主方法身份泄漏给 React。否决。
 
 ## Consequences
 

@@ -38,6 +38,14 @@ const TWO_WORKTREES = [
   '',
 ].join('\n')
 
+/** Porcelain after the linked worktree has been unregistered. */
+const MAIN_ONLY = [
+  'worktree /repo',
+  'HEAD 1111111111111111111111111111111111111111',
+  'branch refs/heads/main',
+  '',
+].join('\n')
+
 describe('probeRepo', () => {
   it('assembles facts from rev-parse, branch refs, and worktree porcelain', async () => {
     const exec = scripted([
@@ -86,6 +94,7 @@ describe('probeRepo', () => {
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
     ])
     const facts = await probeRepo(exec, '/root/repo/feat-x/src', () => true)
+    expect(facts?.repoRoot).toBe(resolve('/root/repo'))
     expect(facts?.repoName).toBe('repo')
     expect(facts?.currentBranch).toBe('feat-x')
   })
@@ -453,5 +462,59 @@ describe('removeWorktree', () => {
     ])
     await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true))
       .rejects.toThrow('locked')
+  })
+
+  it('treats Windows Permission denied as success after git already unregistered', async () => {
+    const swept: string[] = []
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 1, stderr: "error: failed to delete '/root/repo/feat-x': Permission denied\n" } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: MAIN_ONLY } },
+    ])
+    expect(await removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async (path) => {
+      swept.push(path)
+      return 'gone'
+    })).toEqual({ path: p('/root/repo/feat-x'), pruned: false })
+    expect(swept).toEqual([p('/root/repo/feat-x')])
+  })
+
+  it('succeeds without a sweep when Permission denied left no leftover folder', async () => {
+    let existsCalls = 0
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 1, stderr: 'error: failed to delete: Permission denied\n' } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: MAIN_ONLY } },
+    ])
+    expect(await removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => {
+      existsCalls += 1
+      return existsCalls === 1
+    }, async () => {
+      throw new Error('sweep must not run when the folder is already gone')
+    })).toEqual({ path: p('/root/repo/feat-x'), pruned: false })
+  })
+
+  it('still refuses Permission denied when the worktree stays registered', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 1, stderr: 'error: failed to delete: Permission denied\n' } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+    ])
+    await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async () => {
+      throw new Error('sweep must not run while git still lists the worktree')
+    })).rejects.toThrow('Permission denied')
+  })
+
+  it('still refuses Permission denied when the leftover directory has files', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 1, stderr: 'error: failed to delete: Permission denied\n' } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: MAIN_ONLY } },
+    ])
+    await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async () => 'occupied'))
+      .rejects.toThrow('Permission denied')
   })
 })

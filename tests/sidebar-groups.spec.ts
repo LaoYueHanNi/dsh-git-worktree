@@ -60,6 +60,14 @@ describe('deriveSidebarGroups', () => {
     expect(lone.key).toBe('ws:w1')
   })
 
+  it('keeps a lone linked worktree labelled linked so remove-worktree stays', () => {
+    const items = [ws('w-linked', LINKED_PATH)]
+    const facts = { [LINKED_PATH]: gitFacts(REPO_ROOT, 'dsh-git-worktree', 'feat-x', false) }
+    const group = groups0(deriveSidebarGroups(items, facts))
+    expect(group.kind).toBe('single')
+    expect(group.members[0]?.label).toEqual({ type: 'linked', branch: 'feat-x' })
+  })
+
   it('answers plain rows while facts are unknown or null (loading and non-git)', () => {
     const items = [ws('w1', 'E:\\a'), ws('w2', 'E:\\b')]
     for (const factsCase of [undefined, { 'E:\\a': null }]) {
@@ -377,5 +385,13 @@ describe('facts cache', () => {
     }
     expect(factsForSignature('E:\\repo\nE:\\plain', live, cached)).toEqual(live)
     expect(factsForSignature('E:\\other', live, cached)).toBeNull()
+  })
+
+  it('reuses overlapping facts when a new workspace widens the signature', () => {
+    const cached = { signature: 'E:\\repo\nE:\\plain', facts }
+    expect(factsForSignature('E:\\repo\nE:\\plain\nE:\\new', null, cached)).toEqual({
+      signature: 'E:\\repo\nE:\\plain\nE:\\new',
+      facts,
+    })
   })
 })

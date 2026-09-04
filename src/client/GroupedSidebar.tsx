@@ -12,14 +12,15 @@
  * @module git-worktree/client/GroupedSidebar
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16, IconProjectAddOutline16,
   IconSearchOutline16, Menu, Modal, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { OwnerOf, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, OwnerOf, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: GlobalStandardProps.useSessions / useWorkspaces (root kit).
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceGitFacts } from '../wire.ts'
 import {
   deriveFlat, deriveSidebarGroups, deriveStrayGroups, factsForSignature, indexSubagentRunning, loadExpandState, loadFactsCache, loadViewPrefs,
@@ -39,16 +40,13 @@ function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter((part): part is string => typeof part === 'string' && part !== '').join(' ')
 }
 
-/** Observable snapshot (getSnapshot + subscribe) used for host description / flow occupancy. */
-export interface SidebarObservable<T> {
-  readonly getSnapshot: () => T
-  readonly subscribe: (listener: () => void) => () => void
-}
-
-/** The business face this entry injects; the component never touches ctx. */
+/** The business face this entry injects; the component never touches ctx.
+ * Workspace / session lists ride the root standard kit (`useWorkspaces` /
+ * `useSessions`) — Host `ClientWorkspaceModel.getSnapshot` needs `this`, and
+ * the renderer already re-binds it in `bindSnapshotSelector`. hostInfo and
+ * directoryFlow go in the reserved `hooks` compartment so they get the same
+ * binding (native ui-workspace's pattern). */
 export interface GroupedSidebarInjected {
-  readonly workspacesList: SidebarObservable<WorkspaceSnapshot>
-  readonly sessionsList: SidebarObservable<SessionListState>
   readonly openSession: (sessionId: string) => void
   readonly startSession: (workspaceId?: string) => void
   readonly loadFacts: (paths: readonly string[]) =>
@@ -79,10 +77,12 @@ export interface GroupedSidebarInjected {
   readonly ensureDirectory: (path: string) => Promise<void>
   readonly createWorkspace: (input: { path: string }) => Promise<{ workspaceId: string }>
   readonly pickDirectory: () => Promise<string | null>
-  /** Host account home (the native `hostInfo` inject hook's shape; the
-   * snapshot always stands, `home` absent until the first ready frame). */
-  readonly hostInfo: SidebarObservable<{ home: string | undefined }>
-  readonly directoryFlow: SidebarObservable<boolean>
+  readonly hooks: {
+    /** Host account home; `home` absent until the first ready frame. */
+    readonly hostInfo: HostObservable<{ home: string | undefined }>
+    /** True while the native directory-flow hole is occupied. */
+    readonly directoryFlow: HostObservable<boolean>
+  }
   /**
    * This mount can paint the grouped tree (a matching facts cache counts)
    * or the first /group attempt has settled. The settings card spinner
@@ -96,7 +96,7 @@ export type GroupedSidebarProps =
   PropsRuntime<'sidebar.workspaces'>
   & OwnerOf<'sidebar.workspaces'>
   & PropsLocale<'git-worktree'>
-  & GroupedSidebarInjected
+  & InjectFace<GroupedSidebarInjected>
 
 type FactsState = { signature: string; facts: Readonly<Record<string, WorkspaceGitFacts | null>> } | null
 type Translate = PropsLocale<'git-worktree'>['t']
@@ -446,14 +446,14 @@ function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, e
     if (summary !== undefined) nodes.push(sessionNode(summary, descendants))
   }
   const created = createdAtMs(member.workspace.createdAt)
-  // Removal is offered only on linked worktrees the sidebar holds FREE: a
-  // running session's cwd is about to vanish (its failure would surface
-  // mid-task), and the currently-browsed session's directory disappearing
-  // under it is the same hole. Occupied rows simply don't show the action —
-  // archive or switch away first, then remove.
+  // Removal is offered on linked worktrees that have no running session.
+  // Creating a worktree immediately startSession's a blank row into it, so
+  // treating "current session is here" as occupied hid the action at the
+  // exact moment the user looks for it. A running agent still hides it —
+  // deleting the cwd under a live turn is the hole worth blocking. The
+  // confirm dialog already lists sessions that will be archived.
   const hasRunning = member.workspace.sessionIds.some(id => sessions.byId[id]?.running === true)
-  const occupied = containsCurrent || hasRunning
-  const canRemoveWorktree = member.label.type === 'linked' && !occupied
+  const canRemoveWorktree = member.label.type === 'linked' && !hasRunning
   const body = (
     <>
       <ProjectRowItem
@@ -513,11 +513,11 @@ function MemberBlock({ member, indent, sessionIds, sessions, currentSessionId, e
 }
 
 export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
-  const { t } = props
-  const workspaces = useSyncExternalStore(props.workspacesList.subscribe, props.workspacesList.getSnapshot)
-  const sessions = useSyncExternalStore(props.sessionsList.subscribe, props.sessionsList.getSnapshot)
-  const host = useSyncExternalStore(props.hostInfo.subscribe, props.hostInfo.getSnapshot)
-  const directoryFlowAvailable = useSyncExternalStore(props.directoryFlow.subscribe, props.directoryFlow.getSnapshot)
+  const { t, useWorkspaces, useSessions, useHostInfo, useDirectoryFlow } = props
+  const workspaces = useWorkspaces(state => state)
+  const sessions = useSessions(state => state)
+  const host = useHostInfo(state => state)
+  const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
   const items = workspaces.items as readonly WorkspaceLike[]
   const home = host?.home
 
@@ -816,7 +816,16 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
     // Ungrouped), then drop the registration itself.
     void (async () => {
       try {
-        await props.removeWorktree(target.workspace.path, wtInspect.dirty > 0)
+        try {
+          await props.removeWorktree(target.workspace.path, wtInspect.dirty > 0)
+        } catch (reason: unknown) {
+          // Windows: git may have already unregistered and emptied the
+          // folder, then failed the last rmdir. A retry then sees a missing
+          // path (`not a git repository`). If the directory is gone, the git
+          // half is done — continue with archive + drop the DSH registration.
+          const probe = await props.probeDirectories([target.workspace.path]).catch(() => undefined)
+          if (probe?.exists[target.workspace.path] !== false) throw reason
+        }
         for (const sessionId of wtArchiveIds) {
           await props.archiveSession(sessionId).catch((reason: unknown) => {
             console.warn('session archive rejected during worktree removal:', reason)

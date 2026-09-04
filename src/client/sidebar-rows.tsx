@@ -75,9 +75,9 @@ export function ProjectRowItem({ row, onToggle, onCreate, actions, home, t, badg
 }): ReactNode {
   const active = row.expanded && row.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
-  // The worktree entry stays absent on non-linked rows and on linked rows the
-  // sidebar holds occupied (a running or currently-browsed session) — the
-  // affordance appears exactly where removal is safe to offer.
+  // The worktree entry stays absent on non-linked rows and on linked rows
+  // that still have a running session. A currently-browsed (including blank)
+  // session no longer hides it — create-then-remove is the test path.
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     ...(actions?.removeWorktree !== undefined

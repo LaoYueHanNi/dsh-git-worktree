@@ -5,7 +5,8 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, normalize, resolve } from 'node:path'
 import { localBranchName } from './normalize.js'
 import type { BranchEntry, WorktreeEntry, WorkspaceGitFacts } from './wire.js'
@@ -37,7 +38,9 @@ export class GitError extends Error {
 
 /** Facts the status route assembles: branches, worktrees, repo identity. */
 export interface RepoFacts {
-  /** Absolute main worktree path (`rev-parse --show-toplevel` of the main dir). */
+  /** Absolute main worktree path (`dirname` of `--git-common-dir`, not the
+   * queried directory's `--show-toplevel` — a linked worktree's toplevel
+   * dies during `worktree remove`). */
   repoRoot: string
   /** Main repository directory basename. */
   repoName: string
@@ -79,6 +82,39 @@ export type DirExists = (path: string) => boolean
 export const fsDirExists: DirExists = path => existsSync(path)
 
 /**
+ * Leftover-directory sweeper after `git worktree remove` unregisters but
+ * fails the final rmdir (Windows EPERM when a process still has the folder
+ * as cwd). `gone` = deleted; `empty` = still there but vacant (cwd hold);
+ * `occupied` = still has files — the caller must not pretend removal finished.
+ */
+export type SweepDir = (path: string) => Promise<'gone' | 'empty' | 'occupied'>
+
+/** Real leftover sweep: `fs.rm` with Windows EPERM retries, then classify. */
+export async function fsSweepDir(path: string): Promise<'gone' | 'empty' | 'occupied'> {
+  if (!existsSync(path)) return 'gone'
+  try {
+    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+  } catch {
+    // Retries exhausted; classify whatever is still on disk.
+  }
+  if (!existsSync(path)) return 'gone'
+  try {
+    return readdirSync(path).length === 0 ? 'empty' : 'occupied'
+  } catch {
+    return 'occupied'
+  }
+}
+
+/** stderr of a git rmdir that lost to an OS file lock (not git's dirty check). */
+function isDirBusyGitError(error: GitError): boolean {
+  const text = error.stderr
+  return /permission denied/i.test(text)
+    || /\bEPERM\b/i.test(text)
+    || /\bEACCES\b/i.test(text)
+    || /\bEBUSY\b/i.test(text)
+}
+
+/**
  * Resolve a directory to repository facts, or undefined outside any git
  * repository (including the `git` binary missing: ENOENT surfaces as a
  * non-zero exit through the seam).
@@ -93,10 +129,16 @@ export async function probeRepo(exec: Exec, path: string, dirExists: DirExists =
   // repoName comes from the shared .git location: a linked worktree's own
   // toplevel would name the branch folder, not the repository. Both git
   // outputs carry forward slashes on Windows — normalize every derived path.
-  const repoRoot = normalize(top.trim())
+  const toplevel = normalize(top.trim())
   const gitDir = commonDir !== undefined && commonDir.trim() !== ''
     ? normalize(resolve(path, commonDir.trim()))
-    : resolve(repoRoot, '.git')
+    : resolve(toplevel, '.git')
+  // Main worktree, not the queried directory: a linked worktree's
+  // `--show-toplevel` is its own folder, which `git worktree remove` then
+  // destroys (including `.git`). Later `worktree list` / `worktree prune`
+  // must still run in a living git dir — the shared checkout
+  // (`dirname(--git-common-dir)`), same grouping key as probeWorkspaceGit.
+  const repoRoot = dirname(gitDir)
   return {
     repoRoot,
     repoName: basename(dirname(gitDir)),
@@ -442,6 +484,8 @@ export async function inspectWorktree(exec: Exec, worktreePath: string): Promise
  * @param worktreePath - the linked worktree directory to delete (absolute).
  * @param force - pass `--force` past uncommitted changes.
  * @param dirExists - existence seam for the stale-registration branch.
+ * @param sweepDir - leftover rmdir after git unregisters but the OS holds the
+ * folder (Windows Permission denied on the empty directory).
  * @returns the path plus whether only a stale registration was pruned.
  * @throws GitError for the main worktree, an unregistered path, or a refused
  * removal (git's own stderr verbatim).
@@ -452,6 +496,7 @@ export async function removeWorktree(
   worktreePath: string,
   force: boolean,
   dirExists: DirExists = fsDirExists,
+  sweepDir: SweepDir = fsSweepDir,
 ): Promise<{ path: string; pruned: boolean }> {
   const target = normalize(worktreePath)
   const worktrees = await listWorktrees(exec, repoRoot)
@@ -468,8 +513,27 @@ export async function removeWorktree(
     await git(exec, repoRoot, ['worktree', 'prune'])
     return { path: target, pruned: true }
   }
-  await git(exec, repoRoot, force ? ['worktree', 'remove', '--force', target] : ['worktree', 'remove', target])
-  return { path: target, pruned: false }
+  try {
+    await git(exec, repoRoot, force ? ['worktree', 'remove', '--force', target] : ['worktree', 'remove', target])
+    return { path: target, pruned: false }
+  } catch (error) {
+    // Windows: git often unregisters the worktree and empties the tree,
+    // then fails the last rmdir (`Permission denied`) because some process
+    // still has the folder as cwd. `--force` does not help — that flag only
+    // bypasses dirty/lock checks, not OS handles. Relist from `repoRoot`
+    // (the main checkout, which still has `.git`); listing from the target
+    // path would throw "not a git repository" once git has stripped its
+    // `.git`. If the registration is already gone, the git side is done;
+    // sweep the leftover and succeed so the DSH archive+unregister half
+    // can run. A still-occupied leftover (files remain) is a real refusal.
+    if (!(error instanceof GitError) || !isDirBusyGitError(error)) throw error
+    const remaining = (await listWorktrees(exec, repoRoot)).find(w => w.path === target)
+    if (remaining !== undefined) throw error
+    if (!dirExists(target)) return { path: target, pruned: false }
+    const leftover = await sweepDir(target)
+    if (leftover === 'occupied') throw error
+    return { path: target, pruned: false }
+  }
 }
 
 /**

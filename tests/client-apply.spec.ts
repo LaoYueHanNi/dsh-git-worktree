@@ -16,7 +16,8 @@ beforeAll(() => {
  * and directory picking live on `uiWorkspace`, Host facts on `remote.$host`
  * (invalidated through `connection/reset`), and the legacy
  * `workspaces.startSession` / `pickDirectory` / `connection.hostDescription`
- * faces no longer exist.
+ * faces no longer exist. Workspace/session lists are not injected — the
+ * occupant reads the root kit's `useWorkspaces` / `useSessions`.
  */
 class FakeCtx {
   readonly locale = { register: (ns: string, dict: unknown) => { this.namespaces.push([ns, dict]) } }
@@ -26,10 +27,6 @@ class FakeCtx {
     created: [] as Array<{ path: string }>,
     /** The legacy navigation face; a migration regression calls this. */
     startSessionCalls: 0,
-    list: {
-      getSnapshot: () => ({ items: [], archivedSessionIds: [] }),
-      subscribe: () => () => {},
-    },
     async create(input: { path: string }): Promise<{ workspaceId: string }> {
       this.created.push(input)
       return { workspaceId: `ws-${String(this.created.length)}` }
@@ -39,10 +36,6 @@ class FakeCtx {
     },
   }
   readonly sessions = {
-    list: {
-      getSnapshot: () => ({ ids: [], byId: {}, current: undefined }),
-      subscribe: () => () => {},
-    },
     opened: [] as string[],
     searchResultLimit: 8,
     async search(): Promise<never> {
@@ -170,9 +163,11 @@ describe('client apply', () => {
     expect(ctx.uiWorkspace.started).toContainEqual(['ws-1'])
     expect(ctx.workspaces.startSessionCalls).toBe(0)
 
-    expect(face.hostInfo.getSnapshot()).toEqual({ home: '/home/x', isLoopback: true })
+    expect('workspacesList' in face).toBe(false)
+    expect('sessionsList' in face).toBe(false)
+    expect(face.hooks.hostInfo.getSnapshot()).toEqual({ home: '/home/x', isLoopback: true })
     const listener = vi.fn()
-    const stop = face.hostInfo.subscribe(listener)
+    const stop = face.hooks.hostInfo.subscribe(listener)
     ctx.emitReset()
     expect(listener).toHaveBeenCalledTimes(1)
     stop()

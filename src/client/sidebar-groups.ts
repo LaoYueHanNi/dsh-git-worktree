@@ -173,7 +173,24 @@ export function deriveSidebarGroups(
     if (first === undefined) continue
     const repoName = facts?.[first.workspace.path]?.repoName ?? first.workspace.title
     if (ordered.length === 1) {
-      singles.push({ index: bucket.index, group: singleGroup(first.workspace) })
+      // Visual still degrades to a single row (no repo header). A linked
+      // worktree keeps its linked label so the remove-worktree menu stays;
+      // wiping it to `plain` hid that action on a freshly created worktree
+      // (often the only registered checkout of that repo, or the only one
+      // whose facts have landed).
+      if (first.label.type === 'linked') {
+        singles.push({
+          index: bucket.index,
+          group: {
+            key: `ws:${first.workspace.workspaceId}`,
+            kind: 'single',
+            repoName: undefined,
+            members: [first],
+          },
+        })
+      } else {
+        singles.push({ index: bucket.index, group: singleGroup(first.workspace) })
+      }
       continue
     }
     repoGroups.set(key, { key, kind: 'repo', repoName, members: ordered })
@@ -397,6 +414,12 @@ export function loadFactsCache(): FactsCacheEntry | null {
  * win; otherwise a matching cache batch. The grouped tree must paint the
  * moment the workspace path set is known — not only at `useState` init,
  * when the list is still the pending empty snapshot (signature `""`).
+ *
+ * A newly added workspace changes the signature. Exact-match-only would
+ * drop every cached fact until `/group` returns, flattening the tree and
+ * hiding “删除工作树” on the new linked row. Overlapping batches reuse
+ * facts for paths still present; unknown new paths stay absent (plain)
+ * until the probe lands.
  */
 export function factsForSignature(
   signature: string,
@@ -405,7 +428,32 @@ export function factsForSignature(
 ): FactsCacheEntry | null {
   if (live !== null && live.signature === signature) return live
   if (cached !== null && cached.signature === signature) return cached
+  if (live !== null) {
+    const facts = projectFacts(live.facts, signature)
+    if (facts !== undefined) return { signature, facts }
+  }
+  if (cached !== null) {
+    const facts = projectFacts(cached.facts, signature)
+    if (facts !== undefined) return { signature, facts }
+  }
   return null
+}
+
+/** Facts for paths that exist in both the batch and the current signature. */
+function projectFacts(
+  facts: Readonly<Record<string, WorkspaceGitFacts | null>>,
+  signature: string,
+): Readonly<Record<string, WorkspaceGitFacts | null>> | undefined {
+  const paths = signature.split('\n').filter(path => path !== '')
+  if (paths.length === 0) return undefined
+  const out: Record<string, WorkspaceGitFacts | null> = {}
+  let hit = 0
+  for (const path of paths) {
+    if (!Object.hasOwn(facts, path)) continue
+    out[path] = facts[path] ?? null
+    hit += 1
+  }
+  return hit === 0 ? undefined : out
 }
 
 /** Persist one /group facts batch; write failures (quota, privacy mode) stay silent. */
