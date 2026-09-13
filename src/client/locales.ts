@@ -6,8 +6,6 @@
 
 /** Every copy key the plugin surfaces (chip, dialogs, settings card). */
 export type GitWorktreeKey =
-  | 'chipWorktree'
-  | 'worktreeToggle'
   | 'menuBranches'
   | 'menuLocalBranches'
   | 'menuWorktrees'
@@ -26,6 +24,8 @@ export type GitWorktreeKey =
   | 'menuUpdate'
   | 'ctxCheckout'
   | 'ctxHop'
+  | 'ctxWorktree'
+  | 'ctxWorktreeCut'
   | 'ctxCreate'
   | 'ctxCreateCheckout'
   | 'ctxRename'
@@ -46,7 +46,6 @@ export type GitWorktreeKey =
   | 'worktreeAskNew'
   | 'worktreeAskRemote'
   | 'worktreeAskReuse'
-  | 'worktreeAskCutOut'
   | 'worktreeBusy'
   | 'createBranchBusy'
   | 'actionCancel'
@@ -202,8 +201,6 @@ export type GitWorktreeKey =
 
 /** English dictionary — complete by construction. */
 export const en: Record<GitWorktreeKey, string> = {
-  chipWorktree: 'Worktree',
-  worktreeToggle: 'Create an isolated worktree',
   menuBranches: 'Branches',
   menuLocalBranches: 'Local branches',
   menuWorktrees: 'Worktrees',
@@ -222,6 +219,8 @@ export const en: Record<GitWorktreeKey, string> = {
   menuUpdate: 'Update current branch from upstream',
   ctxCheckout: 'Check out',
   ctxHop: 'Go to this worktree',
+  ctxWorktree: 'Create worktree',
+  ctxWorktreeCut: 'New branch and worktree',
   ctxCreate: 'New branch',
   ctxCreateCheckout: 'New branch and check out',
   ctxRename: 'Rename branch',
@@ -242,7 +241,6 @@ export const en: Record<GitWorktreeKey, string> = {
   worktreeAskNew: 'Create a worktree from {branch}?',
   worktreeAskRemote: 'Create a worktree from this remote branch?',
   worktreeAskReuse: 'Switch to the {branch} worktree?',
-  worktreeAskCutOut: 'Cut a new branch out of {branch} into an isolated worktree',
   worktreeBusy: 'Creating…',
   createBranchBusy: 'Creating…',
   actionCancel: 'Cancel',
@@ -399,8 +397,6 @@ export const en: Record<GitWorktreeKey, string> = {
 
 /** 中文词典。 */
 export const zh: Record<GitWorktreeKey, string> = {
-  chipWorktree: '工作树',
-  worktreeToggle: '创建隔离工作树',
   menuBranches: '分支',
   menuLocalBranches: '本地分支',
   menuWorktrees: '工作树',
@@ -419,6 +415,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuUpdate: '更新当前分支',
   ctxCheckout: '签出',
   ctxHop: '跳到此工作树',
+  ctxWorktree: '创建工作树',
+  ctxWorktreeCut: '新建分支并创建工作树',
   ctxCreate: '新建',
   ctxCreateCheckout: '新建并检出',
   ctxRename: '重命名分支',
@@ -439,7 +437,6 @@ export const zh: Record<GitWorktreeKey, string> = {
   worktreeAskNew: '是否从 {branch} 新建工作树？',
   worktreeAskRemote: '从该远程分支新建工作树？',
   worktreeAskReuse: '是否切到 {branch} 工作树？',
-  worktreeAskCutOut: '从当前分支 {branch} 切出新分支到隔离工作树',
   worktreeBusy: '创建中…',
   createBranchBusy: '创建中…',
   actionCancel: '取消',

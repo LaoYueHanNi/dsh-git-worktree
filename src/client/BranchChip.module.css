@@ -1,21 +1,18 @@
 /* Branch chip row inside the composer tool row (conversation.input.left,
- * right of the mode chips). Modeled as a single rounded-rectangle
- * segmented control: the branch picker and the worktree toggle share one
- * container with a thin divider between them, so they read as one
- * affordance instead of two loose buttons.
+ * right of the mode chips). A single chip button: the branch picker (the
+ * worktree toggle that used to share this dock is gone — worktree actions
+ * live in the branch menu's right-click).
  *
  * Geometry mirrors the composer trigger chips in the DSH base (see
  * PermissionSelect / ModelSelect): 28px height, 13/20 medium-secondary
- * label, transparent fill, no outline 鈥?the dock stays at the same
+ * label, transparent fill, no outline — the dock stays at the same
  * visual weight as the surrounding chips (dsh-worktree select, standard
  * mode select, Workspace Write, MiniMax-M3 High). The corners stop short
  * of the base's full pill (24px) so the silhouette stays a chip rather
  * than a capsule, per the design brief. */
 
-/* Shared trigger geometry 鈥?copied 1:1 from the base composer triggers
- * (PermissionSelect .trigger / ModelSelect .trigger). Centralizing here
- * keeps the two segments visually fused so the divider reads as part of
- * one component, not two loose buttons. */
+/* Shared trigger geometry — copied 1:1 from the base composer triggers
+ * (PermissionSelect .trigger / ModelSelect .trigger). */
 .dock {
   display: inline-flex;
   align-items: stretch;
@@ -28,16 +25,6 @@
   font-weight: 500;
   min-height: 28px;
   overflow: hidden;
-}
-
-/* Vertical separator between the two segments. Uses the secondary label
- * color so it stays in the same tonal family as the surrounding trigger
- * outlines and chevrons. */
-.divider {
-  width: 1px;
-  margin: 6px 0;
-  background: color-mix(in srgb, currentColor 22%, transparent);
-  flex-shrink: 0;
 }
 
 .chip {
@@ -67,12 +54,6 @@
   border-bottom-left-radius: 6px;
 }
 
-/* Started sessions drop the worktree segment: the lone chip rounds all
- * corners and reads as a plain button, not a broken-off half control. */
-.chip:only-child {
-  border-radius: 6px;
-}
-
 .branch {
   max-width: 16em;
   overflow: hidden;
@@ -80,60 +61,6 @@
   white-space: nowrap;
 }
 
-.check,
-.checkOn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 100%;
-  padding: 0 4px 0 8px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.check:hover,
-.checkOn:hover {
-  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
-}
-
-/* The rightmost segment rounds only its right corners. */
-.check:last-child,
-.checkOn:last-child {
-  border-top-right-radius: 6px;
-  border-bottom-right-radius: 6px;
-}
-
-.box {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
-  border-radius: 4px;
-}
-
-/* Selected worktree: only the checkbox itself turns bluish and fills 鈥?the
- * surrounding button stays transparent so the label keeps the same
- * secondary tone. Mirrors the Claude Code toggle treatment. The inner
- * check rides the bluish fill with an inverted foreground token so the
- * glyph stays legible. */
-.checkOn .box {
-  border-color: var(--dsw-alias-label-primary-bluish, #4186f0);
-  background: var(--dsw-alias-label-primary-bluish, #4186f0);
-  color: var(--dsw-alias-label-primary-foreground, #ffffff);
-}
-
-.checkLabel {
-  white-space: nowrap;
-}
 
 /* Confirm flyout: the second-level panel opening right of the branch
  * card (the base Menu's submenu posture: r20, elevation-prominent

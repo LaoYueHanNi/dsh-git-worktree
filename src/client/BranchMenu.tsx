@@ -96,6 +96,7 @@ import {
   IconEditOutline16,
   IconGoalOutline16,
   IconPlusOutline16,
+  IconProjectAddOutline16,
   IconRightUpOutline16,
   IconTrashOutline16,
   Toast,
@@ -136,6 +137,20 @@ export interface BranchConfirmFly {
   cancelLabel: string
   /** True while the action runs: both buttons disable. */
   busy: boolean
+  /** Editable draft (the cutout flow's new-branch name): present, the
+   * flyout renders a naming input under the ask line and focuses IT —
+   * typing IS the point, Enter commits a valid draft. */
+  draft?: string
+  /** Draft change verb (presence marks the input on, with `draft`). */
+  onDraftChange?: (value: string) => void
+  /** Input placeholder (the shared new-branch-name copy). */
+  draftPlaceholder?: string
+  /** True while the draft is NOT an acceptable new branch name — the
+   * confirm button disables in lockstep. */
+  draftInvalid?: boolean
+  /** Why the draft is invalid (rendered under the input; absent while the
+   * draft is acceptable or merely empty). */
+  draftHint?: string
   /** Run the confirmed action. */
   onConfirm: () => void
   /** Dismiss the flyout without acting (stays on the open menu). */
@@ -167,6 +182,23 @@ export interface BranchMenuProps {
    * and a linked-worktree session acts from the main checkout — both gate
    * the trio off (the old toolbar plus is gone; this gate survived it). */
   canCreate: boolean
+  /** Whether the WORKTREE verbs are offered (创建工作树 / 新建分支并创建
+   * 工作树): only while the session is BLANK of the main checkout — a
+   * started session's directory is fixed, so isolating a new worktree from
+   * here is meaningless (the 「工作树」 hop group hides under the same
+   * condition). The old toggle that used to arm a mode bit is gone — the
+   * verbs are explicit menu items now. */
+  canWorktree: boolean
+  /** Stage the worktree CONFIRM (the reuse/new/remote-twin ask) for a
+   * RIGHT-CLICKED branch: the row menu knows the row element (the dialog
+   * anchors at the menu's point), the owner knows the rows (a remote row
+   * carries the twin wording). Deliberately NOT routed through `onSelect` —
+   * that path is the plain in-place 签出. */
+  onWorktree: (branch: string) => void
+  /** Stage the cutout dialog for a RIGHT-CLICKED base branch: the editable
+   * new-branch name starts empty and is typed by hand; the base is that
+   * row's branch (any row, current checkout included). */
+  onCutWorktree: (base: string) => void
   /** Run the create NOW. Entry shapes share one flyout: a row context
    * menu's 新建 cuts from THAT branch leaving every checkout untouched
    * (`from` set), 新建并检出 checks it out here in one stroke (`from` +
@@ -440,7 +472,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -477,6 +509,9 @@ export function BranchMenu({
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const flyRef = useRef<HTMLDivElement>(null)
   const flyConfirmRef = useRef<HTMLButtonElement | null>(null)
+  /** The cutout draft input inside the confirm flyout (present only when
+   * the owner staged a draft — see BranchConfirmFly). */
+  const flyInputRef = useRef<HTMLInputElement | null>(null)
   /** The row whose pick is awaiting confirmation (anchoring element). */
   const pendingRef = useRef<{ name: string; el: HTMLElement } | null>(null)
   /** Pending row's name — the placement-effect trigger: picking another
@@ -956,7 +991,8 @@ export function BranchMenu({
     })
   }, [ctx])
 
-  // Confirm opens (or re-anchors to another row) → focus the confirm
+  // Confirm opens (or re-anchors to another row) → focus the DRAFT input
+  // when the owner staged one (typing IS the point), else the confirm
   // button (Enter commits, Escape cancels); confirm closes → forget the
   // pending row anchor. The focus rides a rAF: the flyout mounts in the
   // hidden measure-then-place posture, and focus() on a visibility:hidden
@@ -964,7 +1000,9 @@ export function BranchMenu({
   // the focus lands.
   useEffect(() => {
     if (confirmOpen && pendingName !== null) {
-      const raf = requestAnimationFrame(() => { flyConfirmRef.current?.focus() })
+      const raf = requestAnimationFrame(() => {
+        (flyInputRef.current ?? flyConfirmRef.current)?.focus()
+      })
       return () => { cancelAnimationFrame(raf) }
     }
     if (!confirmOpen) {
@@ -1475,10 +1513,16 @@ export function BranchMenu({
    * checkout untouched), 重命名 the rename flyout, 删除 the owner's
    * confirm flyout (the safe `git branch -d`). A WORKTREE row keeps its
    * two-item launcher (hop + copy path): its job is hopping, and its
-   * branch is by definition checked out elsewhere. Copy is client-only
-   * (WYSIWYG display names; a successful write toasts the shared copied
-   * label). The menu opens NEITHER select NOR pick — it launches, never
-   * re-semantics. */
+   * branch is by definition checked out elsewhere. While the session is
+   * BLANK (canWorktree) the two worktree verbs join the set BELOW 新建并
+   * 检出 (isolation reads as the heavier variant of branching) — 创建工作
+   * 树 (the owner stages the reuse/new/remote-twin ask via `onWorktree`;
+   * routing it through `pick` would land on the plain in-place 签出) and
+   * 新建分支并创建工作树 (the owner's cutout dialog, name typed by hand,
+   * cut from THIS row); a started session drops them — its directory is
+   * fixed. Copy is client-only (WYSIWYG display names; a successful write
+   * toasts the shared copied label). The menu opens NEITHER select NOR
+   * pick — it launches, never re-semantics. */
   const ctxItems: { id: string; label: string; icon: React.ReactNode; run: () => void }[] = []
   if (ctx !== null) {
     const { row, name, x, y } = ctx
@@ -1548,6 +1592,45 @@ export function BranchMenu({
           icon: <IconBranchOutline16 size={14} />,
           run: () => { openCreate(true) },
         })
+      }
+      // Worktree verbs ride only while the session is BLANK (canWorktree):
+      // a started session's directory is fixed, so isolating from here is
+      // meaningless. They sit BELOW 新建并检出 (isolation reads as the
+      // heavier variant of branching). 创建工作树 stages the owner's
+      // reuse/new/remote-twin confirm directly — routing it through `pick`
+      // would land on the plain in-place 签出. The cut verb stages the
+      // owner's cutout dialog with the new branch name typed BY HAND, and
+      // is offered on the CURRENT branch too — the plain add would refuse
+      // there (the branch is checked out right here), the cut is exactly
+      // the isolated-worktree move.
+      if (canWorktree) {
+        if (name !== currentBranch) {
+          ctxItems.push({
+            id: 'worktree',
+            label: t('ctxWorktree'),
+            icon: <IconProjectAddOutline16 size={14} />,
+            run: () => {
+              markPoint()
+              setCtx(null)
+              setSelected(name)
+              stagePending(buttonOf(name), name)
+              onWorktree(name)
+            },
+          })
+        }
+        ctxItems.push({
+          id: 'worktree-cut',
+          label: t('ctxWorktreeCut'),
+          icon: <IconBranchOutline16 size={14} />,
+          run: () => {
+            markPoint()
+            setCtx(null)
+            stagePending(buttonOf(name), name)
+            onCutWorktree(name)
+          },
+        })
+      }
+      if (canCreate) {
         if (row?.kind !== 'remote') {
           ctxItems.push({
             id: 'rename',
@@ -1755,11 +1838,41 @@ export function BranchMenu({
         >
           <p className={css.popAsk}>{confirm.ask}</p>
           {confirm.subject !== undefined && <p className={css.popSubject}>{confirm.subject}</p>}
+          {confirm.onDraftChange !== undefined && (
+            <>
+              <input
+                ref={flyInputRef}
+                className={css.menuCreate}
+                type="text"
+                value={confirm.draft ?? ''}
+                placeholder={confirm.draftPlaceholder}
+                aria-label={confirm.draftPlaceholder}
+                aria-invalid={confirm.draftInvalid === true}
+                spellCheck={false}
+                disabled={confirm.busy}
+                onChange={event => { confirm.onDraftChange?.(event.target.value) }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    if (confirm.draftInvalid !== true && !confirm.busy) confirm.onConfirm()
+                  }
+                }}
+              />
+              {confirm.draftInvalid === true && confirm.draftHint !== undefined && (
+                <p className={css.menuCreateHintBad} role="status">{confirm.draftHint}</p>
+              )}
+            </>
+          )}
           <div className={css.popActions}>
             <button type="button" disabled={confirm.busy} onClick={confirm.onCancel}>
               {confirm.cancelLabel}
             </button>
-            <button ref={flyConfirmRef} type="button" disabled={confirm.busy} onClick={confirm.onConfirm}>
+            <button
+              ref={flyConfirmRef}
+              type="button"
+              disabled={confirm.busy || confirm.draftInvalid === true}
+              onClick={confirm.onConfirm}
+            >
               {confirm.confirmLabel}
             </button>
           </div>

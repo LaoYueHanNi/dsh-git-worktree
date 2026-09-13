@@ -180,10 +180,10 @@ function pathBasename(path: string): string {
 
 /**
  * Dashed folder glyph for virtual (unregistered) directory rows. The icon set
- * ships no dashed variant, so this follows the WorktreeCheck precedent of a
- * module-local SVG: at 16px a dash pattern is a far stronger "directory-shaped
- * but not a registered workspace" mark than the outline/solid stroke contrast
- * it replaces.
+ * ships no dashed variant, so this is a module-local SVG (the same posture
+ * the composer's local glyphs take): at 16px a dash pattern is a far stronger
+ * "directory-shaped but not a registered workspace" mark than the
+ * outline/solid stroke contrast it replaces.
  */
 function StrayFolderGlyph({ size = 16 }: { size?: number }) {
   return (
