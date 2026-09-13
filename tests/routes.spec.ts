@@ -1,12 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, normalize, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
   type RouteDeps,
 } from '../src/routes.ts'
+import { stat } from 'node:fs/promises'
 import { resolveRootDir } from '../src/settings.ts'
 
 /** Platform-correct expectation for a scripted POSIX-shaped path. */
@@ -55,6 +56,7 @@ function deps(over: Partial<RouteDeps> = {}): RouteDeps {
   return {
     exec: scripted(REPO_CALLS),
     sectionRootDir: () => undefined,
+    sectionFetchBeforeCreate: () => undefined,
     home: () => '/home/u',
     envHome: () => undefined,
     dirExists: () => true,
@@ -756,5 +758,207 @@ describe('handleEnsureDirectory', () => {
     const outcome = await handleEnsureDirectory(deps({ mkdirRecursive, statDirectory: async () => true }), { path: join(ROOT, 'repo-feat-x') })
     expect(outcome).toEqual({ status: 200, body: { created: true } })
     expect(mkdirRecursive).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleCreateWorktree fetch-before-create', () => {
+  /** Deps with the sync enabled; the fetch is answered separately from the
+   * repo-facts script and its invocations recorded. */
+  function fetchDeps(fetch: Partial<ExecResult>, recorded: string[]): RouteDeps {
+    const base = scripted(REPO_CALLS)
+    return deps({
+      sectionFetchBeforeCreate: () => true,
+      exec: async (file, args, options) => {
+        if (args.join(' ') === 'fetch --all --prune') {
+          recorded.push(options.cwd)
+          return { code: 0, stdout: '', stderr: '', ...fetch }
+        }
+        return base(file, args, options)
+      },
+    })
+  }
+
+  it('is off by default: no fetch runs (the script would refuse the call)', async () => {
+    const outcome = await handleCreateWorktree(deps(), { repoPath: '/repo', branch: 'feat/x' })
+    expect(outcome).toEqual({ status: 200, body: { path: p('/root/repo/feat-x'), created: false } })
+  })
+
+  it('runs the fetch at the repo root before creating, silently on success', async () => {
+    const recorded: string[] = []
+    const outcome = await handleCreateWorktree(fetchDeps({}, recorded), { repoPath: '/repo', branch: 'feat/x' })
+    // probeRepo resolves the repo root (Windows gains the current drive letter).
+    expect(recorded).toEqual([resolve('/repo')])
+    expect(outcome).toEqual({ status: 200, body: { path: p('/root/repo/feat-x'), created: false } })
+  })
+
+  it('does not block on a failed fetch: the creation lands with a fetchWarning', async () => {
+    const recorded: string[] = []
+    const outcome = await handleCreateWorktree(
+      fetchDeps({ code: 128, stderr: 'fatal: could not read from remote repository' }, recorded),
+      { repoPath: '/repo', branch: 'feat/x' },
+    )
+    expect(recorded).toEqual([resolve('/repo')])
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected a creation body')
+    expect(outcome.body.created).toBe(false)
+    if (!('fetchWarning' in outcome.body) || outcome.body.fetchWarning === undefined) throw new Error('expected a fetchWarning')
+    expect(outcome.body.fetchWarning).toContain('could not read')
+  })
+
+  it('stages the warning on the cutout path too', async () => {
+    const recorded: string[] = []
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const base = scripted({ ...REPO_CALLS, 'for-each-ref refs/heads': { stdout: 'main\n' }, 'worktree add': {} })
+    const outcome = await handleCreateWorktree(
+      deps({
+        sectionFetchBeforeCreate: () => true,
+        sectionRootDir: () => root,
+        exec: async (file, args, options) => {
+          if (args.join(' ') === 'fetch --all --prune') {
+            recorded.push(options.cwd)
+            return { code: 1, stderr: 'ssh: connect to host closed' }
+          }
+          return base(file, args, options)
+        },
+      }),
+      { repoPath: '/repo', branch: 'main', cutout: true, name: 'main-wt' },
+    )
+    expect(recorded).toEqual([resolve('/repo')])
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected a creation body')
+    expect(outcome.body.created).toBe(true)
+    if (!('fetchWarning' in outcome.body) || outcome.body.fetchWarning === undefined) throw new Error('expected a fetchWarning')
+    expect(outcome.body.fetchWarning).toContain('connect to host')
+  })
+})
+
+describe('handleWorktreesAll', () => {
+  /** The default storage root below the fake home (platform separators). */
+  const ROOT = join('/home/u', '.dsh', 'gitworktree')
+
+  /** Executor dispatching per cwd: recognized children answer the three-line
+   * `rev-parse` probe (the shared .git sits inside the child itself, so the
+   * probe's repoName degenerates to the child's own basename — the route
+   * passes it through verbatim), everything else refuses. */
+  function perDir(table: Record<string, { branch?: string } | 'refuse'>): Exec {
+    return async (_file, args, options) => {
+      if (args.join(' ') !== 'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD') {
+        throw new Error(`unexpected git call: git ${args.join(' ')}`)
+      }
+      const entry = table[options.cwd]
+      if (entry === undefined || entry === 'refuse') return { code: 128, stdout: '', stderr: 'fatal: not a git repository' }
+      const top = options.cwd
+      return { code: 0, stdout: `${top}\n${join(top, '.git')}\n${entry.branch ?? 'HEAD'}\n`, stderr: '' }
+    }
+  }
+
+  it('answers an empty list for an empty scan', async () => {
+    const outcome = await handleWorktreesAll(deps({ listDir: async () => [] }))
+    expect(outcome).toEqual({ status: 200, body: { worktrees: [] } })
+  })
+
+  it('answers an empty list for a real-fs empty storage root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const outcome = await handleWorktreesAll(deps({ sectionRootDir: () => root }))
+    expect(outcome).toEqual({ status: 200, body: { worktrees: [] } })
+  })
+
+  it('skips plain files in the storage root (real fs)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    await writeFile(join(root, 'settings.json'), '{"rootDir":""}', 'utf8')
+    await mkdir(join(root, 'orphan-dir'))
+    const outcome = await handleWorktreesAll(deps({ sectionRootDir: () => root }))
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
+    expect(outcome.body.worktrees.map(entry => entry.path)).toEqual([join(root, 'orphan-dir')])
+  })
+
+  it('scans direct children and degrades unrecognized ones to null facts', async () => {
+    const wtA = join(ROOT, 'repo-feat-x')
+    const wtB = join(ROOT, 'repo-main-wt')
+    const junk = join(ROOT, 'leftover')
+    const outcome = await handleWorktreesAll(deps({
+      listDir: async () => ['repo-feat-x', 'leftover', 'repo-main-wt'],
+      exec: perDir({ [wtA]: { branch: 'feat/x' }, [wtB]: { branch: 'main-wt' }, [junk]: 'refuse' }),
+    }))
+    expect(outcome).toEqual({
+      status: 200,
+      body: {
+        worktrees: [
+          { path: wtA, repoName: 'repo-feat-x', branch: 'feat/x' },
+          { path: junk, repoName: null, branch: null },
+          { path: wtB, repoName: 'repo-main-wt', branch: 'main-wt' },
+        ],
+      },
+    })
+  })
+
+  it('keeps one throwing child from sinking its batch (degrades to null facts)', async () => {
+    const wtA = join(ROOT, 'repo-feat-x')
+    const base = perDir({ [wtA]: { branch: 'feat/x' } })
+    const outcome = await handleWorktreesAll(deps({
+      listDir: async () => ['repo-feat-x'],
+      exec: async (file, args, options) => {
+        if (options.cwd === wtA && args.join(' ').includes('abbrev-ref')) throw new Error('spawn exploded')
+        return base(file, args, options)
+      },
+    }))
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
+    expect(outcome.body.worktrees).toEqual([{ path: wtA, repoName: null, branch: null }])
+  })
+})
+
+describe('handlePurgeDirectory', () => {
+  const ROOT = join('/home/u', '.dsh', 'gitworktree')
+
+  it('rejects paths outside the storage root and non-directories', async () => {
+    expect((await handlePurgeDirectory(deps(), { path: 'wt' })).status).toBe(400)
+    expect((await handlePurgeDirectory(deps(), { path: p('/elsewhere/leftover') })).status).toBe(400)
+    expect((await handlePurgeDirectory(deps(), { path: join(ROOT, 'a', 'b') })).status).toBe(400)
+    const statDirectory = vi.fn(async () => false)
+    const outcome = await handlePurgeDirectory(deps({ statDirectory }), { path: join(ROOT, 'gone') })
+    expect(outcome.status).toBe(400)
+    expect(statDirectory).toHaveBeenCalledWith(resolve(join(ROOT, 'gone')))
+  })
+
+  it('refuses a directory git still recognizes (remove it as a worktree instead)', async () => {
+    const target = join(ROOT, 'repo-feat-x')
+    const base = scripted({ 'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: `${target}\n${join(target, '.git')}\nfeat/x\n` } })
+    const rmRecursive = vi.fn(async () => {})
+    const outcome = await handlePurgeDirectory(
+      deps({ exec: base, statDirectory: async () => true, rmRecursive }),
+      { path: target },
+    )
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected an error body')
+    expect(outcome.body.error).toContain('remove it as a worktree')
+    expect(rmRecursive).not.toHaveBeenCalled()
+  })
+
+  it('deletes a non-git leftover directory (real fs)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
+    cleanup.push(root)
+    const target = join(root, 'leftover')
+    await mkdir(join(target, 'node_modules', 'pkg'), { recursive: true })
+    await writeFile(join(target, 'node_modules', 'pkg', 'index.js'), 'x', 'utf8')
+    const probe = scripted({ 'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { code: 128, stderr: 'fatal: not a git repository' } })
+    const outcome = await handlePurgeDirectory(deps({ sectionRootDir: () => root, exec: probe }), { path: target })
+    expect(outcome).toEqual({ status: 200, body: { path: resolve(target), removed: true } })
+    await expect(stat(target)).rejects.toThrow()
+  })
+
+  it('surfaces an rm failure as a 500 envelope', async () => {
+    const rmRecursive = vi.fn(async () => { throw new Error('EBUSY: locked') })
+    const outcome = await handlePurgeDirectory(
+      deps({ statDirectory: async () => true, rmRecursive, exec: scripted({ 'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { code: 128, stderr: 'fatal: not a git repository' } }) }),
+      { path: join(ROOT, 'leftover') },
+    )
+    expect(outcome.status).toBe(500)
+    if (!('error' in outcome.body)) throw new Error('expected an error body')
+    expect(outcome.body.error).toContain('EBUSY')
   })
 })

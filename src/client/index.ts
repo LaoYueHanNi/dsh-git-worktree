@@ -58,9 +58,11 @@ import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import { GroupedSidebar, type GroupedSidebarInjected } from './GroupedSidebar.tsx'
-import { requestEnsureDirectory, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestRemoveWorktree } from './api.ts'
+import type { WorktreeManagerFace } from './WorktreeManagerModal.tsx'
+import { requestEnsureDirectory, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
 import { loadGroupSidebarBoot, saveGroupSidebarBoot } from './sidebar-groups.ts'
+import { pathKey, planPrune, runAutoPrune } from './worktree-prune.ts'
 import type { BranchChipInjected } from './slots.ts'
 
 export type { BranchChipInjected } from './slots.ts'
@@ -113,6 +115,82 @@ export function apply(ctx: ClientContext): void {
     adoptWorktree: async (path) => {
       const workspace = await ctx.workspaces.create({ path })
       ctx.uiWorkspace.startSession(workspace.workspaceId)
+    },
+    // The lazy auto-prune, fired by the chip after a creation fully lands.
+    // Everything here is a browser-side fact: the switches ride the settings
+    // scope, the cap counts valid scan entries only (orphans never count and
+    // never go), and activity is the freshest qualifying session's
+    // updatedAt — running-session directories, the fresh creation, and the
+    // current session's directory are excluded from selection outright.
+    pruneWorktrees: async (createdPath) => {
+      const section = groupingScope.getSnapshot()
+      if (section.status !== 'ready') return undefined
+      if ((section.value?.autoPruneWorktrees ?? false) !== true) return undefined
+      const keep = section.value?.keepWorktrees ?? 30
+      const scan = await requestWorktreesAll()
+      if (!scan.ok) return undefined
+      const workspaces = ctx.workspaces.list.getSnapshot()
+      const sessions = ctx.sessions.list.getSnapshot()
+      const archived = new Set(workspaces.archivedSessionIds)
+      const activity: Record<string, number> = {}
+      const workspaceIdByPath = new Map<string, string>()
+      const archiveIdsByPath = new Map<string, string[]>()
+      const exclude = new Set<string>([pathKey(createdPath)])
+      for (const workspace of workspaces.items) {
+        const key = pathKey(workspace.path)
+        workspaceIdByPath.set(key, workspace.workspaceId)
+        let latest = 0
+        const archiveIds: string[] = []
+        for (const sessionId of workspace.sessionIds) {
+          const summary = sessions.byId[sessionId]
+          if (summary === undefined) continue
+          if (summary.running === true) exclude.add(key)
+          // Blank rows hold nothing worth archiving and subagent rows are
+          // never the user's to manage — same qualification as the removal
+          // flow's archive set.
+          if (summary.blank || summary.origin === 'subagent') continue
+          if (!archived.has(sessionId)) archiveIds.push(sessionId)
+          if (summary.updatedAt > latest) latest = summary.updatedAt
+        }
+        activity[key] = latest
+        archiveIdsByPath.set(key, archiveIds)
+      }
+      const currentId = sessions.current
+      const currentCwd = currentId === undefined ? undefined : sessions.byId[currentId]?.cwd
+      if (currentCwd !== undefined) exclude.add(pathKey(currentCwd))
+      const plan = planPrune({
+        paths: scan.worktrees.filter(entry => entry.repoName !== null).map(entry => entry.path),
+        activity,
+        keep,
+        exclude,
+      })
+      const targets = plan.map((path) => {
+        const key = pathKey(path)
+        const workspaceId = workspaceIdByPath.get(key)
+        return {
+          path,
+          force: false,
+          ...(workspaceId === undefined ? {} : { workspaceId }),
+          archiveSessionIds: archiveIdsByPath.get(key) ?? [],
+        }
+      })
+      return runAutoPrune({
+        inspectWorktree: async (path) => {
+          const result = await requestInspectWorktree(path)
+          if (!result.ok) throw new Error(result.error)
+          return { dirty: result.dirty }
+        },
+        removeWorktree: async (path, force) => {
+          const result = await requestRemoveWorktree(path, force)
+          if (!result.ok) throw new Error(result.error)
+        },
+        probeDirectories: async (paths) => {
+          const result = await requestPathExists(paths)
+          return result.ok ? { exists: result.exists } : undefined
+        },
+        archiveSession: (sessionId) => ctx.workspaces.archiveSession(sessionId as SessionId),
+        deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
+      }, targets)
     },
   })
 
@@ -324,6 +402,52 @@ export function apply(ctx: ClientContext): void {
   // storage-root card pairs with it without any upstream change. One bind
   // backs both the card form (checkbox reads the snapshot) and the sidebar
   // seat (subscribe drives register/dispose).
+  // The worktree manager dialog's face: scan/inspect ride the plugin routes,
+  // workspace/session shapes ride the live service snapshots — the component
+  // itself stays ctx-free (same discipline as the sidebar's injected face).
+  const managerFace = (): WorktreeManagerFace => ({
+    listWorktrees: async () => {
+      const result = await requestWorktreesAll()
+      if (!result.ok) throw new Error(result.error)
+      return result.worktrees
+    },
+    inspectWorktree: async (path) => {
+      const result = await requestInspectWorktree(path)
+      if (!result.ok) throw new Error(result.error)
+      return { dirty: result.dirty, ahead: result.ahead }
+    },
+    workspaces: () => ctx.workspaces.list.getSnapshot().items.map(workspace => ({
+      workspaceId: workspace.workspaceId as string,
+      path: workspace.path,
+      sessionIds: workspace.sessionIds as readonly string[],
+    })),
+    sessionById: (sessionId) => {
+      const summary = ctx.sessions.list.getSnapshot().byId[sessionId as SessionId]
+      if (summary === undefined) return undefined
+      return {
+        running: summary.running,
+        blank: summary.blank,
+        ...(summary.origin === 'subagent' ? { origin: 'subagent' as const } : {}),
+        updatedAt: summary.updatedAt,
+      }
+    },
+    archivedSessionIds: () => ctx.workspaces.list.getSnapshot().archivedSessionIds,
+    removeWorktree: async (path, force) => {
+      const result = await requestRemoveWorktree(path, force)
+      if (!result.ok) throw new Error(result.error)
+    },
+    probeDirectories: async (paths) => {
+      const result = await requestPathExists(paths)
+      return result.ok ? { exists: result.exists } : undefined
+    },
+    purgeDirectory: async (path) => {
+      const result = await requestPurgeDirectory(path)
+      if (!result.ok) throw new Error(result.error)
+    },
+    archiveSession: (sessionId) => ctx.workspaces.archiveSession(sessionId as SessionId),
+    deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
+  })
+
   const form = new CardForm(groupingScope, waitForGroupingSeat)
   const store = form.bind()
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
@@ -337,6 +461,7 @@ export function apply(ctx: ClientContext): void {
       // The shell's own directory picker (the workspace flows' chooser):
       // resolves the chosen absolute path, or null when the user dismisses.
       pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
+      manager: managerFace(),
     }),
   }, GitWorktreeCard))
 

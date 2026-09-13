@@ -50,6 +50,14 @@ export const ROUTE_EXISTS = `${ROUTE_PREFIX}/exists`
 /** POST ROUTE_PREFIX/ensure-directory — mkdir -p a missing worktree storage slot. */
 export const ROUTE_ENSURE_DIRECTORY = `${ROUTE_PREFIX}/ensure-directory`
 
+/** POST ROUTE_PREFIX/worktrees-all — scan the storage root: git facts for
+ * every direct child directory (the plugin-planned worktree slots). */
+export const ROUTE_WORKTREES_ALL = `${ROUTE_PREFIX}/worktrees-all`
+
+/** POST ROUTE_PREFIX/purge — delete a NON-git directory sitting DIRECTLY in
+ * the storage root (an orphaned leftover whose .git is already gone). */
+export const ROUTE_PURGE = `${ROUTE_PREFIX}/purge`
+
 /** One selectable branch row. */
 export interface BranchEntry {
   /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -113,6 +121,11 @@ export interface CreateWorktreeResult {
   path: string
   /** False when an existing worktree for the branch was reused. */
   created: boolean
+  /** Present only when the pre-create remote sync (`fetchBeforeCreate`) was
+   * enabled AND failed: the creation went ahead anyway (a local worktree
+   * never consumes the fetch), this carries git's stderr summary for the
+   * client to toast. */
+  fetchWarning?: string
 }
 
 /** POST switch request body. */
@@ -310,4 +323,37 @@ export interface EnsureDirectoryResult {
   /** Always true on 200 — the directory now exists (created, or already
    * present as a directory). */
   created: boolean
+}
+
+/** One direct child directory of the worktree storage root. */
+export interface WorktreeScanEntry {
+  /** Absolute directory path. */
+  path: string
+  /** Main repository directory basename; null = the directory is not inside
+   * a git repository (an orphan or foreign folder — shown as unrecognized,
+   * never deleted, never counted against the prune cap). */
+  repoName: string | null
+  /** Branch checked out by the directory; null = unrecognized, detached, or
+   * unborn HEAD. */
+  branch: string | null
+}
+
+/** POST worktrees-all response body — one entry per DIRECT child of the
+ * resolved storage root; the root's absence answers an empty list. */
+export interface WorktreesAllResult {
+  worktrees: WorktreeScanEntry[]
+}
+
+/** POST purge request body. */
+export interface PurgeDirectoryBody {
+  /** The leftover directory to delete (absolute; must sit directly inside
+   * the worktree storage root AND have no git identity). */
+  path: string
+}
+
+/** POST purge response body. */
+export interface PurgeDirectoryResult {
+  /** Always true on 200 — the directory (contents included) is gone. */
+  path: string
+  removed: boolean
 }

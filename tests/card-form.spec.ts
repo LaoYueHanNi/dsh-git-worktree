@@ -250,3 +250,97 @@ describe('CardForm save', () => {
     expect(form.bind().getSnapshot().failed).toBe(false)
   })
 })
+
+describe('CardForm write-through switches', () => {
+  it('defaults the fetch and prune switches off and persists flips immediately', async () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    const store = form.bind()
+    expect(store.getSnapshot()).toMatchObject({ fetchBeforeCreate: false, autoPruneWorktrees: false })
+    await form.actions().setFetchBeforeCreate(true)
+    await form.actions().setAutoPruneWorktrees(true)
+    expect(scope.writes).toEqual([
+      { op: 'set', field: 'fetchBeforeCreate', value: true },
+      { op: 'set', field: 'autoPruneWorktrees', value: true },
+    ])
+    expect(store.getSnapshot()).toMatchObject({ fetchBeforeCreate: true, autoPruneWorktrees: true, dirty: false })
+  })
+
+  it('keeps the keep-cap default at 30 and reports it usable', () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    expect(form.bind().getSnapshot()).toMatchObject({ keepWorktreesText: '30', keepWorktreesValid: true, dirty: false })
+  })
+})
+
+describe('CardForm keep-cap staging', () => {
+  it('stages a numeric edit as dirty without writing', () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    form.actions().editKeepWorktrees('12')
+    expect(form.bind().getSnapshot()).toMatchObject({ keepWorktreesText: '12', keepWorktreesValid: true, dirty: true })
+    expect(scope.writes).toEqual([])
+  })
+
+  it('marks a non-integer draft unusable', () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    form.actions().editKeepWorktrees('2.5')
+    expect(form.bind().getSnapshot()).toMatchObject({ keepWorktreesText: '2.5', keepWorktreesValid: false, dirty: true })
+    form.actions().editKeepWorktrees('0')
+    expect(form.bind().getSnapshot().keepWorktreesValid).toBe(false)
+    form.actions().editKeepWorktrees('abc')
+    expect(form.bind().getSnapshot().keepWorktreesValid).toBe(false)
+  })
+
+  it('refuses to save while the keep draft is unusable', async () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    form.actions().editKeepWorktrees('0')
+    await form.actions().save()
+    expect(scope.writes).toEqual([])
+    expect(form.bind().getSnapshot().keepWorktreesText).toBe('0')
+  })
+
+  it('stores a staged keep edit, verifies the landing, and clears the draft', async () => {
+    const scope = new FakeScope({ autoPruneWorktrees: true })
+    const form = new CardForm(scope)
+    form.actions().editKeepWorktrees(' 12 ')
+    const store = form.bind()
+    await form.actions().save()
+    expect(scope.writes).toEqual([{ op: 'set', field: 'keepWorktrees', value: 12 }])
+    expect(store.getSnapshot()).toMatchObject({ keepWorktreesText: '12', dirty: false, failed: false })
+  })
+
+  it('saves a root edit and a keep edit in one stroke', async () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    form.actions().editRoot('D:\wt')
+    form.actions().editKeepWorktrees('5')
+    await form.actions().save()
+    expect(scope.writes).toEqual([
+      { op: 'set', field: 'rootDir', value: 'D:\wt' },
+      { op: 'set', field: 'keepWorktrees', value: 5 },
+    ])
+    expect(form.bind().getSnapshot()).toMatchObject({ dirty: false, failed: false })
+  })
+
+  it('discard drops the keep draft too', () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    form.actions().editRoot('D:\wt')
+    form.actions().editKeepWorktrees('5')
+    form.actions().discard()
+    expect(form.bind().getSnapshot()).toMatchObject({ rootDir: '', keepWorktreesText: '30', dirty: false })
+  })
+
+  it('flags a refused keep write and keeps the draft staged', async () => {
+    const scope = new FakeScope({})
+    scope.applyWrites = false
+    const form = new CardForm(scope)
+    form.actions().editKeepWorktrees('12')
+    const store = form.bind()
+    await form.actions().save()
+    expect(store.getSnapshot()).toMatchObject({ keepWorktreesText: '12', dirty: true, failed: true })
+  })
+})

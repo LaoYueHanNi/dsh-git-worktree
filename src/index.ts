@@ -27,13 +27,13 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
   type RouteDeps, type RouteOutcome,
 } from './routes.js'
 import {
   loadLegacySettings, migratedFileOf, planLegacyMigration, settingsFileOf, validateRootDir,
 } from './settings.js'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -47,6 +47,14 @@ export interface Config {
   rootDir?: string
   /** Sidebar git grouping on/off; absent = on (the composition-entry layer's default). */
   groupSidebar?: boolean
+  /** Fetch every remote before creating a worktree; absent = off. A failed
+   * fetch never blocks the creation (see the /worktree route). */
+  fetchBeforeCreate?: boolean
+  /** Prune stale worktrees lazily after each creation; absent = off. */
+  autoPruneWorktrees?: boolean
+  /** Global cap the lazy prune trims down to (valid git worktrees only);
+   * absent = 30. */
+  keepWorktrees?: number
 }
 
 /**
@@ -61,11 +69,15 @@ export interface Config {
 export const Config: z<Config> = z.object({
   rootDir: z.string(),
   groupSidebar: z.boolean().default(true),
+  fetchBeforeCreate: z.boolean().default(false),
+  autoPruneWorktrees: z.boolean().default(false),
+  keepWorktrees: z.number(),
 })
 
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: Config): void {
-  const unknown = Object.keys(config).find(key => key !== 'rootDir' && key !== 'groupSidebar')
+  const unknown = Object.keys(config).find(key =>
+    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees')
   if (unknown !== undefined) {
     throw new Error(`GitWorktreeConfig: unknown key "${unknown}"`)
   }
@@ -75,33 +87,71 @@ export function validateConfig(config: Config): void {
   if (config.groupSidebar !== undefined && typeof config.groupSidebar !== 'boolean') {
     throw new Error('GitWorktreeConfig: "groupSidebar" must be a boolean')
   }
+  if (config.fetchBeforeCreate !== undefined && typeof config.fetchBeforeCreate !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "fetchBeforeCreate" must be a boolean')
+  }
+  if (config.autoPruneWorktrees !== undefined && typeof config.autoPruneWorktrees !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "autoPruneWorktrees" must be a boolean')
+  }
+  validateKeepWorktrees(config.keepWorktrees)
   validateRootDir(config.rootDir)
+}
+
+/**
+ * The prune cap must be an integer >= 1: 0 would read as "create then
+ * immediately self-delete" (the fresh worktree is excluded, but every other
+ * one dies on the next creation), a fraction cannot count directories.
+ * Absent = the shipped default, which passes.
+ */
+export function validateKeepWorktrees(value: number | undefined): void {
+  if (value === undefined) return
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error('GitWorktreeConfig: "keepWorktrees" must be an integer >= 1')
+  }
 }
 
 /** The settings namespace this plugin serves; its browser card spells the same string. */
 export const GIT_WORKTREE_NS = 'git-worktree'
 
-/** The settings-facing subset of the config: the worktree storage root and the sidebar grouping switch. */
+/** The settings-facing subset of the config: the worktree storage root, the
+ * sidebar grouping switch, and the create/prune behavior switches. */
 export interface SectionConfig {
   /** Worktree storage root; absent/blank selects `$DSH_HOME/gitworktree`. */
   rootDir?: string
   /** Whether the sidebar groups same-repository workspaces; absent = on. */
   groupSidebar?: boolean
+  /** Fetch every remote before creating a worktree; absent = off. */
+  fetchBeforeCreate?: boolean
+  /** Prune stale worktrees lazily after each creation; absent = off. */
+  autoPruneWorktrees?: boolean
+  /** Global cap the lazy prune trims down to; absent = 30. */
+  keepWorktrees?: number
 }
 
 /** Schema resolving the `git-worktree` settings section. */
 export const sectionSchema: z<SectionConfig> = z.object({
   rootDir: z.string(),
   groupSidebar: z.boolean(),
+  fetchBeforeCreate: z.boolean(),
+  autoPruneWorktrees: z.boolean(),
+  keepWorktrees: z.number(),
 })
 
-/** The section-shaped view of a config: absent keys stay absent (`exactOptionalPropertyTypes`). */
+/** The shipped prune cap (whole storage root, valid git worktrees only). */
+export const KEEP_WORKTREES_DEFAULT = 30
+
+/** The section-shaped view of a config: absent keys stay absent
+ * (`exactOptionalPropertyTypes`) except the switches, which spell their
+ * shipped defaults so a user-layer unset can always fall back to them. */
 export function sectionOf(config: Config): SectionConfig {
   return {
     ...(config.rootDir === undefined ? {} : { rootDir: config.rootDir }),
-    // The composition layer spells the shipped default (grouping ON) so a
-    // user-layer unset can always fall back to it.
+    // The composition layer spells the shipped defaults so a user-layer
+    // unset can always fall back to them.
     groupSidebar: config.groupSidebar ?? true,
+    fetchBeforeCreate: config.fetchBeforeCreate ?? false,
+    autoPruneWorktrees: config.autoPruneWorktrees ?? false,
+    keepWorktrees: config.keepWorktrees ?? KEEP_WORKTREES_DEFAULT,
   }
 }
 
@@ -122,6 +172,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const deps = (): RouteDeps => ({
     exec: childProcessExec,
     sectionRootDir: () => sectionSource().rootDir,
+    sectionFetchBeforeCreate: () => sectionSource().fetchBeforeCreate,
     home: () => homedir(),
     envHome: () => process.env.DSH_HOME,
   })
@@ -138,6 +189,13 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (value.groupSidebar !== undefined && typeof value.groupSidebar !== 'boolean') {
           throw new Error('groupSidebar must be a boolean')
         }
+        if (value.fetchBeforeCreate !== undefined && typeof value.fetchBeforeCreate !== 'boolean') {
+          throw new Error('fetchBeforeCreate must be a boolean')
+        }
+        if (value.autoPruneWorktrees !== undefined && typeof value.autoPruneWorktrees !== 'boolean') {
+          throw new Error('autoPruneWorktrees must be a boolean')
+        }
+        validateKeepWorktrees(value.keepWorktrees)
       },
       setSource: (source) => { sectionSource = source },
       onChange: () => {
@@ -238,5 +296,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     postRoute(ROUTE_REMOVE, 'remove', handleRemoveWorktree)
     postRoute(ROUTE_EXISTS, 'exists', handlePathExists)
     postRoute(ROUTE_ENSURE_DIRECTORY, 'ensure-directory', handleEnsureDirectory)
+    postRoute(ROUTE_WORKTREES_ALL, 'worktrees-all', handleWorktreesAll)
+    postRoute(ROUTE_PURGE, 'purge', handlePurgeDirectory)
   })
 }

@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
+  CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult, WorktreesAllResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -25,7 +25,14 @@ async function send<T>(method: string, url: string, body: unknown): Promise<Call
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })
-    const payload: unknown = await response.json()
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      // An empty or non-JSON body (e.g. a 404 from a host that has not
+      // loaded this build yet): the status code is the whole message.
+      return { ok: false, error: `HTTP ${String(response.status)}` }
+    }
     if (!response.ok) {
       const error = payload as RouteError
       return { ok: false, error: error.error ?? `HTTP ${String(response.status)}` }
@@ -181,4 +188,24 @@ export function requestPathExists(paths: readonly string[]): Promise<Call<PathEx
  */
 export function requestEnsureDirectory(path: string): Promise<Call<EnsureDirectoryResult>> {
   return post<EnsureDirectoryResult>(ROUTE_ENSURE_DIRECTORY, { path })
+}
+
+/**
+ * Scan the worktree storage root: git facts for every direct child directory
+ * (the slots this plugin plans). Orphan/foreign folders answer null facts —
+ * the manager dialog shows them as unrecognized.
+ */
+export function requestWorktreesAll(): Promise<Call<WorktreesAllResult>> {
+  return post<WorktreesAllResult>(ROUTE_WORKTREES_ALL, {})
+}
+
+/**
+ * Delete a NON-git directory sitting directly inside the storage root (an
+ * orphaned leftover whose .git is already gone). The host triple-gates this:
+ * slot boundary, real directory, no git identity — anything git still
+ * recognizes must go through requestRemoveWorktree instead.
+ * @param path - the leftover directory (absolute).
+ */
+export function requestPurgeDirectory(path: string): Promise<Call<PurgeDirectoryResult>> {
+  return post<PurgeDirectoryResult>(ROUTE_PURGE, { path })
 }

@@ -4,12 +4,12 @@
  */
 
 import { dirname, join, resolve } from 'node:path'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult, WorktreesAllResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -17,6 +17,8 @@ export interface RouteDeps {
   exec: Exec
   /** The settings-resolved rootDir (absent/blank = the default location). */
   sectionRootDir: () => string | undefined
+  /** Whether a worktree creation syncs the remotes first (absent = off). */
+  sectionFetchBeforeCreate: () => boolean | undefined
   /** User home directory seam. */
   home: () => string
   /** `$DSH_HOME` environment value seam. */
@@ -28,6 +30,24 @@ export interface RouteDeps {
   statDirectory?: (path: string) => Promise<boolean>
   /** Recursive mkdir seam (fs.mkdir recursive); tests substitute. */
   mkdirRecursive?: (path: string) => Promise<void>
+  /** One-level directory listing seam (fs.readdir with dirents); tests
+   * substitute. */
+  listDir?: (path: string) => Promise<string[]>
+  /** Recursive force rm seam (fs.rm with retries); tests substitute. */
+  rmRecursive?: (path: string) => Promise<void>
+}
+
+/** Real fs-backed one-level directory listing (names only). Plain FILES are
+ * filtered out — the storage root can carry strays (a legacy settings.json
+ * was seen in the wild), and the scan lists worktree SLOTS, not entries. */
+export async function fsListDir(path: string): Promise<string[]> {
+  try {
+    const dirents = await readdir(path, { withFileTypes: true })
+    return dirents.filter(entry => entry.isDirectory()).map(entry => entry.name)
+  } catch {
+    // A missing storage root is the "no worktrees yet" answer, not an error.
+    return []
+  }
 }
 
 /** Real fs-backed directory probe: exists and is a directory. */
@@ -47,7 +67,7 @@ export async function fsMkdirRecursive(path: string): Promise<void> {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | RouteError
+  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -101,6 +121,88 @@ export async function handleGroupWorktrees(deps: RouteDeps, body: unknown): Prom
     for (const [path, value] of probed) facts[path] = value
   }
   return { status: 200, body: { facts } }
+}
+
+/**
+ * POST /worktrees-all — git facts for every DIRECT child directory of the
+ * resolved worktree storage root (the slots this plugin plans as
+ * `<repoName>-<branch>`). The management dialog's data source: one scan
+ * answers for all repositories at once, orphan directories included (a
+ * child that probes as no git repository comes back with null facts rather
+ * than being dropped — the dialog shows it as unrecognized). A missing
+ * storage root answers an empty list; per-child probe failures degrade to
+ * null facts, never a 500 — the dialog must render, not error out.
+ * @param deps - host dependencies.
+ */
+export async function handleWorktreesAll(deps: RouteDeps): Promise<RouteOutcome> {
+  const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+  const listDir = deps.listDir ?? fsListDir
+  const children = await listDir(rootDir)
+  const facts: WorktreesAllResult['worktrees'] = []
+  for (let start = 0; start < children.length; start += GROUP_BATCH_SIZE) {
+    const batch = children.slice(start, start + GROUP_BATCH_SIZE)
+    const probed = await Promise.all(batch.map(async (child) => {
+      const path = join(rootDir, child)
+      try {
+        const gitFacts = await probeWorkspaceGit(deps.exec, path)
+        return gitFacts === undefined
+          ? { path, repoName: null, branch: null }
+          : { path, repoName: gitFacts.repoName, branch: gitFacts.branch }
+      } catch {
+        return { path, repoName: null, branch: null }
+      }
+    }))
+    facts.push(...probed)
+  }
+  return { status: 200, body: { worktrees: facts } }
+}
+
+/** Real fs-backed recursive force rm (Windows file-lock retries included). */
+export async function fsRmRecursive(path: string): Promise<void> {
+  await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+}
+
+/**
+ * POST /purge — delete a NON-git directory sitting DIRECTLY inside the
+ * resolved worktree storage root: the orphaned leftover a half-failed
+ * `worktree remove` can leave behind (git registration and the .git file
+ * already gone, contents stranded on disk). Triple-gated: one level below
+ * the root (resolved forms, same slot boundary as /ensure-directory), a
+ * real directory, and NOT a git repository — anything git still recognizes
+ * must go through /remove, where the removal carries the session-archive
+ * and unregistration half. Deletion is a plain recursive force rm.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ path }`.
+ */
+export async function handlePurgeDirectory(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<PurgeDirectoryBody>(body, ['path'])
+  if (isOutcome(parsed)) return parsed
+  const { path } = parsed
+  if (!isAbsoluteDir(path)) return fail(400, '"path" must be an absolute directory')
+  const configured = deps.sectionRootDir()?.trim()
+  if (configured !== undefined && configured !== '' && !isAbsoluteConfigPath(configured)) {
+    return fail(400, `configured rootDir "${String(deps.sectionRootDir())}" is not an absolute path`)
+  }
+  const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+  const canonical = resolve(path)
+  if (dirname(canonical) !== resolve(rootDir)) {
+    return fail(400, `"${canonical}" is outside the worktree storage root "${resolve(rootDir)}"`)
+  }
+  const statDirectory = deps.statDirectory ?? fsStatDirectory
+  if (!(await statDirectory(canonical))) {
+    return fail(400, `"${canonical}" is not a directory`)
+  }
+  const gitFacts = await probeWorkspaceGit(deps.exec, canonical)
+  if (gitFacts !== undefined) {
+    return fail(400, `"${canonical}" is a git repository; remove it as a worktree instead`)
+  }
+  const rmRecursive = deps.rmRecursive ?? fsRmRecursive
+  try {
+    await rmRecursive(canonical)
+    return { status: 200, body: { path: canonical, removed: true } }
+  } catch (error) {
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
 }
 
 /** GitError to outcome: usage-shaped failures are 400, the rest 500. */
@@ -226,6 +328,19 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+    // Optional pre-create remote sync. Deliberately NOT a gate: a local
+    // worktree never consumes the fetch (only a remote-only branch's twin
+    // does, and that path fails on its own through the envelope), so a
+    // network hiccup must not block the creation — the failure rides the
+    // successful response as `fetchWarning` for the client to toast.
+    let fetchWarning: string | undefined
+    if (deps.sectionFetchBeforeCreate() === true) {
+      try {
+        await fetchAll(deps.exec, facts.repoRoot)
+      } catch (error) {
+        fetchWarning = error instanceof GitError ? error.stderr.trim() : error instanceof Error ? error.message : String(error)
+      }
+    }
     if (cutout === true) {
       // An explicit name skips the `-wt` suffix walk and is used verbatim —
       // both for the branch and the storage folder. A leading dash would
@@ -237,7 +352,7 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
         const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(custom)}`)
         await mkdir(rootDir, { recursive: true })
         await addWorktreeCutout(deps.exec, facts.repoRoot, branch, custom, target)
-        return { status: 200, body: { path: target, created: true } }
+        return { status: 200, body: { path: target, created: true, ...fetchWarning === undefined ? {} : { fetchWarning } } }
       }
       // The new branch name must be known before the folder name can be
       // computed: the folder carries `<repoName>-<NEW branch>`. The name
@@ -252,7 +367,7 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
       const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(newBranch)}`)
       await mkdir(rootDir, { recursive: true })
       await addWorktreeCutout(deps.exec, facts.repoRoot, branch, newBranch, target)
-      return { status: 200, body: { path: target, created: true } }
+      return { status: 200, body: { path: target, created: true, ...fetchWarning === undefined ? {} : { fetchWarning } } }
     }
     // The folder name carries the belonging itself: `<repoName>-<branch>` —
     // the sidebar group title (the folder basename) then reads as the parent
@@ -260,7 +375,7 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
     const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(branch)}`)
     await mkdir(rootDir, { recursive: true })
     const result = await addWorktree(deps.exec, facts.repoRoot, branch, target, deps.dirExists)
-    return { status: 200, body: result }
+    return { status: 200, body: { ...result, ...fetchWarning === undefined ? {} : { fetchWarning } } }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)
     return fail(500, error instanceof Error ? error.message : String(error))

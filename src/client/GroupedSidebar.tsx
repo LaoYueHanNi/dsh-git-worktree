@@ -34,6 +34,7 @@ import {
 } from './sidebar-search.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem, StrayGroupRow } from './sidebar-rows.tsx'
 import { PickFlowController } from './pick-flow.ts'
+import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import css from './GroupedSidebar.module.css'
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -809,36 +810,34 @@ export function GroupedSidebar(props: GroupedSidebarProps): ReactNode {
     const target = wtRemoveTarget
     setWtRemoving(true)
     setWtRemoveError(null)
-    // Git first: a refused removal (locked files on Windows, a git error)
-    // leaves the workspace world untouched and the dialog retries cleanly.
-    // Only after the folder is really gone does the DSH side follow —
-    // archive the workspace's sessions (they'd otherwise surface under
-    // Ungrouped), then drop the registration itself.
-    void (async () => {
-      try {
-        try {
-          await props.removeWorktree(target.workspace.path, wtInspect.dirty > 0)
-        } catch (reason: unknown) {
-          // Windows: git may have already unregistered and emptied the
-          // folder, then failed the last rmdir. A retry then sees a missing
-          // path (`not a git repository`). If the directory is gone, the git
-          // half is done — continue with archive + drop the DSH registration.
-          const probe = await props.probeDirectories([target.workspace.path]).catch(() => undefined)
-          if (probe?.exists[target.workspace.path] !== false) throw reason
-        }
-        for (const sessionId of wtArchiveIds) {
-          await props.archiveSession(sessionId).catch((reason: unknown) => {
-            console.warn('session archive rejected during worktree removal:', reason)
-          })
-        }
-        await props.deleteWorkspace(target.workspace.workspaceId)
+    // The full removal semantics live in worktree-remove-flow (shared with
+    // the settings-page manager and the lazy auto-prune): git first — a
+    // refused removal leaves the workspace world untouched and the dialog
+    // retries cleanly — then archive the workspace's sessions (they'd
+    // otherwise surface under Ungrouped), then drop the registration.
+    void removeWorktreeFully(
+      {
+        removeWorktree: props.removeWorktree,
+        probeDirectories: props.probeDirectories,
+        archiveSession: props.archiveSession,
+        deleteWorkspace: props.deleteWorkspace,
+      },
+      {
+        path: target.workspace.path,
+        force: wtInspect.dirty > 0,
+        workspaceId: target.workspace.workspaceId,
+        archiveSessionIds: wtArchiveIds,
+      },
+    ).then(
+      () => {
         setWtRemoving(false)
         setWtRemoveTarget(null)
-      } catch (reason: unknown) {
+      },
+      (reason: unknown) => {
         setWtRemoving(false)
         setWtRemoveError(reason instanceof Error ? reason.message : String(reason))
-      }
-    })()
+      },
+    )
   }
 
   // Stray (Ungrouped) section: sessions no workspace account holds, clustered

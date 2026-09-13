@@ -19,6 +19,7 @@ import { useState } from 'react'
 import { IconChevronDownOutline14, IconLoadingOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CardActions, CardStore } from './card-form.ts'
+import { WorktreeManagerModal, type WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import css from './GitWorktreeCard.module.css'
 
 /** Props the renderer binds for the git-worktree settings card. */
@@ -39,6 +40,8 @@ export interface GitWorktreeCardFace extends CardActions {
    * dialog.
    */
   pickDirectory: () => Promise<string | null>
+  /** The worktree manager dialog's face (scan, inspect, shared removal). */
+  manager: WorktreeManagerFace
 }
 
 /**
@@ -49,11 +52,15 @@ export interface GitWorktreeCardFace extends CardActions {
 export function GitWorktreeCard(props: GitWorktreeCardProps) {
   const [open, setOpen] = useState(false)
   const [picking, setPicking] = useState(false)
+  const [managerOpen, setManagerOpen] = useState(false)
   const { t } = props
   const state = props.useGitWorktreeCard(snapshot => snapshot)
   if (!state.available) return null
   const lockInput = !state.writable
-  const lockActions = !state.dirty || state.saving
+  // The keep draft failing validation blocks the save outright: an integer
+  // >= 1 is the only shape the Host accepts, so the button disables in
+  // lockstep with the inline hint.
+  const lockActions = !state.dirty || state.saving || !state.keepWorktreesValid
 
   /**
    * Open the shell's native folder dialog and stage the chosen path — the
@@ -146,6 +153,72 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
                 />
               </span>
             </label>
+            <div className={`${css.field} ${css.manageRow}`}>
+              <span className={css.toggleText}>
+                <span className={css.toggleLabel}>{t('cardManageWorktrees')}</span>
+                <span className={css.toggleHint}>{t('cardManageHint')}</span>
+              </span>
+              <button
+                type="button"
+                className={css.manage}
+                onClick={() => { setManagerOpen(true) }}
+              >
+                {t('cardManageWorktrees')}
+              </button>
+            </div>
+            <label className={`${css.field} ${css.toggleRow}`}>
+              <span className={css.toggleText}>
+                <span className={css.toggleLabel}>{t('cardFetchBeforeCreateLabel')}</span>
+                <span className={css.toggleHint}>{t('cardFetchBeforeCreateHint')}</span>
+              </span>
+              <span className={css.toggleControl}>
+                <input
+                  className={css.toggle}
+                  type="checkbox"
+                  disabled={lockInput}
+                  checked={state.fetchBeforeCreate}
+                  onChange={event => { props.setFetchBeforeCreate(event.target.checked) }}
+                />
+              </span>
+            </label>
+            <label className={`${css.field} ${css.toggleRow}`}>
+              <span className={css.toggleText}>
+                <span className={css.toggleLabel}>{t('cardAutoPruneLabel')}</span>
+                <span className={css.toggleHint}>{t('cardAutoPruneHint')}</span>
+              </span>
+              <span className={css.toggleControl}>
+                <input
+                  className={css.toggle}
+                  type="checkbox"
+                  disabled={lockInput}
+                  checked={state.autoPruneWorktrees}
+                  onChange={event => { props.setAutoPruneWorktrees(event.target.checked) }}
+                />
+              </span>
+            </label>
+            <label className={`${css.field} ${css.keepRow}`} htmlFor="git-worktree-card-keep">
+              <span className={css.fieldLabel}>{t('cardKeepWorktreesLabel')}</span>
+              <span className={css.keepControl}>
+                <input
+                  id="git-worktree-card-keep"
+                  className={css.keepInput}
+                  type="number"
+                  min={1}
+                  step={1}
+                  disabled={lockInput || !state.autoPruneWorktrees}
+                  value={state.keepWorktreesText}
+                  onChange={event => { props.editKeepWorktrees(event.target.value) }}
+                />
+              </span>
+              <span className={css.toggleHint}>{t('cardKeepWorktreesHint')}</span>
+              {!state.keepWorktreesValid && <span className={css.keepBad} role="alert">{t('cardKeepWorktreesBad')}</span>}
+            </label>
+            <WorktreeManagerModal
+              open={managerOpen}
+              onClose={() => { setManagerOpen(false) }}
+              face={props.manager}
+              t={t}
+            />
             <div className={css.footer}>
               {state.failed
                 ? <p className={css.failed} role="status">{t('cardSaveFailed')}</p>

@@ -314,3 +314,76 @@
 .toggle:disabled {
   cursor: progress;
 }
+
+/* Manager entry row: title + hint on the left (the toggle rows' text
+ * column), the launcher button on the right — the same posture as the
+ * grouping switch, minus the checkbox. (.field is columnar; the row
+ * direction is restated here.) */
+.manageRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manage {
+  appearance: none;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.manage:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.manage:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+/* Keep-cap row: the number input rides the toggle row's title column, and
+ * stays disabled while the auto-prune switch is off (the联动 gate). */
+.keepRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.keepControl {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.keepInput {
+  width: 96px;
+  appearance: none;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  font: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  padding: 6px 10px;
+}
+
+.keepInput:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.keepInput:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.keepBad {
+  font-size: 12px;
+  color: var(--dsw-alias-label-danger, #d64545);
+}

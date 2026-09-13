@@ -95,16 +95,43 @@ describe('settings file locations', () => {
 })
 
 describe('config section shapes', () => {
-  it('spells the grouping default ON in the composition layer', () => {
-    expect(sectionOf({})).toEqual({ groupSidebar: true })
-    expect(sectionOf({ groupSidebar: false })).toEqual({ groupSidebar: false })
-    expect(sectionOf({ rootDir: 'D:\\wt' })).toEqual({ rootDir: 'D:\\wt', groupSidebar: true })
+  it('spells the shipped switch defaults in the composition layer', () => {
+    expect(sectionOf({})).toEqual({
+      groupSidebar: true,
+      fetchBeforeCreate: false,
+      autoPruneWorktrees: false,
+      keepWorktrees: 30,
+    })
+    expect(sectionOf({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 5 })).toEqual({
+      groupSidebar: false,
+      fetchBeforeCreate: true,
+      autoPruneWorktrees: true,
+      keepWorktrees: 5,
+    })
+    expect(sectionOf({ rootDir: 'D:\\wt' })).toEqual({
+      rootDir: 'D:\\wt',
+      groupSidebar: true,
+      fetchBeforeCreate: false,
+      autoPruneWorktrees: false,
+      keepWorktrees: 30,
+    })
   })
 
-  it('validates the grouping key and rejects unknown keys', () => {
+  it('validates the switch keys and rejects unknown keys', () => {
     expect(() => validateConfig({})).not.toThrow()
-    expect(() => validateConfig({ groupSidebar: false })).not.toThrow()
+    expect(() => validateConfig({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 1 })).not.toThrow()
     expect(() => validateConfig({ groupSidebar: 'yes' })).toThrow('"groupSidebar" must be a boolean')
+    expect(() => validateConfig({ fetchBeforeCreate: 'yes' })).toThrow('"fetchBeforeCreate" must be a boolean')
+    expect(() => validateConfig({ autoPruneWorktrees: 'yes' })).toThrow('"autoPruneWorktrees" must be a boolean')
     expect(() => validateConfig({ groupSidebar: true, nope: 1 })).toThrow('unknown key "nope"')
+  })
+
+  it('requires the prune cap to be an integer >= 1', () => {
+    expect(() => validateConfig({ keepWorktrees: 1 })).not.toThrow()
+    expect(() => validateConfig({ keepWorktrees: 500 })).not.toThrow()
+    expect(() => validateConfig({ keepWorktrees: 0 })).toThrow('integer >= 1')
+    expect(() => validateConfig({ keepWorktrees: -3 })).toThrow('integer >= 1')
+    expect(() => validateConfig({ keepWorktrees: 2.5 })).toThrow('integer >= 1')
+    expect(() => validateConfig({ keepWorktrees: '30' })).toThrow('integer >= 1')
   })
 })

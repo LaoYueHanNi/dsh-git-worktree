@@ -78,6 +78,38 @@ export type GitWorktreeKey =
   | 'cardGroupSidebarMark'
   | 'cardGroupSidebarNote'
   | 'cardGroupSidebarBusy'
+  | 'cardManageWorktrees'
+  | 'cardManageHint'
+  | 'cardFetchBeforeCreateLabel'
+  | 'cardFetchBeforeCreateHint'
+  | 'cardAutoPruneLabel'
+  | 'cardAutoPruneHint'
+  | 'cardKeepWorktreesLabel'
+  | 'cardKeepWorktreesHint'
+  | 'cardKeepWorktreesBad'
+  | 'manager.title'
+  | 'manager.loading'
+  | 'manager.loadFailed'
+  | 'manager.empty'
+  | 'manager.count'
+  | 'manager.colRepo'
+  | 'manager.colBranch'
+  | 'manager.colActivity'
+  | 'manager.activityNever'
+  | 'manager.dirty.one'
+  | 'manager.dirty.other'
+  | 'manager.unknown'
+  | 'manager.running'
+  | 'manager.purgeMenu'
+  | 'manager.purgeAria'
+  | 'worktreePurge.title'
+  | 'worktreePurge.desc'
+  | 'worktreePurge.busy'
+  | 'manager.removeAria'
+  | 'manager.removeFailed'
+  | 'fetchWarning'
+  | 'pruneDone'
+  | 'pruneFailed'
   | 'group.ungrouped'
   | 'session.new'
   | 'section.workspaces'
@@ -242,6 +274,38 @@ export const en: Record<GitWorktreeKey, string> = {
   cardGroupSidebarMark: '(experimental)',
   cardGroupSidebarNote: 'Turn it off to restore the native list if anything breaks; we will switch to the official API as soon as it ships.',
   cardGroupSidebarBusy: 'Switching sidebar…',
+  cardManageWorktrees: 'Manage worktrees…',
+  cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces. Removal follows the same flow as the sidebar.',
+  cardFetchBeforeCreateLabel: 'Fetch upstream before creating',
+  cardFetchBeforeCreateHint: 'Runs fetch --all --prune before each worktree creation. A failed sync never blocks the creation.',
+  cardAutoPruneLabel: 'Auto-remove stale worktrees',
+  cardAutoPruneHint: 'Checked lazily after each creation: once the global count exceeds the cap, the least recently used worktrees are removed (folders only — branches are kept). Worktrees with uncommitted changes or a running session are never auto-removed.',
+  cardKeepWorktreesLabel: 'Worktrees to keep',
+  cardKeepWorktreesHint: 'Global cap across all repositories, minimum 1.',
+  cardKeepWorktreesBad: 'Enter an integer of at least 1',
+  'manager.title': 'Manage worktrees',
+  'manager.loading': 'Scanning worktrees…',
+  'manager.loadFailed': 'Scan failed: {message}',
+  'manager.empty': 'The worktree storage root is empty.',
+  'manager.count': '{n} worktree(s)',
+  'manager.colRepo': 'Repository',
+  'manager.colBranch': 'Branch',
+  'manager.colActivity': 'Last used',
+  'manager.activityNever': 'no sessions',
+  'manager.dirty.one': '{n} uncommitted file',
+  'manager.dirty.other': '{n} uncommitted files',
+  'manager.unknown': 'Unrecognized (not a git repository)',
+  'manager.running': 'A session is running here; removal is unavailable',
+  'manager.purgeMenu': 'Delete folder',
+  'manager.purgeAria': 'Delete the leftover folder “{path}”',
+  'worktreePurge.title': 'Delete leftover folder',
+  'worktreePurge.desc': 'This directory has no git record anymore (not a valid worktree) — most likely a deletion that was interrupted by a file lock. The folder and everything in it will be deleted directly. This cannot be undone.',
+  'worktreePurge.busy': 'Deleting folder…',
+  'manager.removeAria': 'Remove the worktree “{path}”',
+  'manager.removeFailed': 'Removal failed: {message}',
+  fetchWarning: 'Upstream sync failed; created from the local state: {message}',
+  pruneDone: 'Auto-removed {n} stale worktree(s)',
+  pruneFailed: '{n} worktree(s) could not be auto-removed — check the manager in settings',
   'group.ungrouped': 'Ungrouped',
   'session.new': 'New Session',
   'section.workspaces': 'Workspaces',
@@ -407,6 +471,38 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardGroupSidebarMark: '（测试功能）',
   cardGroupSidebarNote: '使用中若遇问题，关掉即可回到原生；官方接口一旦开放，会第一时间改用原生实现。',
   cardGroupSidebarBusy: '正在切换侧栏…',
+  cardManageWorktrees: '管理工作树…',
+  cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录；删除与侧栏的删除工作树走同一流程。',
+  cardFetchBeforeCreateLabel: '创建工作树前同步上游',
+  cardFetchBeforeCreateHint: '每次创建工作树前先执行 fetch --all --prune 同步远程引用；同步失败不会阻断创建。',
+  cardAutoPruneLabel: '自动删除旧工作树',
+  cardAutoPruneHint: '在每次新建工作树后惰性检查一次：全局工作树数量超过保留数量时，按最近使用时间从最不活跃的开始自动删除（只删目录，不删分支）。有未提交更改或进行中会话的工作树不会被自动删除。',
+  cardKeepWorktreesLabel: '保留工作树数量',
+  cardKeepWorktreesHint: '所有仓库合计的全局上限，最小为 1。',
+  cardKeepWorktreesBad: '请输入不小于 1 的整数',
+  'manager.title': '管理工作树',
+  'manager.loading': '正在扫描工作树…',
+  'manager.loadFailed': '扫描失败：{message}',
+  'manager.empty': '工作树存放目录暂无内容。',
+  'manager.count': '{n} 个工作树',
+  'manager.colRepo': '所属项目',
+  'manager.colBranch': '工作树分支',
+  'manager.colActivity': '最近使用',
+  'manager.activityNever': '无会话',
+  'manager.dirty.one': '{n} 个未提交文件',
+  'manager.dirty.other': '{n} 个未提交文件',
+  'manager.unknown': '无法识别（不是 git 仓库）',
+  'manager.running': '有进行中的会话，暂不能删除',
+  'manager.purgeMenu': '删除文件夹',
+  'manager.purgeAria': '删除残留文件夹“{path}”',
+  'worktreePurge.title': '删除残留文件夹',
+  'worktreePurge.desc': '该目录已没有 git 记录（不是有效的工作树），多半是某次删除被文件占用中断后的残留。将直接删除文件夹及其全部内容，此操作不可恢复。',
+  'worktreePurge.busy': '正在删除文件夹…',
+  'manager.removeAria': '删除工作树“{path}”',
+  'manager.removeFailed': '删除失败：{message}',
+  fetchWarning: '上游同步失败，已按本地状态创建：{message}',
+  pruneDone: '已自动清理 {n} 个旧工作树',
+  pruneFailed: '{n} 个工作树自动清理失败，可在设置中打开管理查看',
   'group.ungrouped': '未分组',
   'session.new': '新会话',
   'section.workspaces': '工作区',

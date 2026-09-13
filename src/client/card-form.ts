@@ -22,8 +22,9 @@
 
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 
-/** The field this card edits. */
+/** The fields this card edits. */
 export const ROOT_FIELD = 'rootDir'
+export const KEEP_FIELD = 'keepWorktrees'
 
 /** The resolved user-facing section this card edits. */
 export interface SectionValue {
@@ -31,6 +32,12 @@ export interface SectionValue {
   rootDir?: string
   /** Whether the sidebar groups same-repository workspaces; absent = on. */
   groupSidebar?: boolean
+  /** Sync the remotes before creating a worktree; absent = off. */
+  fetchBeforeCreate?: boolean
+  /** Prune stale worktrees lazily after each creation; absent = off. */
+  autoPruneWorktrees?: boolean
+  /** Global cap the lazy prune trims down to; absent = 30. */
+  keepWorktrees?: number
 }
 
 /**
@@ -67,6 +74,16 @@ export interface CardState {
   groupSidebar: boolean
   /** True while a grouping-switch write (and the seat swap it triggers) is in flight. */
   groupingPending: boolean
+  /** Resolved fetch-before-create switch (user layer over the default off). */
+  fetchBeforeCreate: boolean
+  /** Resolved auto-prune switch (user layer over the default off). */
+  autoPruneWorktrees: boolean
+  /** The keep-cap field as TEXT: the effective value, or the live draft. */
+  keepWorktreesText: string
+  /** True when the keep field (draft or effective) is a usable integer >= 1.
+   * An invalid DRAFT disables saving; an invalid STORED value (host-side
+   * hand edit) just disables the prune's usefulness, not the card. */
+  keepWorktreesValid: boolean
 }
 
 /** The form actions the card's slot entry injects. */
@@ -81,6 +98,12 @@ export interface CardActions {
   discard: () => void
   /** Persist the sidebar-grouping switch (takes effect immediately). */
   setGroupSidebar: (value: boolean) => void
+  /** Persist the fetch-before-create switch (takes effect immediately). */
+  setFetchBeforeCreate: (value: boolean) => void
+  /** Persist the auto-prune switch (takes effect immediately). */
+  setAutoPruneWorktrees: (value: boolean) => void
+  /** Stage draft text for the keep-cap field (validated on save). */
+  editKeepWorktrees: (text: string) => void
 }
 
 /**
@@ -98,6 +121,7 @@ export class CardForm {
   private snapshotValue: CardState
   private readonly listeners = new Set<() => void>()
   private draft: string | undefined
+  private keepDraft: string | undefined
   private saving = false
   private failed = false
   private groupingPending = false
@@ -129,7 +153,7 @@ export class CardForm {
     }
   }
 
-  /** @returns the edit, clear, save, discard, and grouping-switch actions bound to this form. */
+  /** @returns the edit, clear, save, discard, and switch actions bound to this form. */
   actions(): CardActions {
     return {
       editRoot: (text) => {
@@ -146,13 +170,45 @@ export class CardForm {
       // callers that care — tests — can await settlement.
       save: () => this.save(),
       discard: () => {
-        if (this.draft === undefined && !this.failed) return
+        if (this.draft === undefined && this.keepDraft === undefined && !this.failed) return
         this.draft = undefined
+        this.keepDraft = undefined
         this.failed = false
         this.publish()
       },
       setGroupSidebar: (value) => this.setGroupSidebar(value),
+      setFetchBeforeCreate: (value) => this.setSimpleFlag('fetchBeforeCreate', value),
+      setAutoPruneWorktrees: (value) => this.setSimpleFlag('autoPruneWorktrees', value),
+      editKeepWorktrees: (text) => {
+        this.keepDraft = text
+        this.failed = false
+        this.publish()
+      },
     }
+  }
+
+  /** Strict integer parse for the staged keep cap; anything else is unusable. */
+  private parseKeep(text: string): number | undefined {
+    if (!/^-?\d+$/.test(text.trim())) return undefined
+    return Number(text.trim())
+  }
+
+  /** The keep cap as the user sees it: the live draft, else the stored value
+   * over the shipped default. */
+  private effectiveKeepText(): string {
+    const value = this.scope.getSnapshot().value?.[KEEP_FIELD]
+    return this.keepDraft ?? String(value ?? 30)
+  }
+
+  /**
+   * Flip a write-through switch with no seat swap to wait for (unlike the
+   * grouping switch): optimistic publish, persist, done.
+   */
+  private async setSimpleFlag(field: 'fetchBeforeCreate' | 'autoPruneWorktrees', value: boolean): Promise<void> {
+    const current = this.scope.getSnapshot().value?.[field] ?? false
+    if (value === current) return
+    await this.scope.set(field, value)
+    this.publish()
   }
 
   /**
@@ -186,34 +242,46 @@ export class CardForm {
   }
 
   /**
-   * Write the staged edit, then re-seed from what the Host accepted.
+   * Write the staged edits (root text and/or keep cap), then re-seed from
+   * what the Host accepted.
    *
-   * The Host is the only authority on acceptance — an empty draft clears the
-   * field, anything else stores the trimmed text (so blanking the control and
-   * saving is the same gesture as clearing it). A save that did not land
-   * keeps its draft so the user can correct it instead of retyping.
+   * The Host is the only authority on acceptance — an empty root draft
+   * clears the field, anything else stores the trimmed text (so blanking the
+   * control and saving is the same gesture as clearing it); the keep draft
+   * must parse to an integer >= 1 before the save may run. A save that did
+   * not land keeps its drafts so the user can correct them instead of
+   * retyping.
    */
   private async save(): Promise<void> {
-    if (this.draft === undefined || this.saving) return
+    if ((this.draft === undefined && this.keepDraft === undefined) || this.saving) return
     // Snapshot the intended write: a keystroke mid-await must not change what
     // this save commits.
-    const intended = this.draft.trim()
+    const intendedRoot = this.draft?.trim()
+    const intendedKeep = this.keepDraft !== undefined ? this.parseKeep(this.keepDraft) : undefined
+    if (this.keepDraft !== undefined && (intendedKeep === undefined || intendedKeep < 1)) return
     this.saving = true
     this.failed = false
     this.publish()
     let landed = true
     try {
-      if (intended === '') await this.scope.unset(ROOT_FIELD)
-      else await this.scope.set(ROOT_FIELD, intended)
+      if (intendedRoot === '') await this.scope.unset(ROOT_FIELD)
+      else if (intendedRoot !== undefined) await this.scope.set(ROOT_FIELD, intendedRoot)
+      if (intendedKeep !== undefined) await this.scope.set(KEEP_FIELD, intendedKeep)
       // Read back: the Host's validator owns the constraints no schema
       // expresses, so acceptance is judged from the stored layers.
-      if (intended === '' ? this.storedRoot() : this.storedRootValue() !== intended) {
+      if (intendedRoot !== undefined && (intendedRoot === '' ? this.storedRoot() : this.storedRootValue() !== intendedRoot)) {
+        landed = false
+      }
+      if (intendedKeep !== undefined && this.userLayer()?.[KEEP_FIELD] !== intendedKeep) {
         landed = false
       }
     } catch (_settingsWriteFailure) {
       landed = false
     }
-    if (landed) this.draft = undefined
+    if (landed) {
+      if (intendedRoot !== undefined) this.draft = undefined
+      if (intendedKeep !== undefined) this.keepDraft = undefined
+    }
     this.saving = false
     this.failed = !landed
     this.publish()
@@ -245,6 +313,8 @@ export class CardForm {
   private project(): CardState {
     const snapshot = this.scope.getSnapshot()
     const draft = this.draft ?? this.effectiveRoot()
+    const keepText = this.effectiveKeepText()
+    const keepParsed = this.parseKeep(keepText)
     return {
       available: snapshot.status === 'ready',
       writable: snapshot.writable,
@@ -252,11 +322,16 @@ export class CardForm {
       // A staged edit answers for itself, so the override badge previews the
       // save rather than reporting a state the pending edit contradicts.
       overridden: this.draft !== undefined ? this.draft.trim() !== '' : this.storedRoot(),
-      dirty: this.draft !== undefined && this.draft !== this.effectiveRoot(),
+      dirty: (this.draft !== undefined && this.draft !== this.effectiveRoot())
+        || (this.keepDraft !== undefined && this.keepDraft !== String(this.scope.getSnapshot().value?.[KEEP_FIELD] ?? 30)),
       saving: this.saving,
       failed: this.failed,
       groupSidebar: this.effectiveGroupSidebar(),
       groupingPending: this.groupingPending,
+      fetchBeforeCreate: this.scope.getSnapshot().value?.fetchBeforeCreate ?? false,
+      autoPruneWorktrees: this.scope.getSnapshot().value?.autoPruneWorktrees ?? false,
+      keepWorktreesText: keepText,
+      keepWorktreesValid: keepParsed !== undefined && keepParsed >= 1,
     }
   }
 

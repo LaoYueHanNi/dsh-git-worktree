@@ -1,0 +1,173 @@
+/* The worktree manager dialog opened from the git-worktree settings card.
+ * Tokens only, mirroring the card chrome and the sidebar's removal dialog
+ * (a list body, a warn tint on dirty facts, the delete-tinted confirm). */
+
+/* The dialog CARD is widened here — the primitive pins its own .dialog to
+ * min(380px, 100%), and the width lives on the card, not the content region
+ * (this class rides Modal's className prop, which lands on the card; the
+ * doubled class out-specifies the primitive regardless of bundle order). */
+.dialog.dialog {
+  width: min(680px, 100%);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.count {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.status {
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  padding: 8px 0;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--dsw-alias-label-danger, #d64545);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.empty {
+  font-size: 13px;
+  color: var(--dsw-alias-label-dimmed);
+  padding: 12px 0;
+}
+
+/* The scroll region: worktree counts grow without bound, the dialog must
+ * not (BranchMenu's cap posture, dialog-scaled). */
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Head line: repository, branch, dirty mark, then the activity time pushed
+ * to the row's right edge. */
+.rowHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rowRepo {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  flex-shrink: 0;
+}
+
+.rowRepoUnknown {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rowBranch {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowDirty {
+  font-size: 11px;
+  color: var(--dsw-alias-label-danger, #d64545);
+  flex-shrink: 0;
+}
+
+.rowActivity {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The tail of the path is the identity (the <repo>-<branch> folder name), so
+ * the ellipsis trims the head. */
+.rowPath {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.remove {
+  appearance: none;
+  flex-shrink: 0;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-danger, #d64545);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.remove:hover:not(:disabled) {
+  border-color: var(--dsw-alias-label-danger, #d64545);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.removeConfirm {
+  color: var(--dsw-alias-label-danger, #d64545);
+}
+
+.removeFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.removeFact {
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.removeFactWarn {
+  color: var(--dsw-alias-label-danger, #d64545);
+}

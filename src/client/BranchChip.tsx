@@ -358,7 +358,7 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, t }: BranchChipDockProps) {
+export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, pruneWorktrees, t }: BranchChipDockProps) {
   const summary = useSessions(state => state.byId[sessionId])
   const session = useSession(s => s)
   const cwd = summary?.cwd
@@ -567,7 +567,10 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   }, [adoptWorktree, showError])
 
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
-   * branch under an explicit name), register the directory, hop sessions. */
+   * branch under an explicit name), register the directory, hop sessions.
+   * After the hop the lazy auto-prune fires (fire-and-forget — a slow
+   * removal must not hold the confirm dialog open), and a failed
+   * pre-create fetch surfaces as a toast without undoing the creation. */
   const doWorktree = useCallback((branch: string, cutout: boolean, name?: string) => runGuarded(async () => {
     if (cwd === undefined) return 'no session directory'
     const result = cutout
@@ -579,8 +582,24 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     } catch (cause) {
       return cause instanceof Error ? cause.message : String(cause)
     }
+    if (result.fetchWarning !== undefined) {
+      setToast({ seq: Date.now(), text: t('fetchWarning', { message: result.fetchWarning }) })
+    }
+    void pruneWorktrees?.(result.path).then((report) => {
+      if (report === undefined) return
+      if (report.removed.length > 0) {
+        setToast({
+          seq: Date.now(),
+          text: report.failed.length > 0
+            ? `${t('pruneDone', { n: report.removed.length })} ${t('pruneFailed', { n: report.failed.length })}`
+            : t('pruneDone', { n: report.removed.length }),
+        })
+      } else if (report.failed.length > 0) {
+        setToast({ seq: Date.now(), text: t('pruneFailed', { n: report.failed.length }) })
+      }
+    }).catch(() => { /* a prune failure must not disturb the session flow */ })
     return undefined
-  }), [adoptWorktree, cwd, runGuarded])
+  }), [adoptWorktree, pruneWorktrees, cwd, runGuarded, t])
 
   const facts = repo.facts
   // The session sits in a linked worktree when its directory's toplevel is
