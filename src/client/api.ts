@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, RemoveWorktreeResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
+  CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -81,13 +81,40 @@ export function requestSwitch(repoPath: string, branch: string): Promise<Call<Sw
 }
 
 /**
- * Create a NEW branch from the directory's current checkout and switch to it
- * in place.
- * @param repoPath - absolute directory whose HEAD the branch is cut from.
+ * Create a NEW branch. Without `from`: cut from the directory's current
+ * checkout and switch to it in place (the original in-place shape). With
+ * `from` (a local branch or remote-tracking ref): created AT that start
+ * point — left unchecked-out by default (the row menu's 新建), or checked
+ * out here too with `checkout` (the row menu's 新建并检出).
+ * @param repoPath - absolute directory inside the repository.
  * @param name - user-typed new branch name (validated client-side already).
+ * @param from - optional start point; absent keeps the in-place semantics.
+ * @param checkout - with `from`, also check the new branch out here.
  */
-export function requestCreateBranch(repoPath: string, name: string): Promise<Call<CreateBranchResult>> {
-  return post<CreateBranchResult>(ROUTE_BRANCH, { repoPath, name })
+export function requestCreateBranch(repoPath: string, name: string, from?: string, checkout?: boolean): Promise<Call<CreateBranchResult>> {
+  if (from === undefined) return post<CreateBranchResult>(ROUTE_BRANCH, { repoPath, name })
+  return post<CreateBranchResult>(ROUTE_BRANCH, { repoPath, name, from, ...(checkout === true ? { checkout: true } : {}) })
+}
+
+/**
+ * Rename a LOCAL branch (`git branch -m`); repository-wide, worktree HEADs
+ * follow.
+ * @param repoPath - absolute directory inside the repository.
+ * @param name - branch to rename.
+ * @param newName - user-typed new name (validated client-side already).
+ */
+export function requestRenameBranch(repoPath: string, name: string, newName: string): Promise<Call<RenameBranchResult>> {
+  return post<RenameBranchResult>(ROUTE_BRANCH_RENAME, { repoPath, name, newName })
+}
+
+/**
+ * Delete a LOCAL branch with the safe form (`git branch -d`); git refuses
+ * unmerged commits and branches checked out in any worktree.
+ * @param repoPath - absolute directory inside the repository.
+ * @param name - branch to delete.
+ */
+export function requestDeleteBranch(repoPath: string, name: string): Promise<Call<DeleteBranchResult>> {
+  return post<DeleteBranchResult>(ROUTE_BRANCH_DELETE, { repoPath, name })
 }
 
 /**

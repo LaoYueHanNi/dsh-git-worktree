@@ -29,35 +29,49 @@
  * become the folder layer beneath the header. Picking a remote row hands
  * the owner the real `<remote>/name` (see pick) — the remote confirms are
  * the owner's wording (tracking-twin switch / twin-in-worktree).
- * Selection model borrowed from
- * IDEA: a single click SELECTS a row (blue); double-click or Enter then OPENS the
- * right-side confirm flyout for that row — the switch itself always goes
- * through the confirmation step, never straight away. While the confirm
- * flyout is open, clicking another row re-anchors it (the old one-click
- * pick flow).
+ * Selection model: a single click SELECTS a row (blue); Enter or the row's
+ * RIGHT-CLICK menu executes — 签出 and the worktree hop run DIRECTLY (no
+ * confirmation step; the switch is keep-open, the hop moves the session),
+ * while the consequential verbs keep their dialogs (delete's confirm, the
+ * create/rename inputs). While a dialog is open, clicking another row
+ * re-anchors it (the old one-click pick flow).
  *
- * The new-branch tool (the toolbar's plus) opens the create flyout to the
- * RIGHT of the card (the confirm flyout's submenu posture): the flyout
- * holds the naming input — validated as you type (git ref-name rules plus
- * a duplicate check against the rows) with a live hint naming the issue
- * or, while the draft is acceptable, the branch the cut starts from — and
- * the Cancel/Create pair. Confirming fires the create in ONE stroke
- * (create AND in-place switch; no second confirm step — typing the name
- * into the flyout and pressing Create IS the intent). While the create
- * runs the flyout freezes (busy disables input and buttons); a failure
- * toasts and leaves the flyout open for a renamed retry.
- * The confirm flyout is a second-level portal opening to the RIGHT of the
- * branch card (the base Menu's submenu posture): the chip sits in the
- * bottom composer, so the old below-the-chip bubble landed off-viewport.
- * The flyout is a separate portal (not clipped by the card's
- * overflow:hidden), horizontally anchored to the card's right edge — it
- * can never overlap the branch list — and vertically centered on the
- * picked row. Its width is content-driven, capped in CSS, wrapping.
+ * Rows also speak right-click: a cursor-anchored context menu (the browser's
+ * native one is suppressed over rows only). A branch row gets the six-verb
+ * set — 签出 (through `pick`, executed DIRECTLY — no confirmation step),
+ * 新建 and 新建并检出
+ * (the create flyout with the row as the `from` start point, the latter
+ * adding `checkout` so `git switch -c <name> <from>`), 重命名分支 and
+ * 删除分支 (local rows; a rename flyout prefilled with the current name /
+ * the safe-delete confirm), 复制分支 — with each verb degenerating where it
+ * has no object (current branch: no 签出, no 删除; canCreate gates the
+ * write trio; remote rows: no rename, no delete). A worktree row keeps its
+ * two-item launcher (hop + copy path). The menu is a second surface, never
+ * a second semantics — it IS the execution channel (the double-click it
+ * replaced is gone), alongside Enter for the keyboard.
  *
- * Close semantics: outside pointerdown (card, flyouts, and chip excluded)
- * cancels the confirm and closes the menu; Escape unwinds tier by tier —
- * confirm, then the create flyout, then search text, then selection, then
- * the menu; Enter in the search field commits the first enabled visible row.
+ * The create and rename flyouts open IN PLACE of the row menu — at the
+ * very point it stood (staged-from-menu posture; the cursor never leaves
+ * the conversation), clamped into the viewport. Each holds its input —
+ * validated as you type (git ref-name rules plus a duplicate check against
+ * the rows; the rename pre-fills the current name and disables an
+ * unchanged draft) — and the Cancel/confirm pair. Confirming fires in ONE
+ * stroke (no second confirm step — typing into the flyout and pressing the
+ * button IS the intent). While the action runs the flyout freezes (busy
+ * disables input and buttons); a failure toasts and leaves the flyout open
+ * for a corrected retry, a success closes the flyout but KEEPS THE MENU
+ * OPEN (the row-menu keep-open rule: 原地动作 — checkout, create, rename,
+ * delete — leave the picker up for more rows; only session-hopping actions
+ * close it). A confirm flyout staged WITHOUT the row menu (worktree picks
+ * from Enter or a re-click) anchors to the card's right edge as before.
+ * The flyouts are separate portals (not clipped by the card's
+ * overflow:hidden); their width is content-driven, capped in CSS, wrapping.
+ *
+ * Close semantics: outside pointerdown (card, flyouts, row menu, and chip
+ * excluded) cancels the confirm and closes the menu; Escape unwinds tier
+ * by tier — row menu, confirm, create flyout, rename flyout, search text,
+ * selection, the menu; Enter in the search field commits the first enabled
+ * visible row.
  *
  * Long names and many branches: a clipped label shows the full name on
  * hover via the native title (gated to actually-clipped rows only). The
@@ -73,12 +87,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  IconBranchOutline16,
   IconCheckOutline16,
   IconChevronDownOutline14,
   IconChevronRightOutline14,
   IconChevronUpOutline14,
+  IconCopyOutline16,
+  IconEditOutline16,
   IconGoalOutline16,
   IconPlusOutline16,
+  IconRightUpOutline16,
+  IconTrashOutline16,
+  Toast,
+  writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { branchNameIssue } from '../normalize.ts'
@@ -141,12 +162,30 @@ export interface BranchMenuProps {
   /** Stage a pick (starts the confirm flyout beside that row). Current
    * branch re-select closes the menu unless the owner stages otherwise. */
   onSelect: (branch: string) => void
-  /** Whether the new-branch tool is offered (worktree mode routes creation
-   * through the cutout flow instead — the toolbar plus then disables). */
+  /** Whether row-level branch WRITING is offered (context menu's create /
+   * rename / delete): worktree mode routes creation through the cutout flow
+   * and a linked-worktree session acts from the main checkout — both gate
+   * the trio off (the old toolbar plus is gone; this gate survived it). */
   canCreate: boolean
-  /** Run the create NOW (create AND in-place switch): the flyout's Create
-   * button fires this once for a valid draft — no second confirm step. */
-  onCreate: (name: string) => void
+  /** Run the create NOW. Entry shapes share one flyout: a row context
+   * menu's 新建 cuts from THAT branch leaving every checkout untouched
+   * (`from` set), 新建并检出 checks it out here in one stroke (`from` +
+   * `checkout`), and the removed toolbar plus used to cut from the current
+   * checkout in place (`from` absent — kept for API shape). The flyout's
+   * Create button fires this once for a valid draft — no second confirm
+   * step. `onSettled` runs on SUCCESS only: the menu stays open (the
+   * keep-open rule), so the flyout closes itself through this hook; a
+   * failure skips it and the flyout stays for a renamed retry. */
+  onCreate: (name: string, from: string | undefined, checkout: boolean, onSettled: () => void) => void
+  /** Rename a LOCAL branch (`git branch -m`, repository-wide). Fired by the
+   * rename flyout's confirm button for a valid changed draft; `onSettled`
+   * follows the create's success-only contract. */
+  onRename: (name: string, newName: string, onSettled: () => void) => void
+  /** Delete a LOCAL branch (`git branch -d`, safe form — git refuses
+   * unmerged commits and occupied branches). Fired by the row menu's
+   * 删除分支 after the confirm flyout; success keeps the menu open and the
+   * refreshed rows drop the row. */
+  onDelete: (branch: string) => void
   /** True while the create runs: the flyout freezes (input and buttons
    * disable, the Create button shows progress text). */
   busy: boolean
@@ -208,7 +247,7 @@ const CARD_WIDTH = 360
 /** Design flyout width cap — matches .popCard's max-width arm. */
 const FLY_MAX_WIDTH = 400
 /** After a folder toggle, clicks arriving within this window are swallowed
- * (double-click misfire guard — see shiftGuardUntil in the component). */
+ * (layout-shift guard — see shiftGuardUntil in the component). */
 const CLICK_GUARD_MS = 250
 /** Unplaced flyout: hidden but laid out at a fixed origin so offsetWidth/
  * offsetHeight are real for the measure-then-place pass (base Menu trick). */
@@ -401,7 +440,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, onCreate, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -428,13 +467,14 @@ export function BranchMenu({
     inputRef.current = el
     if (el !== null) el.focus()
   }, [])
-  /** Same mount-time focus trick for the new-branch input: the form mounts
-   * when the toolbar plus flips `creating`, mid-card-lifecycle, so the ref
-   * callback is the only reliable focus point. Stable for the same reason
-   * as holdSearchFocus — typing would otherwise re-focus on every render. */
-  const holdCreateFocus = useCallback((el: HTMLInputElement | null): void => {
-    if (el !== null) el.focus()
-  }, [])
+  /** The create/rename flyout inputs. Focus does NOT ride the ref callback:
+   * the flyout's first frame lays out in the hidden measure-then-place
+   * posture, and focus() on a visibility:hidden element is a no-op (the
+   * confirm button hit the same wall — see its rAF effect) — so the refs
+   * are plain holders and the focus effect below lands one frame later,
+   * once the placed flyout is visible. */
+  const createInputRef = useRef<HTMLInputElement | null>(null)
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
   const flyRef = useRef<HTMLDivElement>(null)
   const flyConfirmRef = useRef<HTMLButtonElement | null>(null)
   /** The row whose pick is awaiting confirmation (anchoring element). */
@@ -465,10 +505,42 @@ export function BranchMenu({
    * (or closing the flyout) resets both — see the open-reset effect. */
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState('')
+  /** The create's start point: the row context menu's cut base (新建/新建
+   * 并检出 always stage it with the row's branch — the toolbar plus that
+   * used to leave it undefined is gone, the undefined shape survives only
+   * in the owner API). `createCheckout` splits the two from-shapes: with
+   * the base AND checked out here (新建并检出), or at the base with no
+   * checkout touched (新建). Reset on every open. */
+  const [createBase, setCreateBase] = useState<string | undefined>(undefined)
+  const [createCheckout, setCreateCheckout] = useState(false)
+  /** The rename flyout: the LOCAL branch being renamed plus the live draft
+   * (pre-filled with the current name — an unchanged draft disables the
+   * confirm). Opened only from a row context menu; reset on menu open. */
+  const [renaming, setRenaming] = useState<{ name: string; draft: string } | null>(null)
+  const renameFlyRef = useRef<HTMLDivElement | null>(null)
+  const [renameFlyPos, setRenameFlyPos] = useState<{ left: number; top: number } | null>(null)
   /** The create flyout element and its placed position (see its place
    * pass below; same measure-then-place posture as the confirm flyout). */
   const createFlyRef = useRef<HTMLDivElement | null>(null)
   const [createFlyPos, setCreateFlyPos] = useState<{ left: number; top: number } | null>(null)
+  /** The row context menu (right-click): the target row plus the cursor
+   * point in viewport coordinates; null while closed. Placement is
+   * computed once at open — a cursor-anchored transient does not track
+   * scroll/resize (the next pointerdown, scrollbar drags included,
+   * dismisses it). */
+  const [ctx, setCtx] = useState<{ row: BranchRow | null; name: string; x: number; y: number } | null>(null)
+  const ctxCardRef = useRef<HTMLDivElement | null>(null)
+  const [ctxPos, setCtxPos] = useState<{ left: number; top: number } | null>(null)
+  /** Where the row menu stood when one of its items staged a second-level
+   * flyout (create/rename/delete confirm, a worktree-mode pick): the flyout
+   * replaces the menu AT this point — the cursor is already here, so the
+   * second click/keystroke should be too. Any non-ctx staging path (Enter,
+   * click re-pick) clears it and the flyout falls back to the card-right
+   * posture. Read by the three flyout placement passes. */
+  const ctxPointRef = useRef<{ x: number; y: number } | null>(null)
+  /** Copy feedback: a seq-keyed Toast (the shared copied label) fired by a
+   * successful context-menu copy write. */
+  const [copiedSeq, setCopiedSeq] = useState<number | null>(null)
 
   // Latest values for stable-effect listeners (the parent rebuilds the
   // confirm object each render; refs keep the document-level keydown and
@@ -482,6 +554,13 @@ export function BranchMenu({
   /** Fresh creating flag for the stale-safe document keydown listener. */
   const creatingRef = useRef(creating)
   creatingRef.current = creating
+  /** Fresh rename flyout state for the same stale-safe listeners. */
+  const renamingRef = useRef(renaming)
+  renamingRef.current = renaming
+  /** Fresh row-menu state for the same stale-safe listeners (Escape tier
+   * and the outside-pointerdown dismissal). */
+  const ctxStateRef = useRef(ctx)
+  ctxStateRef.current = ctx
   /** Latest rows for the open-reset effect: the effect must NOT re-run when
    * a mid-open refresh swaps the rows (that would reset folders the user
    * has toggled), but the reset itself still needs the freshest list. */
@@ -492,26 +571,37 @@ export function BranchMenu({
   const confirmOpen = confirm !== null
 
   /**
-   * Double-click misfire guard: toggling a folder shifts the layout — the
-   * second click of a double-click can land on a row that slid under the
-   * cursor (a branch!), which would select it or pop the switch flyout.
-   * After a folder toggle, every click swallowed for CLICK_GUARD_MS, so a
+   * Layout-shift guard: toggling a folder shifts the layout — a rapid
+   * second click can land on a row that slid under the cursor (a
+   * branch!), which would select it or pop the switch flyout. After a
+   * folder toggle, every click swallowed for CLICK_GUARD_MS, so a rushed
    * double-click on a folder expands it exactly once and never bleeds into
    * a branch click. Branch-row clicks do not arm the guard (selecting does
-   * not move anything), so row double-clicks keep working instantly.
+   * not move anything), so follow-up row clicks keep working instantly.
    */
   const shiftGuardUntil = useRef(0)
   const guardActive = (): boolean => Date.now() < shiftGuardUntil.current
   const armShiftGuard = (): void => { shiftGuardUntil.current = Date.now() + CLICK_GUARD_MS }
 
-  /** Stage a pick: remember the row element (the flyout anchors beside
-   * it), then hand the branch to the owner. All pick paths — search Enter,
-   * keyboard Enter on a selected row — funnel through here. A remote row
-   * carries its DISPLAY name through selection and anchors; the owner
-   * always receives the real `<remote>/name` action name. */
-  const pick = (el: HTMLElement | null, name: string): void => {
+  /** Anchor a second-level flyout to a row: remember the row element (the
+   * flyout anchors beside it) and mark it pending. Shared by every
+   * right-side flyout stage path — pick (confirm) and the row menu's
+   * delete (its own confirm). */
+  const stagePending = (el: HTMLElement | null, name: string): void => {
     if (el !== null) pendingRef.current = { name, el }
     setPendingName(name)
+  }
+
+  /** Stage a pick: anchor the confirm flyout beside the row (or, when the
+   * row menu staged it, AT the menu's point — see ctxPointRef), then hand
+   * the branch to the owner. All pick paths — search Enter, keyboard Enter
+   * on a selected row, the row menu's 签出 — funnel through here; only the
+   * row menu's calls carry `fromCtx`. A remote row carries its DISPLAY name
+   * through selection and anchors; the owner always receives the real
+   * `<remote>/name` action name. */
+  const pick = (el: HTMLElement | null, name: string, fromCtx = false): void => {
+    if (!fromCtx) ctxPointRef.current = null
+    stagePending(el, name)
     onSelect(remoteNameMapRef.current.get(name) ?? name)
   }
   pickRef.current = pick
@@ -587,6 +677,10 @@ export function BranchMenu({
     setSelected(null)
     setCreating(false)
     setDraft('')
+    setCreateBase(undefined)
+    setCreateCheckout(false)
+    setRenaming(null)
+    setCtx(null)
     const currentRows = latestRows.current
     const current = groupRows(currentRows)
     const localPaths = collectFolderPaths(buildTree(current.localRows)).map(p => groupKey('local', p))
@@ -625,6 +719,7 @@ export function BranchMenu({
   useLayoutEffect(() => {
     if (!open) {
       setPos(null)
+      setCtx(null)
       return
     }
     const place = (): void => {
@@ -706,22 +801,33 @@ export function BranchMenu({
       return
     }
     const place = (): void => {
-      const pending = pendingRef.current
       const fly = flyRef.current
-      const card = cardRef.current
-      if (pending === null || fly === null || card === null) return
-      const row = pending.el.getBoundingClientRect()
-      const cr = card.getBoundingClientRect()
+      if (fly === null) return
       const vw = window.innerWidth
       const vh = window.innerHeight
+      const fw = fly.offsetWidth
+      const fh = fly.offsetHeight
+      // Staged from the row menu: replace it AT its point (clamped), not
+      // beside the row — the cursor never leaves the conversation.
+      const point = ctxPointRef.current
+      if (point !== null) {
+        setFlyPos({
+          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
+          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
+        })
+        return
+      }
+      const pending = pendingRef.current
+      const card = cardRef.current
+      if (pending === null || card === null) return
+      const row = pending.el.getBoundingClientRect()
+      const cr = card.getBoundingClientRect()
       const left = cr.right + GAP
       // Fit the right side: content width first, clamped by the room left
       // of the viewport margin (floor keeps the buttons usable on very
       // narrow windows, at the cost of spilling past the margin).
       const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
       fly.style.maxWidth = `${room}px`
-      const fw = fly.offsetWidth
-      const fh = fly.offsetHeight
       // The picked row's center rides the flyout's vertical center.
       const top = Math.min(
         Math.max(row.top + row.height / 2 - fh / 2, MARGIN),
@@ -749,16 +855,27 @@ export function BranchMenu({
     }
     const place = (): void => {
       const fly = createFlyRef.current
-      const card = cardRef.current
-      if (fly === null || card === null) return
-      const cr = card.getBoundingClientRect()
+      if (fly === null) return
       const vw = window.innerWidth
       const vh = window.innerHeight
+      const fw = fly.offsetWidth
+      const fh = fly.offsetHeight
+      // Staged from the row menu (its only entry since the plus left):
+      // replace the menu AT its point, clamped into the viewport.
+      const point = ctxPointRef.current
+      if (point !== null) {
+        setCreateFlyPos({
+          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
+          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
+        })
+        return
+      }
+      const card = cardRef.current
+      if (card === null) return
+      const cr = card.getBoundingClientRect()
       const left = cr.right + GAP
       const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
       fly.style.maxWidth = `${room}px`
-      const fw = fly.offsetWidth
-      const fh = fly.offsetHeight
       const top = Math.min(
         Math.max(cr.top + cr.height / 2 - fh / 2, MARGIN),
         Math.max(MARGIN, vh - fh - MARGIN),
@@ -773,6 +890,71 @@ export function BranchMenu({
       window.removeEventListener('scroll', place, true)
     }
   }, [creating])
+
+  // Rename flyout placement: the create flyout's posture verbatim (card's
+  // right edge, viewport-clamped, measure-then-place), keyed on the rename
+  // state instead of the create flag.
+  useLayoutEffect(() => {
+    if (renaming === null) {
+      setRenameFlyPos(null)
+      return
+    }
+    const place = (): void => {
+      const fly = renameFlyRef.current
+      if (fly === null) return
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const fw = fly.offsetWidth
+      const fh = fly.offsetHeight
+      // Row-menu-staged: replace the menu AT its point (see the create
+      // flyout's placement pass).
+      const point = ctxPointRef.current
+      if (point !== null) {
+        setRenameFlyPos({
+          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
+          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
+        })
+        return
+      }
+      const card = cardRef.current
+      if (card === null) return
+      const cr = card.getBoundingClientRect()
+      const left = cr.right + GAP
+      const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
+      fly.style.maxWidth = `${room}px`
+      const top = Math.min(
+        Math.max(cr.top + cr.height / 2 - fh / 2, MARGIN),
+        Math.max(MARGIN, vh - fh - MARGIN),
+      )
+      setRenameFlyPos({ left: Math.min(left, vw - MARGIN - fw), top })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [renaming])
+
+  // Row-menu placement: cursor-anchored, clamped into the viewport with one
+  // measure-then-place pass (the FLY_MEASURE posture gives real offsets).
+  // No listeners on purpose — unlike the card and the flyouts this menu does
+  // not track scroll/resize; it is dismissed by the next pointerdown.
+  useLayoutEffect(() => {
+    if (ctx === null) {
+      setCtxPos(null)
+      return
+    }
+    const el = ctxCardRef.current
+    if (el === null) return
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    setCtxPos({
+      left: Math.min(Math.max(ctx.x, MARGIN), Math.max(MARGIN, vw - MARGIN - el.offsetWidth)),
+      top: Math.min(Math.max(ctx.y, MARGIN), Math.max(MARGIN, vh - MARGIN - el.offsetHeight)),
+    })
+  }, [ctx])
 
   // Confirm opens (or re-anchors to another row) → focus the confirm
   // button (Enter commits, Escape cancels); confirm closes → forget the
@@ -791,6 +973,21 @@ export function BranchMenu({
     }
   }, [confirmOpen, pendingName])
 
+  // Create/rename flyout open → focus the input (typing IS the point —
+  // the flyout should be ready for keystrokes the frame it appears). Same
+  // rAF posture as the confirm button: the first frame is the hidden
+  // measure-then-place layout, and focus() no-ops on visibility:hidden.
+  // Keyed on the OPEN flags only — keystrokes mutate the rename draft (a
+  // fresh object each change) and must not re-arm the effect.
+  const renamingOpen = renaming !== null
+  useEffect(() => {
+    if (!creating && !renamingOpen) return
+    const raf = requestAnimationFrame(() => {
+      (creating ? createInputRef.current : renameInputRef.current)?.focus()
+    })
+    return () => { cancelAnimationFrame(raf) }
+  }, [creating, renamingOpen])
+
   // Outside pointer / keyboard dismiss. Outside clicks cancel the confirm
   // and close the menu in one go. Escape unwinds tier by tier — confirm,
   // then search text, then selection, then the menu. Arrow keys move the
@@ -800,6 +997,23 @@ export function BranchMenu({
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: PointerEvent): void => {
+      // The row menu unwinds first: a pointer outside it closes just the
+      // menu, and only a pointer also outside the CARD falls through to
+      // the whole-picker dismissal below (a click on another row must
+      // keep the picker open).
+      if (ctxStateRef.current !== null && ctxCardRef.current?.contains(event.target as Node) !== true) {
+        setCtx(null)
+        if (cardRef.current?.contains(event.target as Node) === true) return
+      }
+      // The row menu itself anchors the dismissal, exactly like the card
+      // and the flyouts: it portals to document.body (OUTSIDE cardRef), so
+      // without this check a click on a menu item reads as an outside
+      // click, tears the whole picker down before the click ever lands,
+      // and the item's action never runs. The rename flyout needs the same
+      // anchor — without it its confirm button unmounts the picker on
+      // pointerdown and the rename never fires.
+      if (ctxCardRef.current?.contains(event.target as Node) === true) return
+      if (renameFlyRef.current?.contains(event.target as Node) === true) return
       if (cardRef.current?.contains(event.target as Node) === true) return
       if (flyRef.current?.contains(event.target as Node) === true) return
       if (createFlyRef.current?.contains(event.target as Node) === true) return
@@ -810,8 +1024,12 @@ export function BranchMenu({
     const onKeyDown = (event: KeyboardEvent): void => {
       const key = event.key
       if (key === 'Escape') {
+        // The row menu is the topmost transient: it unwinds before the
+        // confirm flyout, and one press takes only it.
+        if (ctxStateRef.current !== null) { setCtx(null); return }
         if (confirmRef.current !== null) { confirmRef.current.onCancel(); return }
         if (creatingRef.current) { setCreating(false); setDraft(''); return }
+        if (renamingRef.current !== null) { setRenaming(null); return }
         if (queryRef.current.trim() !== '') { setQuery(''); return }
         if (selectedRef.current !== null) { setSelected(null); return }
         onClose()
@@ -894,11 +1112,41 @@ export function BranchMenu({
 
   /** Fire the create in one stroke — the flyout's whole point. Invalid
    * drafts and a running create are no-ops (the Create button disables in
-   * lockstep); the owner closes the menu on success, toasts on failure and
-   * leaves the flyout open for a renamed retry. */
+   * lockstep); a failure toasts and leaves the flyout open for a renamed
+   * retry, a success runs `onSettled` (flyout closes, the MENU stays —
+   * the keep-open rule) via the owner. The start point rides along:
+   * the row's branch as `from`, `checkout` splitting 新建 (at-base,
+   * untouched checkouts) from 新建并检出 (at-base AND checked out here). */
   const commitCreate = (): void => {
     if (!createValid || busy) return
-    onCreate(draft)
+    onCreate(draft, createBase, createCheckout, () => {
+      setCreating(false)
+      setDraft('')
+      setCreateBase(undefined)
+      setCreateCheckout(false)
+    })
+  }
+
+  /** Rename-draft validation: git ref-name rules first, then a duplicate
+   * check against every EXISTING local name — the branch's own current name
+   * excluded (a rename onto itself is the no-op the confirm disables via
+   * `renameChanged`). Same namespace as the create: worktree-held names are
+   * taken (their branches exist), remote names are no claim. */
+  const renameIssue = renaming === null ? null : branchNameIssue(renaming.draft)
+  const renameDuplicate = renaming !== null && renameIssue === null
+    && renaming.draft !== renaming.name && existsLocally(renaming.draft)
+  const renameChanged = renaming !== null && renaming.draft !== renaming.name
+  const renameValid = renameIssue === null && !renameDuplicate && renameChanged
+  const showRenameHint = (renameIssue !== null && renameIssue !== 'empty') || renameDuplicate
+
+  /** Fire the rename in one stroke — the create flyout's one-stroke intent
+   * on a prefilled input: editing the name and pressing confirm IS the
+   * intent. Git stays the authority (an occupied target toasts 400 and the
+   * flyout stays open for a corrected retry); success runs `onSettled` —
+   * the flyout closes, the menu stays. */
+  const commitRename = (): void => {
+    if (renaming === null || !renameValid || busy) return
+    onRename(renaming.name, renaming.draft, () => { setRenaming(null) })
   }
 
   /** Row class composition: base + HEAD tint + selection (selection wins)
@@ -933,18 +1181,38 @@ export function BranchMenu({
     return marks
   }
 
-  /** A row's click behavior: with the confirm flyout open, clicking a row
-   * re-picks it (the old one-click flow — the flyout re-anchors); without
-   * one it just selects (IDEA model — double-click or Enter opens the
-   * confirm flyout for the selected row). Locked rows do neither: dimmed
-   * rows are not selectable, the double-click is the hint's stage. `el` is
-   * nullable like {@link pick}'s anchor: a row whose button is already
-   * unmounted still selects/picks, it just re-anchors nothing. */
+  /** A row's click behavior: with a dialog open (delete confirm or a
+   * worktree pick), clicking a row re-picks it (the flyout re-anchors);
+   * without one it just selects (Enter or the row menu executes the
+   * selected row — 签出 directly, no dialog). Locked rows do neither:
+   * dimmed rows are not selectable, the row-menu 签出 is the hint's stage.
+   * `el` is nullable like {@link pick}'s anchor: a row whose button is
+   * already unmounted still selects/picks, it just re-anchors nothing. */
   const rowClick = (el: HTMLButtonElement | null, name: string): void => {
     if (isLocked(name)) return
     if (confirmOpen) pick(el, name)
     else setSelected(name)
   }
+
+  /** Shared row pointer wiring — the three render shapes (tree leaf, flat
+   * worktree row, search hit) bind ONE behavior set: hover tooltip gating,
+   * click-select (with confirm-flyout re-anchor while it is open), and the
+   * RIGHT-CLICK row menu. Execution lives on two channels: Enter (the
+   * keyboard path, see the document keydown handler) and the context menu
+   * (the mouse path — 签出/跳转 funnel through the same `pick` the removed
+   * double-click used). The context menu only replaces the browser's native
+   * one over rows (headers, toolbar, and the search field keep it) and
+   * neither selects nor picks on open, so it adds a surface, never a second
+   * semantics. No shift-guard arming: the menu moves nothing. */
+  const rowEvents = (row: BranchRow | null, name: string): React.HTMLAttributes<HTMLButtonElement> => ({
+    onClick: () => { if (guardActive()) return; rowClick(buttonOf(name), name) },
+    onMouseEnter: (event) => { gateTooltip(event.currentTarget, name) },
+    onMouseLeave: (event) => { clearTooltip(event.currentTarget) },
+    onContextMenu: (event) => {
+      event.preventDefault()
+      setCtx({ row, name, x: event.clientX, y: event.clientY })
+    },
+  })
 
   /** Wrap every case-insensitive occurrence of `needle` in `text` with the
    * search-mark span (IDEA-style hit highlight). */
@@ -1064,10 +1332,7 @@ export function BranchMenu({
       className={rowClass(node.leaf ?? null, node.path)}
       title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
       style={{ paddingLeft: 8 + depth * 12 + LEAF_CHEVRON_SLOT }}
-      onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
-      onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
-      onMouseEnter={(event) => { gateTooltip(event.currentTarget, node.path) }}
-      onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+      {...rowEvents(node.leaf, node.path)}
     >
       <span className={css.menuRowLabel}>{label}</span>
       {renderArrows(node.leaf)}
@@ -1077,12 +1342,12 @@ export function BranchMenu({
 
   /** One flat worktree row: a direct hop target, one per linked worktree
    * — no tree (worktree names rarely fork, and the group is a launcher,
-   * not a taxonomy), no confirm (the double-click IS the hop; the owner
-   * picks it up through onSelect). The native title carries the worktree
-   * DIRECTORY — the fact a branch row cannot show. The row the session
-   * currently lives in keeps the trailing check + HEAD tint: it is the
-   * "you are here" mark the local group no longer holds (its branch was
-   * filed into THIS group). */
+   * not a taxonomy), no confirm (the row menu's 跳到此工作树 IS the hop;
+   * the owner picks it up through onSelect). The native title carries the
+   * worktree DIRECTORY — the fact a branch row cannot show. The row the
+   * session currently lives in keeps the trailing check + HEAD tint: it is
+   * the "you are here" mark the local group no longer holds (its branch
+   * was filed into THIS group). */
   const renderFlatLeaf = (row: BranchRow, prefix: string): React.ReactNode => (
     <button
       key={`${prefix}${row.name}`}
@@ -1093,10 +1358,7 @@ export function BranchMenu({
       className={rowClass(row, row.name)}
       title={row.locked === true ? t('mainRepoOnly') : row.path}
       style={{ paddingLeft: 8 + 12 + LEAF_CHEVRON_SLOT }}
-      onClick={() => { if (guardActive()) return; rowClick(buttonOf(row.name), row.name) }}
-      onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, row.name) }}
-      onMouseEnter={(event) => { gateTooltip(event.currentTarget, row.name) }}
-      onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+      {...rowEvents(row, row.name)}
     >
       <span className={css.menuRowLabel}>{row.name}</span>
       {row.name === currentBranch && <IconCheckOutline16 size={14} />}
@@ -1165,10 +1427,7 @@ export function BranchMenu({
             className={rowClass(node.leaf ?? null, node.path)}
             title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
             style={{ paddingLeft: 8 + depth * 12 + LEAF_CHEVRON_SLOT }}
-            onClick={() => { if (guardActive()) return; rowClick(buttonOf(node.path), node.path) }}
-            onDoubleClick={(event) => { if (guardActive()) return; pick(event.currentTarget, node.path) }}
-            onMouseEnter={(event) => { gateTooltip(event.currentTarget, node.path) }}
-            onMouseLeave={(event) => { clearTooltip(event.currentTarget) }}
+            {...rowEvents(node.leaf, node.path)}
           >
             <span className={css.menuRowLabel}>{renderLabel(node.segment)}</span>
             {renderArrows(node.leaf)}
@@ -1201,6 +1460,144 @@ export function BranchMenu({
   const buttonOf = (name: string): HTMLButtonElement | null =>
     cardRef.current?.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(name)}"]`) ?? null
 
+  /** The row menu's items — for a BRANCH row, the six-verb set (签出 /
+   * 新建 / 新建并检出 / 重命名分支 / 删除分支 / 复制分支), each degenerating
+   * where it has no object: the current branch drops 签出 AND 删除 (git
+   * refuses a delete of the checked-out branch anyway), worktree mode and
+   * linked-worktree sessions drop the write trio + delete (canCreate — the
+   * gate the removed toolbar plus lived under), remote rows drop 重命名
+   * and 删除 (a remote branch is not ours to rename or delete). 签出 and
+   * the hop go through `pick` DIRECTLY — no confirmation step (the owner
+   * executes the switch in place, keep-open; a worktree-mode pick stages
+   * the owner's worktree dialog instead). 新建 / 新建并检出 open the
+   * create flyout with the row as the start point (`from`; 新建并检出 adds
+   * `checkout` — `git switch -c <name> <from>` — while 新建 leaves every
+   * checkout untouched), 重命名 the rename flyout, 删除 the owner's
+   * confirm flyout (the safe `git branch -d`). A WORKTREE row keeps its
+   * two-item launcher (hop + copy path): its job is hopping, and its
+   * branch is by definition checked out elsewhere. Copy is client-only
+   * (WYSIWYG display names; a successful write toasts the shared copied
+   * label). The menu opens NEITHER select NOR pick — it launches, never
+   * re-semantics. */
+  const ctxItems: { id: string; label: string; icon: React.ReactNode; run: () => void }[] = []
+  if (ctx !== null) {
+    const { row, name, x, y } = ctx
+    const isWorktree = row?.kind === 'worktree'
+    // Every verb that can stage a second-level flyout records where the
+    // menu stood FIRST (setCtx below clears the menu state): the flyout
+    // then replaces it in place instead of anchoring to the card.
+    const markPoint = (): void => { ctxPointRef.current = { x, y } }
+    const openCreate = (checkout: boolean): void => {
+      confirmRef.current?.onCancel()
+      setRenaming(null)
+      markPoint()
+      setCtx(null)
+      setDraft('')
+      setCreateBase(remoteNameMapRef.current.get(name) ?? name)
+      setCreateCheckout(checkout)
+      setCreating(true)
+    }
+    if (isWorktree) {
+      if (name !== currentBranch) {
+        ctxItems.push({
+          id: 'hop',
+          label: t('ctxHop'),
+          icon: <IconRightUpOutline16 size={14} />,
+          run: () => {
+            markPoint()
+            setCtx(null)
+            setSelected(name)
+            pick(buttonOf(name), name, true)
+          },
+        })
+      }
+      ctxItems.push({
+        id: 'copy',
+        label: t('ctxCopyPath'),
+        icon: <IconCopyOutline16 size={14} />,
+        run: () => {
+          setCtx(null)
+          const text = row?.path !== undefined ? row.path : name
+          void writeClipboard(text).then(ok => { if (ok) setCopiedSeq(Date.now()) })
+        },
+      })
+    } else {
+      if (name !== currentBranch) {
+        ctxItems.push({
+          id: 'checkout',
+          label: t('ctxCheckout'),
+          icon: <IconBranchOutline16 size={14} />,
+          run: () => {
+            markPoint()
+            setCtx(null)
+            setSelected(name)
+            pick(buttonOf(name), name, true)
+          },
+        })
+      }
+      if (canCreate) {
+        ctxItems.push({
+          id: 'create',
+          label: t('ctxCreate'),
+          icon: <IconPlusOutline16 size={14} />,
+          run: () => { openCreate(false) },
+        })
+        ctxItems.push({
+          id: 'create-checkout',
+          label: t('ctxCreateCheckout'),
+          icon: <IconBranchOutline16 size={14} />,
+          run: () => { openCreate(true) },
+        })
+        if (row?.kind !== 'remote') {
+          ctxItems.push({
+            id: 'rename',
+            label: t('ctxRename'),
+            icon: <IconEditOutline16 size={14} />,
+            run: () => {
+              confirmRef.current?.onCancel()
+              markPoint()
+              setCtx(null)
+              setCreating(false)
+              setDraft('')
+              setCreateBase(undefined)
+              setCreateCheckout(false)
+              setRenaming({ name, draft: name })
+            },
+          })
+          // Delete skips the CURRENT branch outright — the item is not even
+          // offered (git refuses to delete the checked-out branch, so it
+          // would be a guaranteed dead end). The SAFE `-d` form sits behind
+          // the owner's confirm flyout — a menu click must never discard
+          // commits. Rename of the current branch STAYS: `git branch -m`
+          // follows the HEAD ref legally.
+          if (name !== currentBranch) {
+            ctxItems.push({
+              id: 'delete',
+              label: t('ctxDelete'),
+              icon: <IconTrashOutline16 size={14} />,
+              run: () => {
+                confirmRef.current?.onCancel()
+                markPoint()
+                setCtx(null)
+                stagePending(buttonOf(name), name)
+                onDelete(name)
+              },
+            })
+          }
+        }
+      }
+      ctxItems.push({
+        id: 'copy',
+        label: t('ctxCopyName'),
+        icon: <IconCopyOutline16 size={14} />,
+        run: () => {
+          setCtx(null)
+          void writeClipboard(name).then(ok => { if (ok) setCopiedSeq(Date.now()) })
+        },
+      })
+    }
+  }
+
   return (
     <>
       {createPortal(
@@ -1212,33 +1609,11 @@ export function BranchMenu({
           aria-label={t('menuBranches')}
         >
           <div className={css.menuToolbar} role="toolbar" aria-label={t('menuBranches')}>
-            {/* The plus UNMOUNTS where branch creation has no business
-              * (worktree mode armed, or a linked-worktree session) instead
-              * of disabling: a disabled button swallows clicks with no
-              * answer — the exact dead-gray shape this menu locked rows
-              * out of (see the menu-scope DR). Escape (creatingRef branch)
-              * and outside clicks already collapse the create flyout, so
-              * losing the anchor button takes no dismiss path with it. */}
-            {canCreate && (
-              <button
-                type="button"
-                className={creating ? `${css.menuToolButton} ${css.menuToolButtonOn}` : css.menuToolButton}
-                title={t('menuNewBranch')}
-                aria-label={t('menuNewBranch')}
-                aria-pressed={creating}
-                onClick={() => {
-                  // Opening the flyout cancels a staged confirm first: the
-                  // flyout would otherwise stay anchored to a stale row beside
-                  // the create panel. Closing drops the draft with it.
-                  confirmRef.current?.onCancel()
-                  const next = !creating
-                  setCreating(next)
-                  if (!next) setDraft('')
-                }}
-              >
-                <IconPlusOutline16 size={16} />
-              </button>
-            )}
+            {/* The toolbar's old plus (create from current) is GONE — branch
+              * writing lives in the row context menu (新建 / 新建并检出 /
+              * 重命名 / 删除), where the target branch is the row under the
+              * cursor. The strip keeps the read-only tools: locate, update,
+              * fetch, expand/collapse. */}
             <button
               type="button"
               className={css.menuToolButton}
@@ -1397,11 +1772,11 @@ export function BranchMenu({
           className={css.popCard}
           style={createFlyPos ?? FLY_MEASURE}
           role="dialog"
-          aria-label={t('createBranchTitle', { branch: currentBranch })}
+          aria-label={t('createFlyAsk')}
         >
-          <p className={css.popAsk}>{t('createBranchTitle', { branch: currentBranch })}</p>
+          <p className={css.popAsk}>{t('createFlyAsk')}</p>
           <input
-            ref={holdCreateFocus}
+            ref={createInputRef}
             className={css.menuCreate}
             type="text"
             value={draft}
@@ -1429,13 +1804,78 @@ export function BranchMenu({
             >
               {t('actionCancel')}
             </button>
-            <button type="button" disabled={!createValid || busy} onClick={commitCreate}>
-              {busy ? t('createBranchBusy') : t('actionConfirm')}
+            <button
+              type="button"
+              disabled={!createValid || busy}
+              onClick={commitCreate}
+            >
+              {busy ? t('createBranchBusy') : createCheckout ? t('createCheckoutConfirm') : t('actionConfirm')}
             </button>
           </div>
         </div>,
         document.body,
       )}
+      {renaming !== null && createPortal(
+        <div
+          ref={renameFlyRef}
+          className={css.popCard}
+          style={renameFlyPos ?? FLY_MEASURE}
+          role="dialog"
+          aria-label={t('renameBranchTitle', { branch: renaming.name })}
+        >
+          <p className={css.popAsk}>{t('renameBranchTitle', { branch: renaming.name })}</p>
+          <input
+            ref={renameInputRef}
+            className={css.menuCreate}
+            type="text"
+            value={renaming.draft}
+            placeholder={t('menuNewBranchPlaceholder')}
+            aria-label={t('menuNewBranchPlaceholder')}
+            aria-invalid={renameIssue !== null && renameIssue !== 'empty'}
+            spellCheck={false}
+            disabled={busy}
+            onChange={event => { setRenaming(current => current === null ? current : { ...current, draft: event.target.value }) }}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitRename()
+              }
+            }}
+          />
+          {showRenameHint && (
+            <p className={css.menuCreateHintBad} role="status">
+              {renameDuplicate ? t('menuNewBranchExists') : t('menuNewBranchBad')}
+            </p>
+          )}
+          <div className={css.popActions}>
+            <button type="button" disabled={busy} onClick={() => { setRenaming(null) }}>
+              {t('actionCancel')}
+            </button>
+            <button type="button" disabled={!renameValid || busy} onClick={commitRename}>
+              {busy ? t('renameBranchBusy') : t('actionConfirm')}
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+      {ctx !== null && createPortal(
+        <div
+          ref={ctxCardRef}
+          className={css.ctxCard}
+          style={ctxPos ?? FLY_MEASURE}
+          role="menu"
+          aria-label={ctx.name}
+        >
+          {ctxItems.map(item => (
+            <button key={item.id} type="button" role="menuitem" className={css.ctxItem} onClick={item.run}>
+              {item.icon}
+              <span className={css.ctxItemLabel}>{item.label}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+      {copiedSeq !== null && <Toast key={copiedSeq} text={t('hover.copied')} onDone={() => { setCopiedSeq(null) }} />}
     </>
   )
 }

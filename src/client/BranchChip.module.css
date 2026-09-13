@@ -388,8 +388,8 @@
 
 /* Locked rows (a linked-worktree session answers every non-current pick
  * with the main-checkout toast): dimmed with a default cursor, but KEEP
- * the click path alive — no disabled attribute, the double-click is the
- * toast's stage. Hover stays quiet: nothing is on offer here. */
+ * the click path alive — no disabled attribute, the row menu's 签出 is
+ * the toast's stage. Hover stays quiet: nothing is on offer here. */
 .menuRowLocked {
   opacity: 0.45;
   cursor: default;
@@ -555,20 +555,11 @@
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
-/* ── New-branch create flyout (BranchMenu toolbar plus) ─────────────
- * Opens to the RIGHT of the card (the confirm flyout's posture) and holds
- * the whole flow in one panel: ask line, naming input, live hint, and the
- * Cancel/Create pair — typing the name and pressing Create fires the
- * create in one stroke, no second confirm step. */
-
-/* The toolbar plus in its active (flyout open) state: a bluish tint
- * layering the same way the picked row does, so the toggled state reads at
- * a glance. */
-.menuToolButtonOn,
-.menuToolButtonOn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--dsw-alias-label-primary-bluish, #4186f0) 18%, transparent);
-  color: var(--dsw-alias-label-primary-bluish, #4186f0);
-}
+/* ── Create/rename flyouts (BranchMenu row context menu) ────────────
+ * Open IN PLACE of the row menu (at its point, clamped) and hold the whole
+ * flow in one panel: ask line, input, live hint, and the Cancel/confirm
+ * pair — typing the name and pressing the button fires in one stroke, no
+ * second confirm step. */
 
 /* The naming input inside the flyout: borderless, part of the card, focus
  * shown as the standard hover tint. Fixed width — the popCard is
@@ -612,4 +603,67 @@
   font-size: 12px;
   line-height: 16px;
   color: var(--dsw-alias-label-error);
+}
+
+/* ── Row context menu (BranchMenu right-click) ─────────────────────
+ * Cursor-anchored transient over the branch card: the same card chrome
+ * family as .popCard (--dsw-specific-menu, elevation-prominent hairline,
+ * lv3 fallback) at a smaller radius — a two-item menu wears r20 like a
+ * pill, r12 keeps the corners proportionate. Width hugs the widest item
+ * (shrink-to-fit, no design width) with a generous cap for safety —
+ * a launcher reads better snug than stretched. Positioned once at open
+ * (see BranchMenu's ctx placement pass); z-index one step above the
+ * popCard so it never slides under the confirm flyout. */
+.ctxCard {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 1001;
+  width: max-content;
+  max-width: 280px;
+  padding: 4px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Menu-item rows: the .menuRow geometry at a hair lighter weight — a
+ * launcher's labels read as commands, not data. nowrap: the labels are
+ * fixed copy (no branch names), the 280px cap is unreachable by design. */
+.ctxItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ctxItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* Leading glyph rides the label tone, a step quieter. */
+.ctxItem svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.ctxItemLabel {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

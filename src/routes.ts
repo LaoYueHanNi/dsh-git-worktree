@@ -5,11 +5,11 @@
 
 import { dirname, join, resolve } from 'node:path'
 import { mkdir, stat } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, RemoveWorktreeBody, RemoveWorktreeResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -128,6 +128,11 @@ function gitFailure(error: GitError): RouteOutcome {
     // texts (a remote that vanished mid-fetch: `Repository '...' not
     // found`) carry no quoted branch and stay 500 host faults.
     || error.stderr.includes('branch "')
+    // Deletion refusals from `git branch -d` are the user's repo state the
+    // same way: unmerged commits (the safe delete's whole point) and a
+    // branch checked out in some worktree.
+    || error.stderr.includes('is not fully merged')
+    || error.stderr.includes('Cannot delete branch')
     // Removal refusals from git.ts are caller-side state the same way: the
     // main worktree (git refuses it too, but the route answers a clean 400
     // before ever spawning git) and a path the repository never registered
@@ -286,27 +291,99 @@ export async function handleSwitch(deps: RouteDeps, body: unknown): Promise<Rout
 }
 
 /**
- * POST /branch 鈥?create a NEW branch from the queried directory's current
- * checkout (whatever its HEAD points at, detached included) and check it out
- * in place. Git validates the name; the client pre-flights the same rules
+ * POST /branch — create a NEW branch. Without `from`, from the queried
+ * directory's current checkout (whatever its HEAD points at, detached
+ * included), checked out in place. With `from` (a local branch or a remote
+ * tracking ref): checked out here too when `checkout` is set
+ * (`git switch -c <name> <from>`), created with no checkout touched
+ * otherwise (`git branch`) — a create aimed at another branch must not
+ * silently move the session's HEAD unless the caller asked for exactly
+ * that. Git validates both names; the client pre-flights the same rules
  * and only sends names it already accepts.
  * @param deps - host dependencies.
  * @param body - parsed request body.
  */
 export async function handleCreateBranch(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  const parsed = readBody<CreateBranchBody>(body, ['repoPath', 'name'])
+  const parsed = readBody<CreateBranchBody>(body, ['repoPath', 'name'], ['checkout'], ['from'])
   if (isOutcome(parsed)) return parsed
-  const { repoPath, name } = parsed
+  const { repoPath, name, from, checkout } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (name.trim() === '') return fail(400, '"name" must be non-empty')
   // A leading dash would ride `git switch -c` as a flag — reject before the
   // exec, not as an "unknown switch" GitError.
   if (name.startsWith('-')) return fail(400, '"name" must not start with "-"')
+  // The same flag-ride guard for the start point, which lands on
+  // `git branch <name> <from>` verbatim (a remote ref like `origin/x` is
+  // the caller's legitimate shape — passed through untouched).
+  if (from !== undefined) {
+    if (from.trim() === '') return fail(400, '"from" must be non-empty when present')
+    if (from.startsWith('-')) return fail(400, '"from" must not start with "-"')
+  }
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    const created = await createBranch(deps.exec, facts.repoRoot, name)
+    const created = await createBranch(deps.exec, facts.repoRoot, name, from, checkout === true)
     const result: CreateBranchResult = { branch: created }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /branch-rename — rename a LOCAL branch (`git branch -m`). Runs at the
+ * repository root: branch refs are repository-wide and worktree HEADs
+ * pointing at the old name follow the ref. Git validates the new name and
+ * refuses a target that already exists; both map to 400 through
+ * {@link gitFailure}.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handleRenameBranch(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<RenameBranchBody>(body, ['repoPath', 'name', 'newName'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath, name, newName } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  if (name.trim() === '') return fail(400, '"name" must be non-empty')
+  if (newName.trim() === '') return fail(400, '"newName" must be non-empty')
+  // Same flag-ride guard as the create route: the new name lands on
+  // `git branch -m <name> <newName>` verbatim.
+  if (newName.startsWith('-')) return fail(400, '"newName" must not start with "-"')
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const renamed = await renameBranch(deps.exec, facts.repoRoot, name, newName)
+    const result: RenameBranchResult = { branch: renamed }
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /branch-delete — delete a LOCAL branch with the SAFE form
+ * (`git branch -d`): git refuses unmerged commits and branches checked out
+ * in any worktree, both mapping to 400 through {@link gitFailure}. No
+ * force variant — a menu click must never discard commits.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handleDeleteBranch(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<DeleteBranchBody>(body, ['repoPath', 'name'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath, name } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  if (name.trim() === '') return fail(400, '"name" must be non-empty')
+  // Same flag-ride guard as its sibling routes: the name lands on
+  // `git branch -d <name>` verbatim.
+  if (name.startsWith('-')) return fail(400, '"name" must not start with "-"')
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const deleted = await deleteBranch(deps.exec, facts.repoRoot, name)
+    const result: DeleteBranchResult = { branch: deleted }
     return { status: 200, body: result }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)

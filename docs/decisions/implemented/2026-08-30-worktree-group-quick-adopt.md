@@ -1,4 +1,4 @@
-# DR: 工作树分组收集被占用分支，双击直跳工作区
+# DR: 工作树分组收集被占用分支，直跳工作区
 
 Status: implemented
 
@@ -10,7 +10,7 @@ Status: implemented
 
 被 linked worktree 占用的分支从本地分组**移入**顶层第三组「工作树」（位于本地与远程之间）：每个 live worktree 一行（分支名即行名，hover 的原生 title 显示目录路径），组头样式与本地/远程组一致、可折叠、**默认恒开**（它是空白会话的快捷入口，不参与 TREE_MIN_ROWS 的收起规则）。组只在 `session.blank` 时渲染——已开始的会话目录固定，跳转无从谈起。
 
-组内行沿用全菜单统一节奏：单击选中（蓝底）、**双击或 Enter 直接跳转**——`adoptWorktree(path)` 注册目录为工作区并打开新会话。零 git 动作、零网络请求（目录已在 `worktrees` facts 里）、无确认弹层：跳目录可逆且不触碰任何 git 状态，确认弹层在这里是伪安全。跳转失败 toast 报错。主 worktree（"回家"而非"切出去"，且当前会话多半就在其中）与 detached worktree（没有分支名可展示）不进组。
+组内行沿用全菜单统一节奏：单击选中（蓝底）、**Enter 或行右键「跳到此工作树」直接跳转**（初版为双击或 Enter，双击通道已由右键菜单接管退场——见 [分支行右键菜单](2026-09-13-branch-row-context-menu.md)）——`adoptWorktree(path)` 注册目录为工作区并打开新会话。零 git 动作、零网络请求（目录已在 `worktrees` facts 里）、无确认弹层：跳目录可逆且不触碰任何 git 状态，确认弹层在这里是伪安全。跳转失败 toast 报错。主 worktree（"回家"而非"切出去"，且当前会话多半就在其中）与 detached worktree（没有分支名可展示）不进组。
 
 归类同时消灭了禁用机制本身：本地组不再有 git 会拒绝的行，`BranchRow.disabled` 与 `.menuRow:disabled` 一并删除；远程行对"孪生被占用"的防御性禁用也随之消失（该状态只在菜单开着时外部另建 worktree 的时序边缘出现，落到 not found 的 400 toast 兜底）。新建分支与切出命名的重名检查把工作树行名视为已占用（它们就是现存的本地分支）。
 
@@ -24,6 +24,6 @@ Status: implemented
 
 ## Consequences
 
-- 得：空白会话把"进入某个 worktree"收敛为双击一下；本地组不再有死行，禁用机制与 CSS 一并退场，`buildBranchRows` 回归纯数据映射。
+- 得：空白会话把"进入某个 worktree"收敛为一下右键；本地组不再有死行，禁用机制与 CSS 一并退场，`buildBranchRows` 回归纯数据映射。
 - 代价：本地组少了被占用分支（去「工作树」组找，组头恒开所以一眼可见）；搜索 Enter 命中工作树行 = 直接跳转会话（与其余行为语义一致，但动作不可"确认后再看"——跳错会话再切回即可）。
 - 边界：菜单打开期间外部新建/删除 worktree 不会即时反映（数据在打开、聚焦、操作后刷新，与全菜单口径一致）；detached worktree 不出现在组里，仍需终端进入。

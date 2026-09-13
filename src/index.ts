@@ -27,13 +27,13 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps, type RouteOutcome,
 } from './routes.js'
 import {
   loadLegacySettings, migratedFileOf, planLegacyMigration, settingsFileOf, validateRootDir,
 } from './settings.js'
-import { ROUTE_BRANCH, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -229,6 +229,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     postRoute(ROUTE_WORKTREE, 'worktree', handleCreateWorktree)
     postRoute(ROUTE_SWITCH, 'switch', handleSwitch)
     postRoute(ROUTE_BRANCH, 'branch', handleCreateBranch)
+    postRoute(ROUTE_BRANCH_RENAME, 'branch-rename', handleRenameBranch)
+    postRoute(ROUTE_BRANCH_DELETE, 'branch-delete', handleDeleteBranch)
     postRoute(ROUTE_FETCH, 'fetch', handleFetch)
     postRoute(ROUTE_GROUP, 'group', handleGroupWorktrees)
     postRoute(ROUTE_UPDATE, 'update', handleUpdate)

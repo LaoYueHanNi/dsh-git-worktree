@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalize, resolve } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, fetchAll, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, switchBranch, updateBranch,
+  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch,
   type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -280,12 +280,60 @@ describe('createBranch', () => {
     expect(await createBranch(exec, '/repo/wt', 'feat/auth-login')).toBe('feat/auth-login')
   })
 
+  it('creates at an explicit start point without moving the checkout', async () => {
+    const exec = scripted([
+      { args: ['branch', 'dev', 'origin/main'], out: { stdout: '' } },
+    ])
+    expect(await createBranch(exec, '/repo', 'dev', 'origin/main')).toBe('dev')
+  })
+
+  it('creates at a start point and checks it out in one stroke when checkout is set', async () => {
+    const exec = scripted([
+      { args: ['switch', '-c', 'dev', 'origin/main'], out: { stdout: "Switched to a new branch 'dev'\n" } },
+    ])
+    expect(await createBranch(exec, '/repo', 'dev', 'origin/main', true)).toBe('dev')
+  })
+
   it('surfaces a git refusal of the name', async () => {
     const exec = scripted([
       { args: ['switch', '-c', 'bad..name'],
         out: { code: 128, stderr: "fatal: 'bad..name' is not a valid branch name\n" } },
     ])
     await expect(createBranch(exec, '/repo', 'bad..name')).rejects.toThrow('not a valid branch name')
+  })
+})
+
+describe('renameBranch', () => {
+  it('runs branch -m at the repository root and reports the new name', async () => {
+    const exec = scripted([
+      { args: ['branch', '-m', 'feat/x', 'feat/y'], out: { stdout: '' } },
+    ])
+    expect(await renameBranch(exec, '/repo', 'feat/x', 'feat/y')).toBe('feat/y')
+  })
+
+  it('surfaces a git refusal of the new name', async () => {
+    const exec = scripted([
+      { args: ['branch', '-m', 'feat/x', 'bad..name'],
+        out: { code: 128, stderr: "fatal: 'bad..name' is not a valid branch name\n" } },
+    ])
+    await expect(renameBranch(exec, '/repo', 'feat/x', 'bad..name')).rejects.toThrow('not a valid branch name')
+  })
+})
+
+describe('deleteBranch', () => {
+  it('runs the SAFE -d form at the repository root and reports the name', async () => {
+    const exec = scripted([
+      { args: ['branch', '-d', 'feat/x'], out: { stdout: "Deleted branch feat/x (was abc123).\n" } },
+    ])
+    expect(await deleteBranch(exec, '/repo', 'feat/x')).toBe('feat/x')
+  })
+
+  it('surfaces git deletion refusals (unmerged, occupied)', async () => {
+    const exec = scripted([
+      { args: ['branch', '-d', 'feat/x'],
+        out: { code: 1, stderr: "error: the branch 'feat/x' is not fully merged.\n" } },
+    ])
+    await expect(deleteBranch(exec, '/repo', 'feat/x')).rejects.toThrow('not fully merged')
   })
 })
 

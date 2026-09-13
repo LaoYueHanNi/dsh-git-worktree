@@ -19,26 +19,35 @@ export type GitWorktreeKey =
   | 'menuLocate'
   | 'menuExpandAll'
   | 'menuCollapseAll'
-  | 'menuNewBranch'
   | 'menuNewBranchPlaceholder'
   | 'menuNewBranchBad'
   | 'menuNewBranchExists'
   | 'menuFetch'
   | 'menuUpdate'
+  | 'ctxCheckout'
+  | 'ctxHop'
+  | 'ctxCreate'
+  | 'ctxCreateCheckout'
+  | 'ctxRename'
+  | 'ctxDelete'
+  | 'ctxCopyName'
+  | 'ctxCopyPath'
+  | 'renameBranchTitle'
+  | 'renameBranchBusy'
+  | 'createFlyAsk'
+  | 'createCheckoutConfirm'
+  | 'deleteBranchAsk'
+  | 'deleteBranchBusy'
   | 'fetchDone'
   | 'updateDone'
   | 'updateUpToDate'
   | 'aheadTitle'
   | 'behindTitle'
-  | 'switchAsk'
-  | 'switchAskRemote'
-  | 'switchBusy'
   | 'worktreeAskNew'
   | 'worktreeAskRemote'
   | 'worktreeAskReuse'
   | 'worktreeAskCutOut'
   | 'worktreeBusy'
-  | 'createBranchTitle'
   | 'createBranchBusy'
   | 'actionCancel'
   | 'actionConfirm'
@@ -174,26 +183,35 @@ export const en: Record<GitWorktreeKey, string> = {
   menuLocate: 'Locate current branch',
   menuExpandAll: 'Expand all',
   menuCollapseAll: 'Collapse all',
-  menuNewBranch: 'Create branch from current',
   menuNewBranchPlaceholder: 'New branch name',
   menuNewBranchBad: 'Git will not accept this name',
   menuNewBranchExists: 'A branch with this name already exists',
   menuFetch: 'Fetch',
   menuUpdate: 'Update current branch from upstream',
+  ctxCheckout: 'Check out',
+  ctxHop: 'Go to this worktree',
+  ctxCreate: 'New branch',
+  ctxCreateCheckout: 'New branch and check out',
+  ctxRename: 'Rename branch',
+  ctxDelete: 'Delete branch',
+  ctxCopyName: 'Copy branch',
+  ctxCopyPath: 'Copy path',
+  renameBranchTitle: 'Rename {branch}',
+  renameBranchBusy: 'Renaming…',
+  createFlyAsk: 'Enter a new branch name',
+  createCheckoutConfirm: 'Check out',
+  deleteBranchAsk: 'Delete branch {branch}?',
+  deleteBranchBusy: 'Deleting…',
   fetchDone: 'Remote branches synced',
   updateDone: '{branch} fast-forwarded to its upstream',
   updateUpToDate: 'Already up to date',
   aheadTitle: '{n} commits ahead of upstream',
   behindTitle: '{n} commits behind upstream',
-  switchAsk: 'Switch to {branch}?',
-  switchAskRemote: 'Check out this remote branch?',
-  switchBusy: 'Switching…',
   worktreeAskNew: 'Create a worktree from {branch}?',
   worktreeAskRemote: 'Create a worktree from this remote branch?',
   worktreeAskReuse: 'Switch to the {branch} worktree?',
   worktreeAskCutOut: 'Cut a new branch out of {branch} into an isolated worktree',
   worktreeBusy: 'Creating…',
-  createBranchTitle: 'New branch from {branch}',
   createBranchBusy: 'Creating…',
   actionCancel: 'Cancel',
   actionConfirm: 'Confirm',
@@ -330,26 +348,35 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuLocate: '定位当前分支',
   menuExpandAll: '全部展开',
   menuCollapseAll: '全部折叠',
-  menuNewBranch: '从当前分支新建分支',
   menuNewBranchPlaceholder: '新分支名称',
   menuNewBranchBad: 'Git 不接受该名称',
   menuNewBranchExists: '同名分支已存在',
   menuFetch: '提取',
   menuUpdate: '更新当前分支',
+  ctxCheckout: '签出',
+  ctxHop: '跳到此工作树',
+  ctxCreate: '新建',
+  ctxCreateCheckout: '新建并检出',
+  ctxRename: '重命名分支',
+  ctxDelete: '删除分支',
+  ctxCopyName: '复制分支',
+  ctxCopyPath: '复制路径',
+  renameBranchTitle: '重命名 {branch}',
+  renameBranchBusy: '重命名中…',
+  createFlyAsk: '输入新分支名称',
+  createCheckoutConfirm: '检出',
+  deleteBranchAsk: '是否删除分支 {branch}？',
+  deleteBranchBusy: '删除中…',
   fetchDone: '远程分支已同步',
   updateDone: '{branch} 已快进到远程最新',
   updateUpToDate: '已是最新',
   aheadTitle: '领先上游 {n} 个提交',
   behindTitle: '落后上游 {n} 个提交',
-  switchAsk: '是否切到 {branch}？',
-  switchAskRemote: '是否检出该远程分支？',
-  switchBusy: '切换中…',
   worktreeAskNew: '是否从 {branch} 新建工作树？',
   worktreeAskRemote: '从该远程分支新建工作树？',
   worktreeAskReuse: '是否切到 {branch} 工作树？',
   worktreeAskCutOut: '从当前分支 {branch} 切出新分支到隔离工作树',
   worktreeBusy: '创建中…',
-  createBranchTitle: '从 {branch} 新建分支',
   createBranchBusy: '创建中…',
   actionCancel: '取消',
   actionConfirm: '确认',

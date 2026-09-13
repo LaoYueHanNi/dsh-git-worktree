@@ -40,9 +40,9 @@
  *
  * Branches held by linked worktrees get their own 「工作树」 group (blank
  * sessions only): they have left the local group — git refuses to check
- * them out twice, so a local-group row would be a dead end — and a
- * double-click hops the session straight into that worktree directory
- * (adoptWorktree; no git action, no confirm). A started session's
+ * them out twice, so a local-group row would be a dead end — and the row
+ * menu's 「跳到此工作树」 hops the session straight into that worktree
+ * directory (adoptWorktree; no git action, no confirm). A started session's
  * directory is fixed, so the group only exists while blank.
  */
 
@@ -57,7 +57,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { branchNameIssue, localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
-import { fetchStatus, requestCreateBranch, requestFetch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
@@ -93,14 +93,15 @@ interface StatusState {
   facts: (RepoStatus & { repo: true }) | null
 }
 
-/** One pending confirm dialog. */
+/** One pending confirm dialog. Switches are NOT here — 签出 runs directly
+ * (keep-open, no confirmation step); the confirms left are the ones with
+ * real consequences to spell out or inputs to carry. */
 interface ConfirmState {
-  kind: 'switch' | 'worktree' | 'worktree-cutout'
+  kind: 'worktree' | 'worktree-cutout' | 'delete'
   branch: string
   /** True when `branch` names a REMOTE branch (an `origin/feat-x` row):
-   * the switch confirm creates the local tracking twin, the worktree
-   * confirm creates the twin plus its worktree — the ask lines spell that
-   * out instead of reading as a plain in-place switch. */
+   * the worktree confirm creates the twin plus its worktree — the ask line
+   * spells that out instead of reading as a plain reuse. */
   remote?: boolean
   /** Editable cutout name (kind `worktree-cutout` only): pre-filled with
    * the first free `<branch>-wt` name, editable before confirming. */
@@ -388,11 +389,11 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     // during the blank phase must not survive into branch switching — nor
     // its confirm: a keyboard-only send (no outside pointerdown to dismiss
     // it) can start the session while the cutout dialog still floats over a
-    // withdrawn toggle. Switch confirms stay: in-place branch switching is
-    // a started-session feature.
+    // withdrawn toggle. (Switches stage no dialog anymore — 签出 runs
+    // directly.)
     if (!session.blank) {
       setWorktreeMode(false)
-      setConfirm(current => current !== null && current.kind !== 'switch' ? null : current)
+      setConfirm(null)
     }
   }, [session.blank])
 
@@ -425,8 +426,11 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     setToast({ seq: Date.now(), text: t('errorGeneric', { message }) })
   }, [t])
 
-  /** Run one guarded confirm action: single-flight, toast on failure, close on success. */
-  const runGuarded = useCallback(async (action: () => Promise<string | undefined>): Promise<void> => {
+  /** Run one guarded confirm action: single-flight, toast on failure. On
+   * success the confirm clears; the MENU closes unless `keepOpen` (the row
+   * menu's rule: 原地动作 leave the picker up), and `onSettled` — the
+   * flyout's success-only close hook — fires after both. */
+  const runGuarded = useCallback(async (action: () => Promise<string | undefined>, keepOpen = false, onSettled?: () => void): Promise<void> => {
     if (busyRef.current) return
     busyRef.current = true
     setBusy(true)
@@ -438,30 +442,53 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return
     }
     setConfirm(null)
-    setMenuOpen(false)
+    if (!keepOpen) setMenuOpen(false)
+    onSettled?.()
   }, [showError])
 
   /** In-place switch flow: POST /switch, then refetch the status. */
-  const doSwitch = useCallback((branch: string) => runGuarded(async () => {
+  const doSwitch = useCallback((branch: string, keepOpen = false) => runGuarded(async () => {
     if (cwd === undefined) return 'no session directory'
     const result = await requestSwitch(cwd, branch)
     if (!result.ok) return result.error
     await refresh()
     return undefined
-  }), [cwd, refresh, runGuarded])
+  }, keepOpen), [cwd, refresh, runGuarded])
 
-  /** Create-branch flow: POST /branch (create from the current checkout and
-   * switch to it in place), then refetch the status — the menu closed by
-   * then, and the chip label must name the new branch. Fired directly by
-   * the menu's create flyout (no confirm kind): typing the name into the
-   * flyout and pressing Create is the intent. */
-  const doCreateBranch = useCallback((name: string) => runGuarded(async () => {
+  /** Create-branch flow: POST /branch (`from` + `checkout` split the three
+   * shapes — see the wire docs), then refetch the status. ALWAYS keep-open:
+   * the row menu is the only entry now, and the whole point of the menu is
+   * acting on more rows afterwards; `onSettled` closes the create flyout
+   * on success only. */
+  const doCreateBranch = useCallback((name: string, from: string | undefined, checkout: boolean, onSettled: () => void) => runGuarded(async () => {
     if (cwd === undefined) return 'no session directory'
-    const result = await requestCreateBranch(cwd, name)
+    const result = await requestCreateBranch(cwd, name, from, checkout)
     if (!result.ok) return result.error
     await refresh()
     return undefined
-  }), [cwd, refresh, runGuarded])
+  }, true, onSettled), [cwd, refresh, runGuarded])
+
+  /** Rename-branch flow: POST /branch-rename (`git branch -m`, repository-
+   * wide), then refetch the status — the chip label and the row follow the
+   * new name. Keep-open + success-only `onSettled`, like the create. */
+  const doRenameBranch = useCallback((name: string, newName: string, onSettled: () => void) => runGuarded(async () => {
+    if (cwd === undefined) return 'no session directory'
+    const result = await requestRenameBranch(cwd, name, newName)
+    if (!result.ok) return result.error
+    await refresh()
+    return undefined
+  }, true, onSettled), [cwd, refresh, runGuarded])
+
+  /** Delete-branch flow: POST /branch-delete (the SAFE `-d`; git refuses
+   * unmerged commits and occupied branches with a 400 toast), then refetch
+   * the status — the refreshed rows drop the row, the menu stays. */
+  const doDeleteBranch = useCallback((name: string) => runGuarded(async () => {
+    if (cwd === undefined) return 'no session directory'
+    const result = await requestDeleteBranch(cwd, name)
+    if (!result.ok) return result.error
+    await refresh()
+    return undefined
+  }, true), [cwd, refresh, runGuarded])
 
   /** Remote-sync flow: POST /fetch (fetch every remote + prune), then
    * refetch the status. Deliberately NOT runGuarded: its success closes the
@@ -521,7 +548,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   }, [cwd, refresh, showError, t])
 
   /** Worktree-group flow: hop the session into the EXISTING worktree
-   * directory. No git action, no confirm — the double-click IS the hop
+   * directory. No git action, no confirm — the row menu's hop IS the jump
    * (a directory jump is reversible and touches nothing), and the owner's
    * adoptWorktree registers the folder and opens a blank session there. */
   const doAdoptWorktree = useCallback((path: string): void => {
@@ -615,32 +642,32 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     : facts.worktrees.find(w => w.branch === confirmLocalName)
 
   /** One confirm bundle shared by the menu flyout and the standalone
-   * dialog (whichever is showing). Remote picks keep the ask line SHORT (a
-   * wrapping sentence with long branch names breaks badly) and name the
-   * branch on its own weight-500 line — the dwim/worktree consequences are
-   * git's default behavior, not worth a third line. */
+   * dialog (whichever is showing). Switches stage NO dialog — 签出 runs
+   * directly (keep-open); what remains is the destructive delete and the
+   * worktree/cutout dialogs, the latter carrying the editable new-branch
+   * name. Remote worktree picks keep the ask line SHORT and name the
+   * branch on its own weight-500 line. */
   const confirmBundle = confirm === null ? null : {
     ask: confirm.kind === 'worktree-cutout'
       ? t('worktreeAskCutOut', { branch: confirmLocalName })
-      : confirm.kind === 'worktree'
-        ? confirm.remote === true
-          ? t('worktreeAskRemote')
-          : t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName })
+      : confirm.kind === 'delete'
+        ? t('deleteBranchAsk', { branch: confirm.branch })
         : confirm.remote === true
-          ? t('switchAskRemote')
-          : t('switchAsk', { branch: confirm.branch }),
+          ? t('worktreeAskRemote')
+          : t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName }),
     ...confirm.remote === true ? { subject: confirm.branch } : {},
     confirmLabel: busy
-      ? (confirm.kind === 'worktree' || confirm.kind === 'worktree-cutout' ? t('worktreeBusy') : t('switchBusy'))
+      ? (confirm.kind === 'delete' ? t('deleteBranchBusy') : t('worktreeBusy'))
       : t('actionConfirm'),
     cancelLabel: t('actionCancel'),
     busy,
     onConfirm: () => {
-      if (confirm.kind === 'worktree' || confirm.kind === 'worktree-cutout') {
-        if (confirm.kind === 'worktree-cutout' && !cutoutValid) return
-        void doWorktree(confirm.branch, confirm.kind === 'worktree-cutout', confirm.draft)
+      if (confirm.kind === 'delete') {
+        void doDeleteBranch(confirm.branch)
+      } else if (confirm.kind === 'worktree-cutout' && !cutoutValid) {
+        return
       } else {
-        void doSwitch(confirm.branch)
+        void doWorktree(confirm.branch, confirm.kind === 'worktree-cutout', confirm.draft)
       }
     },
     onCancel: () => { if (!busy) setConfirm(null) },
@@ -716,7 +743,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         canCreate={!worktreeMode && !inLinkedWorktree}
         canAdopt={session.blank}
         busy={busy}
-        onCreate={(name) => { void doCreateBranch(name) }}
+        onCreate={(name, from, checkout, onSettled) => { void doCreateBranch(name, from, checkout, onSettled) }}
+        onRename={(name, newName, onSettled) => { void doRenameBranch(name, newName, onSettled) }}
+        onDelete={(branch) => {
+          // The confirm flyout's anchor was staged by the row menu (it
+          // knows the row element); here we only stage the dialog itself.
+          setConfirm({ kind: 'delete', branch })
+        }}
         onFetch={() => { void doFetch() }}
         fetchBusy={fetchBusy}
         onUpdate={() => { void doUpdate() }}
@@ -724,10 +757,12 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         onSelect={(branch) => {
           // In worktree mode re-selecting the CURRENT branch stages the
           // cut-out dialog (editable name); without the mode it is a plain
-          // close. Any other pick stages the regular confirm flyout beside
-          // that row (menu stays open) — except a WORKTREE row: the pick
-          // hops the session straight into that worktree directory, no
-          // confirm (the menu closes on success).
+          // close. Any other pick executes DIRECTLY — no confirm dialog on
+          // the switch path (right-click 签出 and Enter are the same stroke,
+          // keep-open so the picker stays up) — except a WORKTREE row: the
+          // pick hops the session into that worktree directory (the menu
+          // closes on success; the session moved). In worktree mode the
+          // "switch" stages the worktree dialog instead (reuse or cut).
           if (branch === facts.currentBranch) {
             if (worktreeMode) {
               setConfirm({
@@ -753,11 +788,15 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
             doAdoptWorktree(row.path)
             return
           }
-          // Remote rows carry the remote-twin wording into whichever confirm
-          // they stage (switch = tracking twin in place, worktree = twin in
-          // its own directory); local rows keep the plain asks.
-          const remote = row?.kind === 'remote'
-          setConfirm({ kind: worktreeMode ? 'worktree' : 'switch', branch, remote })
+          if (worktreeMode) {
+            // Remote rows carry the remote-twin wording into the dialog
+            // (twin in its own directory); local rows the plain reuse ask.
+            setConfirm({ kind: 'worktree', branch, remote: row?.kind === 'remote' })
+            return
+          }
+          // 签出, confirmation-free: an in-place `git switch` (remote rows
+          // dwim their tracking twin), menu stays open.
+          void doSwitch(branch, true)
         }}
         onClose={() => { setMenuOpen(false) }}
         t={t}

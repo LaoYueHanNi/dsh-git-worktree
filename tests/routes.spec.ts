@@ -4,7 +4,7 @@ import { join, normalize, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Exec, ExecResult } from '../src/git.ts'
 import {
-  handleCreateBranch, handleCreateWorktree, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleStatus, handleSwitch, handleUpdate,
+  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate,
   type RouteDeps,
 } from '../src/routes.ts'
 import { resolveRootDir } from '../src/settings.ts'
@@ -275,9 +275,26 @@ describe('handleCreateBranch', () => {
     expect(outcome).toEqual({ status: 200, body: { branch: 'feat/x' } })
   })
 
+  it('creates at an explicit start point without touching the checkout', async () => {
+    const calls = { ...REPO_CALLS, 'branch dev origin/main': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'dev', from: 'origin/main' })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'dev' } })
+  })
+
+  it('creates at a start point and checks it out when checkout is set', async () => {
+    const calls = { ...REPO_CALLS, 'switch -c dev origin/main': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'dev', from: 'origin/main', checkout: true })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'dev' } })
+  })
+
   it('rejects unknown body keys', async () => {
-    expect((await handleCreateBranch(deps(), { repoPath: '/repo', name: 'dev', from: 'main' })).status).toBe(400)
+    expect((await handleCreateBranch(deps(), { repoPath: '/repo', name: 'dev', bases: 'main' })).status).toBe(400)
     expect((await handleCreateBranch(deps(), null)).status).toBe(400)
+  })
+
+  it('rejects a leading-dash or empty start point before it can ride the command line', async () => {
+    expect((await handleCreateBranch(deps(), { repoPath: '/repo', name: 'dev', from: '-main' })).status).toBe(400)
+    expect((await handleCreateBranch(deps(), { repoPath: '/repo', name: 'dev', from: '  ' })).status).toBe(400)
   })
 
   it('rejects a non-absolute repoPath or empty name', async () => {
@@ -320,6 +337,73 @@ describe('handleCreateBranch', () => {
     expect(outcome.status).toBe(400)
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('already exists')
+  })
+})
+
+describe('handleRenameBranch', () => {
+  it('renames at the repository root and reports the new name', async () => {
+    const calls = { ...REPO_CALLS, 'branch -m feat/x feat/y': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleRenameBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'feat/x', newName: 'feat/y' })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'feat/y' } })
+  })
+
+  it('rejects unknown body keys, a non-absolute repoPath, and an empty name', async () => {
+    expect((await handleRenameBranch(deps(), { repoPath: '/repo', name: 'feat/x', newName: 'feat/y', force: true })).status).toBe(400)
+    expect((await handleRenameBranch(deps(), { repoPath: 'repo', name: 'feat/x', newName: 'feat/y' })).status).toBe(400)
+    expect((await handleRenameBranch(deps(), { repoPath: '/repo', name: 'feat/x', newName: '  ' })).status).toBe(400)
+  })
+
+  it('rejects a leading dash in the new name before it can ride the command line', async () => {
+    const outcome = await handleRenameBranch(deps(), { repoPath: '/repo', name: 'feat/x', newName: '-feat' })
+    expect(outcome.status).toBe(400)
+  })
+
+  it('maps a duplicate target to a 400 envelope', async () => {
+    const calls = {
+      ...REPO_CALLS,
+      'branch -m feat/x main': { code: 128, stderr: "fatal: a branch named 'main' already exists\n" },
+    } as Record<string, Partial<ExecResult>>
+    const outcome = await handleRenameBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'feat/x', newName: 'main' })
+    expect(outcome.status).toBe(400)
+    if (!('error' in outcome.body)) throw new Error('expected error body')
+    expect(outcome.body.error).toContain('already exists')
+  })
+})
+
+describe('handleDeleteBranch', () => {
+  it('deletes with the safe -d form and reports the name', async () => {
+    const calls = { ...REPO_CALLS, 'branch -d feat/x': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleDeleteBranch(deps({ exec: scripted(calls) }), { repoPath: '/repo', name: 'feat/x' })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'feat/x' } })
+  })
+
+  it('rejects unknown body keys, a non-absolute repoPath, and an empty name', async () => {
+    expect((await handleDeleteBranch(deps(), { repoPath: '/repo', name: 'feat/x', force: true })).status).toBe(400)
+    expect((await handleDeleteBranch(deps(), { repoPath: 'repo', name: 'feat/x' })).status).toBe(400)
+    expect((await handleDeleteBranch(deps(), { repoPath: '/repo', name: '  ' })).status).toBe(400)
+  })
+
+  it('rejects a leading dash before it can ride the command line as a flag', async () => {
+    const outcome = await handleDeleteBranch(deps(), { repoPath: '/repo', name: '-feat' })
+    expect(outcome.status).toBe(400)
+  })
+
+  it('maps deletion refusals (unmerged, checked out) to a 400 envelope', async () => {
+    const unmerged = {
+      ...REPO_CALLS,
+      'branch -d feat/x': { code: 1, stderr: "error: the branch 'feat/x' is not fully merged.\n" },
+    } as Record<string, Partial<ExecResult>>
+    const occupied = {
+      ...REPO_CALLS,
+      'branch -d main': { code: 1, stderr: "error: Cannot delete branch 'main' checked out at '/repo'\n" },
+    } as Record<string, Partial<ExecResult>>
+    const first = await handleDeleteBranch(deps({ exec: scripted(unmerged) }), { repoPath: '/repo', name: 'feat/x' })
+    const second = await handleDeleteBranch(deps({ exec: scripted(occupied) }), { repoPath: '/repo', name: 'main' })
+    expect(first.status).toBe(400)
+    expect(second.status).toBe(400)
+    if (!('error' in first.body) || !('error' in second.body)) throw new Error('expected error bodies')
+    expect(first.body.error).toContain('not fully merged')
+    expect(second.body.error).toContain('Cannot delete branch')
   })
 })
 

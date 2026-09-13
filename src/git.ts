@@ -385,19 +385,67 @@ export async function switchBranch(exec: Exec, repoRoot: string, branch: string)
 }
 
 /**
- * Create a NEW branch from the current checkout and check it out in place
- * (`git switch -c`): the cut point is whatever the queried directory's HEAD
- * points at, so a detached or unborn checkout cuts from the current commit
- * too. Runs at the queried directory's own toplevel — a session inside a
- * linked worktree creates and checks out within that worktree, never the
- * main checkout (the same semantics as {@link switchBranch}).
+ * Create a NEW branch. Three shapes:
+ *
+ *   - no `from`: cut from the current checkout and check it out in place
+ *     (`git switch -c`) — the cut point is whatever the queried directory's
+ *     HEAD points at, so a detached or unborn checkout cuts from the current
+ *     commit too. Runs at the queried directory's own toplevel — a session
+ *     inside a linked worktree creates and checks out within that worktree,
+ *     never the main checkout (the same semantics as {@link switchBranch}).
+ *   - `from` without `checkout`: create AT that start point WITHOUT touching
+ *     any checkout (`git branch`) — a create aimed at another branch must
+ *     not move this session's HEAD.
+ *   - `from` with `checkout`: create at the start point AND check it out
+ *     here in one stroke (`git switch -c <name> <from>`).
  * @param exec - executor seam.
  * @param cwd - directory whose HEAD the branch is cut from (worktree toplevel).
  * @param name - new branch name (git validates; failures raise GitError).
- * @returns the branch name now created and checked out.
+ * @param from - optional start point; absent keeps the in-place semantics.
+ * @param checkout - with `from`, also check the new branch out here.
+ * @returns the branch name now created (checked out unless created at a
+ * start point with `checkout` false).
  */
-export async function createBranch(exec: Exec, cwd: string, name: string): Promise<string> {
-  await git(exec, cwd, ['switch', '-c', name])
+export async function createBranch(exec: Exec, cwd: string, name: string, from?: string, checkout = false): Promise<string> {
+  if (from === undefined || checkout) {
+    const startPoint = from === undefined ? [] : [from]
+    await git(exec, cwd, ['switch', '-c', name, ...startPoint])
+    return name
+  }
+  await git(exec, cwd, ['branch', name, from])
+  return name
+}
+
+/**
+ * Rename a LOCAL branch (`git branch -m`): branch refs are repository-wide,
+ * so the command runs at the repository root and every worktree HEAD pointing
+ * at the old name follows the ref. Git validates the new name and refuses a
+ * target that already exists; remote branches are not renameable (not ours).
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param name - branch to rename.
+ * @param newName - the new local name.
+ * @returns the new name.
+ */
+export async function renameBranch(exec: Exec, repoRoot: string, name: string, newName: string): Promise<string> {
+  await git(exec, repoRoot, ['branch', '-m', name, newName])
+  return newName
+}
+
+/**
+ * Delete a LOCAL branch (`git branch -d`, the SAFE form): git refuses a
+ * branch with unmerged commits ("not fully merged") and one checked out in
+ * any worktree — both caller-side state, mapped to 400 by the route. No
+ * `-D` force variant on purpose: a menu click must never discard commits
+ * (the terminal is the place for deliberate force-deletes). Runs at the
+ * repository root; remote branches are not ours to delete.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param name - branch to delete.
+ * @returns the name of the branch that was deleted.
+ */
+export async function deleteBranch(exec: Exec, repoRoot: string, name: string): Promise<string> {
+  await git(exec, repoRoot, ['branch', '-d', name])
   return name
 }
 

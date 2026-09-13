@@ -17,8 +17,17 @@ export const ROUTE_WORKTREE = `${ROUTE_PREFIX}/worktree`
 /** POST ROUTE_PREFIX/switch — in-place branch switch of the main checkout. */
 export const ROUTE_SWITCH = `${ROUTE_PREFIX}/switch`
 
-/** POST ROUTE_PREFIX/branch — create a NEW branch from the current checkout and switch to it. */
+/** POST ROUTE_PREFIX/branch — create a NEW branch (at the current checkout
+ * or an explicit start point, with or without checking it out). */
 export const ROUTE_BRANCH = `${ROUTE_PREFIX}/branch`
+
+/** POST ROUTE_PREFIX/branch-rename — rename a LOCAL branch (refs are
+ * repository-wide; worktree HEADs pointing at it follow). */
+export const ROUTE_BRANCH_RENAME = `${ROUTE_PREFIX}/branch-rename`
+
+/** POST ROUTE_PREFIX/branch-delete — delete a LOCAL branch (`-d`, merged
+ * only; git refuses the rest). */
+export const ROUTE_BRANCH_DELETE = `${ROUTE_PREFIX}/branch-delete`
 
 /** POST ROUTE_PREFIX/fetch — sync remote-tracking refs (fetch every remote + prune). */
 export const ROUTE_FETCH = `${ROUTE_PREFIX}/fetch`
@@ -122,16 +131,57 @@ export interface SwitchResult {
 
 /** POST branch request body. */
 export interface CreateBranchBody {
-  /** Any directory inside the repository (workspace cwd) — the new branch is
-   * cut from whatever this directory's HEAD points at and checked out HERE. */
+  /** Any directory inside the repository (workspace cwd). Without `from` the
+   * new branch is cut from whatever this directory's HEAD points at and
+   * checked out HERE. */
   repoPath: string
   /** User-typed name of the branch to create (a local name, verbatim). */
   name: string
+  /** Optional start point (a local branch or a remote-tracking ref like
+   * `origin/feat-x`). Absent keeps the original in-place semantics: create
+   * AND check out here. */
+  from?: string
+  /** With `from`, ALSO check the new branch out in the queried directory
+   * (`git switch -c <name> <from>`) instead of leaving every checkout
+   * untouched (`git branch <name> <from>`). Ignored without `from` —
+   * the no-`from` shape always checks out. */
+  checkout?: boolean
 }
 
 /** POST branch response body. */
 export interface CreateBranchResult {
-  /** The branch created and now checked out. */
+  /** The branch created; checked out in the queried directory unless
+   * created at a start point with `checkout` left false. */
+  branch: string
+}
+
+/** POST branch-rename request body. */
+export interface RenameBranchBody {
+  /** Any directory inside the repository (branch refs are repository-wide). */
+  repoPath: string
+  /** The branch to rename (a LOCAL name; remote branches are not ours). */
+  name: string
+  /** User-typed new name (a local name, verbatim). */
+  newName: string
+}
+
+/** POST branch-rename response body. */
+export interface RenameBranchResult {
+  /** The branch's new name. */
+  branch: string
+}
+
+/** POST branch-delete request body. */
+export interface DeleteBranchBody {
+  /** Any directory inside the repository (branch refs are repository-wide). */
+  repoPath: string
+  /** The branch to delete (a LOCAL name; remote branches are not ours). */
+  name: string
+}
+
+/** POST branch-delete response body. */
+export interface DeleteBranchResult {
+  /** The branch that was deleted. */
   branch: string
 }
 
