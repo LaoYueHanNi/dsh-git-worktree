@@ -241,11 +241,13 @@ async function listWorktrees(exec: Exec, repoRoot: string): Promise<WorktreeEntr
 
 /**
  * Resolve a branch display name against the authoritative branch list of the
- * repository.
+ * repository. Exported for the /worktree route's fetch gate: the pre-create
+ * remote sync only earns its round trip when the display name is REMOTE-only
+ * (a local branch's worktree never consumes fetched refs).
  * @returns the local name plus the tracking remote when the display name is
  * remote-only, or undefined when neither shape exists.
  */
-async function resolveBranch(exec: Exec, repoRoot: string, branch: string): Promise<{ local: string; remote: string | undefined } | undefined> {
+export async function resolveBranch(exec: Exec, repoRoot: string, branch: string): Promise<{ local: string; remote: string | undefined } | undefined> {
   const localsOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
   const locals = localsOut.split('\n').map(l => l.trim()).filter(l => l !== '')
   if (locals.includes(branch)) return { local: branch, remote: undefined }

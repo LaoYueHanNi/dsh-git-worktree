@@ -19,8 +19,9 @@ import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './sidebar-search.ts'
+import { groupScanEntries } from './scan-groups.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
-import { pathKey } from './worktree-prune.ts'
+import { freshestUpdatedAt, pathKey } from './worktree-prune.ts'
 import css from './WorktreeManagerModal.module.css'
 
 /** Structural minimums of the browser facts the dialog reads; the slot
@@ -194,16 +195,11 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
     face.workspaces().find(ws => pathKey(ws.path) === pathKey(path))?.workspaceId
 
   const activityOf = (path: string): number => {
-    let latest = 0
-    for (const workspace of face.workspaces()) {
-      if (pathKey(workspace.path) !== pathKey(path)) continue
-      for (const sessionId of workspace.sessionIds) {
-        const summary = face.sessionById(sessionId)
-        if (summary === undefined || summary.blank || summary.origin === 'subagent') continue
-        if (summary.updatedAt > latest) latest = summary.updatedAt
-      }
-    }
-    return latest
+    const workspace = face.workspaces().find(ws => pathKey(ws.path) === pathKey(path))
+    if (workspace === undefined) return 0
+    // The same helper the lazy prune orders by — the manager's last-use
+    // column and the prune's victim order cannot disagree.
+    return freshestUpdatedAt(workspace.sessionIds.map(id => face.sessionById(id)))
   }
 
   const validCount = scan.status === 'ready' ? scan.entries.filter(entry => entry.repoName !== null).length : 0
@@ -224,64 +220,68 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
             <div className={css.count} role="status">{t('manager.count', { n: validCount })}</div>
             {scan.entries.length === 0 && <div className={css.empty}>{t('manager.empty')}</div>}
             <div className={css.list}>
-              {scan.entries.map((entry) => {
-                const unknown = entry.repoName === null
-                const activity = unknown ? 0 : activityOf(entry.path)
-                const running = !unknown && runningPaths.has(pathKey(entry.path))
-                const dirty = inspects[entry.path]?.dirty ?? 0
-                return (
-                  <div key={entry.path} className={css.row}>
-                    <div className={css.rowMain}>
-                      <div className={css.rowHead}>
-                        <span className={unknown ? css.rowRepoUnknown : css.rowRepo}>
-                          {unknown ? t('manager.unknown') : entry.repoName}
-                        </span>
-                        {!unknown && <span className={css.rowBranch}>{entry.branch ?? '—'}</span>}
-                        {!unknown && dirty > 0 && (
-                          <span className={css.rowDirty} role="status">
-                            {t(dirty === 1 ? 'manager.dirty.one' : 'manager.dirty.other', { n: dirty })}
-                          </span>
-                        )}
-                        {!unknown && (
-                          <span className={css.rowActivity}>
-                            {activity > 0 ? timeLabel(activity, now, t) : t('manager.activityNever')}
-                          </span>
+              {groupScanEntries(scan.entries).map(group => (
+                <div key={group.repoName ?? '<orphans>'} className={css.group}>
+                  <div className={css.groupHead} role="presentation">
+                    {group.repoName ?? t('manager.orphans')}
+                  </div>
+                  {group.entries.map((entry) => {
+                    const unknown = entry.repoName === null
+                    const activity = unknown ? 0 : activityOf(entry.path)
+                    const running = !unknown && runningPaths.has(pathKey(entry.path))
+                    const dirty = inspects[entry.path]?.dirty ?? 0
+                    return (
+                      <div key={entry.path} className={css.row}>
+                        <div className={css.rowMain}>
+                          <div className={css.rowHead}>
+                            <span className={css.rowBranch}>{entry.branch ?? '—'}</span>
+                            {!unknown && dirty > 0 && (
+                              <span className={css.rowDirty} role="status">
+                                {t(dirty === 1 ? 'manager.dirty.one' : 'manager.dirty.other', { n: dirty })}
+                              </span>
+                            )}
+                            {!unknown && (
+                              <span className={css.rowActivity}>
+                                {activity > 0 ? timeLabel(activity, now, t) : t('manager.activityNever')}
+                              </span>
+                            )}
+                          </div>
+                          <div className={css.rowPath} title={entry.path}>{entry.path}</div>
+                        </div>
+                        {!unknown ? (
+                          <button
+                            type="button"
+                            className={css.remove}
+                            disabled={running}
+                            title={running ? t('manager.running') : t('manager.removeAria', { path: entry.path })}
+                            aria-label={t('manager.removeAria', { path: entry.path })}
+                            onClick={() => {
+                              setRemoveTarget({ path: entry.path, branch: entry.branch, kind: 'git' })
+                              setRemoveError(null)
+                            }}
+                          >
+                            {t('worktreeRemove.menu')}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={css.remove}
+                            disabled={running}
+                            title={running ? t('manager.running') : t('manager.purgeAria', { path: entry.path })}
+                            aria-label={t('manager.purgeAria', { path: entry.path })}
+                            onClick={() => {
+                              setRemoveTarget({ path: entry.path, branch: null, kind: 'orphan' })
+                              setRemoveError(null)
+                            }}
+                          >
+                            {t('manager.purgeMenu')}
+                          </button>
                         )}
                       </div>
-                      <div className={css.rowPath} title={entry.path}>{entry.path}</div>
-                    </div>
-                    {!unknown ? (
-                      <button
-                        type="button"
-                        className={css.remove}
-                        disabled={running}
-                        title={running ? t('manager.running') : t('manager.removeAria', { path: entry.path })}
-                        aria-label={t('manager.removeAria', { path: entry.path })}
-                        onClick={() => {
-                          setRemoveTarget({ path: entry.path, branch: entry.branch, kind: 'git' })
-                          setRemoveError(null)
-                        }}
-                      >
-                        {t('worktreeRemove.menu')}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className={css.remove}
-                        disabled={running}
-                        title={running ? t('manager.running') : t('manager.purgeAria', { path: entry.path })}
-                        aria-label={t('manager.purgeAria', { path: entry.path })}
-                        onClick={() => {
-                          setRemoveTarget({ path: entry.path, branch: null, kind: 'orphan' })
-                          setRemoveError(null)
-                        }}
-                      >
-                        {t('manager.purgeMenu')}
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -313,9 +313,9 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         {removeTarget?.kind === 'git' && inspects[removeTarget.path] !== undefined && (
           <div className={css.removeFacts}>
             <div className={(inspects[removeTarget.path]?.dirty ?? 0) > 0 ? `${css.removeFact} ${css.removeFactWarn}` : css.removeFact}>
-              {(inspects[removeTarget.path]?.dirty ?? 0) > 0
-                ? t('worktreeRemove.dirty.other', { n: inspects[removeTarget.path]?.dirty ?? 0 })
-                : t('worktreeRemove.clean')}
+            {(inspects[removeTarget.path]?.dirty ?? 0) > 0
+              ? t((inspects[removeTarget.path]?.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: inspects[removeTarget.path]?.dirty ?? 0 })
+              : t('worktreeRemove.clean')}
             </div>
             {removeTarget !== null && inspects[removeTarget.path]?.ahead !== undefined && (inspects[removeTarget.path]?.ahead ?? 0) > 0 && (
               <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: inspects[removeTarget.path]?.ahead ?? 0 })}</div>

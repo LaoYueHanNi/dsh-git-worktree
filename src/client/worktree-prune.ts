@@ -26,6 +26,29 @@ export function pathKey(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
+/** The slice of a session summary the activity scan needs (structural
+ * minimum — both consumers read framework snapshots through their own
+ * faces). */
+export interface ActivitySummary {
+  readonly updatedAt: number
+  readonly blank?: boolean
+  readonly origin?: string
+}
+
+/** Freshest `updatedAt` across QUALIFYING sessions (non-blank, non-subagent
+ * — the same qualification the archive set uses); 0 when nothing qualifies,
+ * which reads as "least active in the room". Shared by the lazy prune's
+ * plan input and the manager dialog's last-use column so the two activity
+ * figures can never drift apart. */
+export function freshestUpdatedAt(summaries: readonly (ActivitySummary | undefined)[]): number {
+  let latest = 0
+  for (const summary of summaries) {
+    if (summary === undefined || summary.blank || summary.origin === 'subagent') continue
+    if (summary.updatedAt > latest) latest = summary.updatedAt
+  }
+  return latest
+}
+
 /** Inputs of the plan, all browser-side facts. */
 export interface PrunePlanInput {
   /** Absolute directories of every VALID worktree the scan found (orphans

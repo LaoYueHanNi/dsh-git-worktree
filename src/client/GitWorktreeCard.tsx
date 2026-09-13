@@ -19,6 +19,8 @@ import { useState } from 'react'
 import { IconChevronDownOutline14, IconLoadingOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CardActions, CardStore } from './card-form.ts'
+import { readPruneHistory } from './prune-history.ts'
+import { timeLabel } from './sidebar-search.ts'
 import { WorktreeManagerModal, type WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import css from './GitWorktreeCard.module.css'
 
@@ -213,6 +215,43 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
               <span className={css.toggleHint}>{t('cardKeepWorktreesHint')}</span>
               {!state.keepWorktreesValid && <span className={css.keepBad} role="alert">{t('cardKeepWorktreesBad')}</span>}
             </label>
+            {/* The auto-prune's audit trail (browser-local, newest first):
+              * which run removed whose worktrees, so a misjudged activity
+              * is discoverable after the toast has faded. Read at render —
+              * expanding the card re-reads, a finished prune shows on the
+              * next look. */}
+            {state.autoPruneWorktrees && (
+              <div className={`${css.field} ${css.historyRow}`}>
+                <span className={css.fieldLabel}>{t('cardPruneHistoryLabel')}</span>
+                {(() => {
+                  const history = readPruneHistory()
+                  if (history.length === 0) return <span className={css.toggleHint}>{t('cardPruneHistoryEmpty')}</span>
+                  return (
+                    <ul className={css.history}>
+                      {history.map(run => (
+                        <li key={run.at} className={css.historyRun}>
+                          <span className={css.historyTime}>{timeLabel(run.at, Date.now(), t)}</span>
+                          {run.removed.length > 0
+                            ? (
+                              <span className={css.historyLine}>
+                                {t('cardPruneHistoryRun', { n: run.removed.length })}
+                                {run.removed.map(item => ` ${item.repoName}/${item.branch}`).join(' ·')}
+                              </span>
+                            )
+                            : <span className={css.historyLine}>{t('cardPruneHistoryNone')}</span>}
+                          {run.skippedDirty.length > 0 && (
+                            <span className={css.historyLine}>{t('cardPruneHistorySkipped', { n: run.skippedDirty.length })}</span>
+                          )}
+                          {run.failed.length > 0 && (
+                            <span className={css.historyLine}>{t('cardPruneHistoryFailed', { n: run.failed.length })}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                })()}
+              </div>
+            )}
             <WorktreeManagerModal
               open={managerOpen}
               onClose={() => { setManagerOpen(false) }}

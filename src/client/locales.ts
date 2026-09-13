@@ -86,11 +86,18 @@ export type GitWorktreeKey =
   | 'cardKeepWorktreesLabel'
   | 'cardKeepWorktreesHint'
   | 'cardKeepWorktreesBad'
+  | 'cardPruneHistoryLabel'
+  | 'cardPruneHistoryEmpty'
+  | 'cardPruneHistoryRun'
+  | 'cardPruneHistoryNone'
+  | 'cardPruneHistorySkipped'
+  | 'cardPruneHistoryFailed'
   | 'manager.title'
   | 'manager.loading'
   | 'manager.loadFailed'
   | 'manager.empty'
   | 'manager.count'
+  | 'manager.orphans'
   | 'manager.colRepo'
   | 'manager.colBranch'
   | 'manager.colActivity'
@@ -281,11 +288,18 @@ export const en: Record<GitWorktreeKey, string> = {
   cardKeepWorktreesLabel: 'Worktrees to keep',
   cardKeepWorktreesHint: 'Global cap across all repositories, minimum 1.',
   cardKeepWorktreesBad: 'Enter an integer of at least 1',
+  cardPruneHistoryLabel: 'Prune history',
+  cardPruneHistoryEmpty: 'No prune runs yet',
+  cardPruneHistoryRun: 'Removed {n}:',
+  cardPruneHistoryNone: 'Nothing to remove this round',
+  cardPruneHistorySkipped: '{n} skipped (uncommitted changes)',
+  cardPruneHistoryFailed: '{n} failed',
   'manager.title': 'Manage worktrees',
   'manager.loading': 'Scanning worktrees…',
   'manager.loadFailed': 'Scan failed: {message}',
   'manager.empty': 'The worktree storage root is empty.',
   'manager.count': '{n} worktree(s)',
+  'manager.orphans': 'Unrecognized directories',
   'manager.colRepo': 'Repository',
   'manager.colBranch': 'Branch',
   'manager.colActivity': 'Last used',
@@ -477,11 +491,18 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardKeepWorktreesLabel: '保留工作树数量',
   cardKeepWorktreesHint: '所有仓库合计的全局上限，最小为 1。',
   cardKeepWorktreesBad: '请输入不小于 1 的整数',
+  cardPruneHistoryLabel: '清理记录',
+  cardPruneHistoryEmpty: '暂无清理记录',
+  cardPruneHistoryRun: '清理了 {n} 个：',
+  cardPruneHistoryNone: '本轮无需清理',
+  cardPruneHistorySkipped: '{n} 个因未提交改动跳过',
+  cardPruneHistoryFailed: '{n} 个失败',
   'manager.title': '管理工作树',
   'manager.loading': '正在扫描工作树…',
   'manager.loadFailed': '扫描失败：{message}',
   'manager.empty': '工作树存放目录暂无内容。',
   'manager.count': '{n} 个工作树',
+  'manager.orphans': '无法识别的目录',
   'manager.colRepo': '所属项目',
   'manager.colBranch': '工作树分支',
   'manager.colActivity': '最近使用',

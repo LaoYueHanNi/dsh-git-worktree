@@ -27,8 +27,8 @@
  * local row because the host hides remote branches that have a local
  * twin), with SEVERAL remotes the full names stay so `origin`/`upstream`
  * become the folder layer beneath the header. Picking a remote row hands
- * the owner the real `<remote>/name` (see pick) — the remote confirms are
- * the owner's wording (tracking-twin switch / twin-in-worktree).
+ * the owner the real `<remote>/name` (see pick) — 签出 dwims the tracking
+ * twin in place, and the worktree verbs spell the twin-in-worktree ask.
  * Selection model: a single click SELECTS a row (blue); Enter or the row's
  * RIGHT-CLICK menu executes — 签出 and the worktree hop run DIRECTLY (no
  * confirmation step; the switch is keep-open, the hop moves the session),

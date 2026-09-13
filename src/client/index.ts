@@ -62,7 +62,8 @@ import type { WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import { requestEnsureDirectory, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
 import { loadGroupSidebarBoot, saveGroupSidebarBoot } from './sidebar-groups.ts'
-import { pathKey, planPrune, runAutoPrune } from './worktree-prune.ts'
+import { pathKey, freshestUpdatedAt, planPrune, runAutoPrune } from './worktree-prune.ts'
+import { recordPruneRun } from './prune-history.ts'
 import type { BranchChipInjected } from './slots.ts'
 
 export type { BranchChipInjected } from './slots.ts'
@@ -139,7 +140,6 @@ export function apply(ctx: ClientContext): void {
       for (const workspace of workspaces.items) {
         const key = pathKey(workspace.path)
         workspaceIdByPath.set(key, workspace.workspaceId)
-        let latest = 0
         const archiveIds: string[] = []
         for (const sessionId of workspace.sessionIds) {
           const summary = sessions.byId[sessionId]
@@ -150,9 +150,10 @@ export function apply(ctx: ClientContext): void {
           // flow's archive set.
           if (summary.blank || summary.origin === 'subagent') continue
           if (!archived.has(sessionId)) archiveIds.push(sessionId)
-          if (summary.updatedAt > latest) latest = summary.updatedAt
         }
-        activity[key] = latest
+        // The activity figure and the manager dialog's last-use column share
+        // one helper, so the two views cannot drift apart.
+        activity[key] = freshestUpdatedAt(workspace.sessionIds.map(id => sessions.byId[id]))
         archiveIdsByPath.set(key, archiveIds)
       }
       const currentId = sessions.current
@@ -174,7 +175,7 @@ export function apply(ctx: ClientContext): void {
           archiveSessionIds: archiveIdsByPath.get(key) ?? [],
         }
       })
-      return runAutoPrune({
+      const report = await runAutoPrune({
         inspectWorktree: async (path) => {
           const result = await requestInspectWorktree(path)
           if (!result.ok) throw new Error(result.error)
@@ -191,6 +192,22 @@ export function apply(ctx: ClientContext): void {
         archiveSession: (sessionId) => ctx.workspaces.archiveSession(sessionId as SessionId),
         deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
       }, targets)
+      // The run lands in the settings card's 清理记录 (browser-local): the
+      // removed directories carry the belonging the scan knew, so the
+      // record reads "which project lost which worktrees", not bare paths.
+      if (report.removed.length + report.skippedDirty.length + report.failed.length > 0) {
+        const detail = new Map(scan.worktrees.map(entry => [pathKey(entry.path), entry]))
+        recordPruneRun({
+          at: Date.now(),
+          removed: report.removed.map((path) => {
+            const entry = detail.get(pathKey(path))
+            return { path, repoName: entry?.repoName ?? '', branch: entry?.branch ?? '' }
+          }),
+          skippedDirty: report.skippedDirty,
+          failed: report.failed,
+        })
+      }
+      return report
     },
   })
 

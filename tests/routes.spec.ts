@@ -763,11 +763,14 @@ describe('handleEnsureDirectory', () => {
 
 describe('handleCreateWorktree fetch-before-create', () => {
   /** Deps with the sync enabled; the fetch is answered separately from the
-   * repo-facts script and its invocations recorded. */
-  function fetchDeps(fetch: Partial<ExecResult>, recorded: string[]): RouteDeps {
-    const base = scripted(REPO_CALLS)
+   * repo-facts script and its invocations recorded. The worktree add and
+   * the storage-root mkdir are stubbed so a remote twin can be CREATED
+   * (not just reused) without touching the real fs. */
+  function fetchDeps(fetch: Partial<ExecResult>, recorded: string[], extraScript: Record<string, Partial<ExecResult>> = {}): RouteDeps {
+    const base = scripted({ ...REPO_CALLS, ...extraScript })
     return deps({
       sectionFetchBeforeCreate: () => true,
+      mkdirRecursive: async () => {},
       exec: async (file, args, options) => {
         if (args.join(' ') === 'fetch --all --prune') {
           recorded.push(options.cwd)
@@ -783,46 +786,48 @@ describe('handleCreateWorktree fetch-before-create', () => {
     expect(outcome).toEqual({ status: 200, body: { path: p('/root/repo/feat-x'), created: false } })
   })
 
-  it('runs the fetch at the repo root before creating, silently on success', async () => {
+  it('fetches ONLY for a remote-only branch, before creating its twin', async () => {
     const recorded: string[] = []
-    const outcome = await handleCreateWorktree(fetchDeps({}, recorded), { repoPath: '/repo', branch: 'feat/x' })
+    const outcome = await handleCreateWorktree(
+      fetchDeps({}, recorded, { 'worktree add': {} }),
+      { repoPath: '/repo', branch: 'origin/dev' },
+    )
     // probeRepo resolves the repo root (Windows gains the current drive letter).
     expect(recorded).toEqual([resolve('/repo')])
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected a creation body')
+    expect(outcome.body.created).toBe(true)
+    if ('fetchWarning' in outcome.body && outcome.body.fetchWarning !== undefined) throw new Error('expected no fetchWarning')
+  })
+
+  it('skips the fetch for a LOCAL branch: its worktree never consumes remote data', async () => {
+    const recorded: string[] = []
+    const outcome = await handleCreateWorktree(fetchDeps({}, recorded), { repoPath: '/repo', branch: 'feat/x' })
+    expect(recorded).toEqual([])
     expect(outcome).toEqual({ status: 200, body: { path: p('/root/repo/feat-x'), created: false } })
   })
 
-  it('does not block on a failed fetch: the creation lands with a fetchWarning', async () => {
+  it('does not block on a failed fetch: the twin creation lands with a fetchWarning', async () => {
     const recorded: string[] = []
     const outcome = await handleCreateWorktree(
-      fetchDeps({ code: 128, stderr: 'fatal: could not read from remote repository' }, recorded),
-      { repoPath: '/repo', branch: 'feat/x' },
+      fetchDeps({ code: 128, stderr: 'fatal: could not read from remote repository' }, recorded, { 'worktree add': {} }),
+      { repoPath: '/repo', branch: 'origin/dev' },
     )
     expect(recorded).toEqual([resolve('/repo')])
     expect(outcome.status).toBe(200)
     if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected a creation body')
-    expect(outcome.body.created).toBe(false)
+    expect(outcome.body.created).toBe(true)
     if (!('fetchWarning' in outcome.body) || outcome.body.fetchWarning === undefined) throw new Error('expected a fetchWarning')
     expect(outcome.body.fetchWarning).toContain('could not read')
   })
 
-  it('stages the warning on the cutout path too', async () => {
+  it('stages the warning on the cutout path too (a remote base consumes the fetch)', async () => {
     const recorded: string[] = []
     const root = await mkdtemp(join(tmpdir(), 'dsh-gwt-'))
     cleanup.push(root)
-    const base = scripted({ ...REPO_CALLS, 'for-each-ref refs/heads': { stdout: 'main\n' }, 'worktree add': {} })
     const outcome = await handleCreateWorktree(
-      deps({
-        sectionFetchBeforeCreate: () => true,
-        sectionRootDir: () => root,
-        exec: async (file, args, options) => {
-          if (args.join(' ') === 'fetch --all --prune') {
-            recorded.push(options.cwd)
-            return { code: 1, stderr: 'ssh: connect to host closed' }
-          }
-          return base(file, args, options)
-        },
-      }),
-      { repoPath: '/repo', branch: 'main', cutout: true, name: 'main-wt' },
+      fetchDeps({ code: 1, stderr: 'ssh: connect to host closed' }, recorded, { 'worktree add': {} }),
+      { repoPath: '/repo', branch: 'origin/dev', cutout: true, name: 'dev-wt' },
     )
     expect(recorded).toEqual([resolve('/repo')])
     expect(outcome.status).toBe(200)

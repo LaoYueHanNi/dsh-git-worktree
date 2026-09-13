@@ -387,3 +387,43 @@
   font-size: 12px;
   color: var(--dsw-alias-label-danger, #d64545);
 }
+
+/* The auto-prune audit trail (清理记录): newest first, one run per line —
+ * relative time, the removed directories with their belonging, then the
+ * run's exceptions in the secondary tone. */
+.historyRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.historyRun {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  border: 0.5px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 6px;
+}
+
+.historyTime {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.historyLine {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}

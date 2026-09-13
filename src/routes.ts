@@ -5,7 +5,7 @@
 
 import { dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
+import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
@@ -328,17 +328,23 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
-    // Optional pre-create remote sync. Deliberately NOT a gate: a local
-    // worktree never consumes the fetch (only a remote-only branch's twin
-    // does, and that path fails on its own through the envelope), so a
-    // network hiccup must not block the creation — the failure rides the
-    // successful response as `fetchWarning` for the client to toast.
+    // Optional pre-create remote sync — but only when the branch actually
+    // consumes remote data: a LOCAL branch's worktree (or an existing twin)
+    // never reads the fetched refs, so the resolve runs first and the fetch
+    // fires just for the remote-only shape (the twin `worktree add -b`
+    // consumes it, the cutout's arbitrary base too). Deliberately NOT a
+    // gate: a network hiccup must not block the creation — the failure
+    // rides the successful response as `fetchWarning` for the client to
+    // toast.
     let fetchWarning: string | undefined
     if (deps.sectionFetchBeforeCreate() === true) {
-      try {
-        await fetchAll(deps.exec, facts.repoRoot)
-      } catch (error) {
-        fetchWarning = error instanceof GitError ? error.stderr.trim() : error instanceof Error ? error.message : String(error)
+      const resolved = await resolveBranch(deps.exec, facts.repoRoot, branch)
+      if (resolved?.remote !== undefined) {
+        try {
+          await fetchAll(deps.exec, facts.repoRoot)
+        } catch (error) {
+          fetchWarning = error instanceof GitError ? error.stderr.trim() : error instanceof Error ? error.message : String(error)
+        }
       }
     }
     if (cutout === true) {

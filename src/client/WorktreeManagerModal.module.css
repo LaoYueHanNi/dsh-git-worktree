@@ -71,8 +71,8 @@
   gap: 2px;
 }
 
-/* Head line: repository, branch, dirty mark, then the activity time pushed
- * to the row's right edge. */
+/* Head line: branch, dirty mark, then the activity time pushed to the
+ * row's right edge (the repository moved up into the group header). */
 .rowHead {
   display: flex;
   align-items: baseline;
@@ -80,22 +80,26 @@
   min-width: 0;
 }
 
-.rowRepo {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  flex-shrink: 0;
+/* The per-repository group header (and the trailing unrecognized
+ * directory group): the secondary tone and the row hairlines keep it a
+ * label, the bold weight keeps it readable as the belonging of everything
+ * under it. */
+.group {
+  display: flex;
+  flex-direction: column;
 }
 
-.rowRepoUnknown {
-  font-size: 13px;
+.groupHead {
+  padding: 8px 0 2px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
 }
 
 .rowBranch {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
