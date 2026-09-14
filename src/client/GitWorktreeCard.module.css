@@ -280,12 +280,6 @@
   line-height: 18px;
 }
 
-.toggleNote {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
 .toggleControl {
   display: flex;
   align-items: center;
@@ -435,4 +429,22 @@
   line-height: 16px;
   color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
+}
+
+/* The fold toggle. A link, not a button chrome: it reveals rows in place,
+ * it does not act on anything. */
+.historyMore {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-link, var(--dsw-alias-label-secondary));
+  cursor: pointer;
+}
+
+.historyMore:hover {
+  text-decoration: underline;
 }

@@ -46,6 +46,17 @@ export interface GitWorktreeCardFace extends CardActions {
   manager: WorktreeManagerFace
 }
 
+/** Prune runs shown before the log folds behind "show all". */
+const HISTORY_PREVIEW = 3
+
+/** One removed worktree as "repo/branch" — or whichever half the scan
+ * knew. The belonging is a snapshot taken at prune time and either field
+ * can be missing; joining them unconditionally printed a bare " /". */
+function labelOfRemoved(item: { repoName?: string | null; branch?: string | null }): string {
+  const parts = [item.repoName, item.branch].filter((part): part is string => typeof part === 'string' && part !== '')
+  return parts.length === 0 ? '?' : parts.join('/')
+}
+
 /**
  * Render the git-worktree settings card.
  * @param props - locale copy, the card snapshot, and its form actions.
@@ -61,11 +72,17 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
    * times underneath the user. */
   const [history, setHistory] = useState<readonly PruneRunEntry[]>([])
   const [historyNow, setHistoryNow] = useState(() => Date.now())
+  /** Whether the log is showing past its preview. Collapses again on every
+   * expansion: the log can hold 20 runs, and a settings card is not where
+   * a wall of them belongs by default. */
+  const [historyAll, setHistoryAll] = useState(false)
   useEffect(() => {
     if (!open) return
     setHistory(readPruneHistory())
     setHistoryNow(Date.now())
+    setHistoryAll(false)
   }, [open])
+  const shownHistory = historyAll ? history : history.slice(0, HISTORY_PREVIEW)
   const { t } = props
   const state = props.useGitWorktreeCard(snapshot => snapshot)
   if (!state.available) return null
@@ -147,7 +164,6 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
                   <span className={css.toggleMark}>{t('cardGroupSidebarMark')}</span>
                 </span>
                 <span className={css.toggleHint}>{t('cardGroupSidebarHint')}</span>
-                <span className={css.toggleNote}>{t('cardGroupSidebarNote')}</span>
                 {state.switchFailed === 'groupSidebar' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
               </span>
               <span className={css.toggleControl}>
@@ -232,35 +248,47 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
             {/* The auto-prune's audit trail (browser-local, newest first):
               * which run removed whose worktrees, so a misjudged activity
               * is discoverable after the toast has faded. Read once per
-              * expansion — a finished prune shows on the next look. */}
-            {state.autoPruneWorktrees && (
+              * expansion — a finished prune shows on the next look.
+              * Shown whenever there is history, NOT only while the switch
+              * is on: having just turned auto-prune off is exactly when a
+              * user goes looking for what it did. */}
+            {history.length > 0 && (
               <div className={`${css.field} ${css.historyRow}`}>
                 <span className={css.fieldLabel}>{t('cardPruneHistoryLabel')}</span>
-                {history.length === 0
-                  ? <span className={css.toggleHint}>{t('cardPruneHistoryEmpty')}</span>
-                  : (
-                    <ul className={css.history}>
-                      {history.map(run => (
-                        <li key={run.at} className={css.historyRun}>
-                          <span className={css.historyTime}>{timeLabel(run.at, historyNow, t)}</span>
-                          {run.removed.length > 0
-                            ? (
-                              <span className={css.historyLine}>
-                                {t('cardPruneHistoryRun', { n: run.removed.length })}
-                                {run.removed.map(item => ` ${item.repoName}/${item.branch}`).join(' ·')}
-                              </span>
-                            )
-                            : <span className={css.historyLine}>{t('cardPruneHistoryNone')}</span>}
-                          {run.skippedDirty.length > 0 && (
-                            <span className={css.historyLine}>{t('cardPruneHistorySkipped', { n: run.skippedDirty.length })}</span>
-                          )}
-                          {run.failed.length > 0 && (
-                            <span className={css.historyLine}>{t('cardPruneHistoryFailed', { n: run.failed.length })}</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+                <ul className={css.history}>
+                  {shownHistory.map(run => (
+                    <li key={run.at} className={css.historyRun}>
+                      <span className={css.historyTime}>{timeLabel(run.at, historyNow, t)}</span>
+                      {run.removed.length > 0
+                        ? (
+                          <span className={css.historyLine}>
+                            {t('cardPruneHistoryRun', { n: run.removed.length })}
+                            {run.removed.map(item => ` ${labelOfRemoved(item)}`).join(' ·')}
+                          </span>
+                        )
+                        : <span className={css.historyLine}>{t('cardPruneHistoryNone')}</span>}
+                      {run.skippedDirty.length > 0 && (
+                        <span className={css.historyLine}>{t('cardPruneHistorySkipped', { n: run.skippedDirty.length })}</span>
+                      )}
+                      {run.failed.length > 0 && (
+                        <span className={css.historyLine}>{t('cardPruneHistoryFailed', { n: run.failed.length })}</span>
+                      )}
+                    </li>
+                  ))}
+                  {history.length > HISTORY_PREVIEW && (
+                    <li>
+                      <button type="button" className={css.historyMore} onClick={() => { setHistoryAll(value => !value) }}>
+                        {historyAll ? t('cardPruneHistoryLess') : t('cardPruneHistoryMore', { n: history.length })}
+                      </button>
+                    </li>
                   )}
+                </ul>
+              </div>
+            )}
+            {history.length === 0 && state.autoPruneWorktrees && (
+              <div className={`${css.field} ${css.historyRow}`}>
+                <span className={css.fieldLabel}>{t('cardPruneHistoryLabel')}</span>
+                <span className={css.toggleHint}>{t('cardPruneHistoryEmpty')}</span>
               </div>
             )}
             <WorktreeManagerModal

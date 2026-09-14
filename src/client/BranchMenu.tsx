@@ -659,6 +659,14 @@ export function BranchMenu({
    * (its Enter path funnels through pick, which reads the ref). */
   const remoteNameMapRef = useRef(grouped.remoteNameMap)
   remoteNameMapRef.current = grouped.remoteNameMap
+  /** The inverse map, action→display: state that holds an ACTION name (the
+   * create flyout's base) has to read back as what the row showed, or a
+   * single-remote setup would suddenly quote `origin/feat/x` at a user who
+   * only ever saw `feat/x`. */
+  const displayNameOf = useMemo(() => {
+    const inverse = new Map([...grouped.remoteNameMap].map(([display, action]) => [action, display]))
+    return (action: string): string => inverse.get(action) ?? action
+  }, [grouped.remoteNameMap])
 
   /** Every folder key that renders a header — the expand/collapse-all
    * button's scope (group-prefixed, see groupKey). */
@@ -983,8 +991,12 @@ export function BranchMenu({
 
   // Row-menu placement: cursor-anchored, clamped into the viewport with one
   // measure-then-place pass (the FLY_MEASURE posture gives real offsets).
-  // No listeners on purpose — unlike the card and the flyouts this menu does
-  // not track scroll/resize; it is dismissed by the next pointerdown.
+  // The menu deliberately does NOT re-place on scroll/resize the way the
+  // card and the flyouts do — it is anchored to a cursor point, and a point
+  // that has moved is no longer the point the user aimed at. It dismisses
+  // instead: pointerdown already covered clicks, and scroll/resize cover
+  // the rest (a wheel scroll fires no pointerdown, so the menu used to hang
+  // at its old spot while the row it names slid out from under it).
   useLayoutEffect(() => {
     if (ctx === null) {
       setCtxPos(null)
@@ -998,6 +1010,27 @@ export function BranchMenu({
       left: Math.min(Math.max(ctx.x, MARGIN), Math.max(MARGIN, vw - MARGIN - el.offsetWidth)),
       top: Math.min(Math.max(ctx.y, MARGIN), Math.max(MARGIN, vh - MARGIN - el.offsetHeight)),
     })
+    const dismiss = (): void => { setCtx(null) }
+    window.addEventListener('resize', dismiss)
+    // Capture phase: the list scrolls inside the card, and a scroll event
+    // on an element does not bubble to window.
+    window.addEventListener('scroll', dismiss, true)
+    return () => {
+      window.removeEventListener('resize', dismiss)
+      window.removeEventListener('scroll', dismiss, true)
+    }
+  }, [ctx])
+
+  // The row menu is keyboard-reachable once open: focus the first item so
+  // Arrow keys and Enter work without a pointer. The focus rides a rAF for
+  // the same reason the flyouts' does — the first frame is the hidden
+  // measure posture, and focus() on visibility:hidden is a no-op.
+  useEffect(() => {
+    if (ctx === null) return
+    const raf = requestAnimationFrame(() => {
+      ctxCardRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus()
+    })
+    return () => { cancelAnimationFrame(raf) }
   }, [ctx])
 
   // Confirm opens (or re-anchors to another row) → focus the DRAFT input
@@ -1699,6 +1732,46 @@ export function BranchMenu({
     }
   }
 
+  /** The create flyout's ask line. The base branch is the whole difference
+   * between "new branch" and "new branch from THAT row" — the row that was
+   * right-clicked is no longer visible once the menu is replaced by this
+   * flyout (and near a viewport edge the menu had already detached from
+   * it), so the ask has to carry it. No base = the toolbar-era in-place
+   * create, which has nothing to name. */
+  const createAsk = createBase === undefined
+    ? t('createFlyAsk')
+    : t('createFlyAskFrom', { branch: displayNameOf(createBase) })
+
+  /**
+   * Arrow/Enter/Home/End inside the row menu. Items are read from the DOM
+   * rather than from `ctxItems` so the focused item IS the source of truth
+   * (no index state to drift). Wrapping at both ends: a six-item transient
+   * is faster to cycle than to aim at. Escape is NOT handled here — the
+   * document listener already unwinds the menu first, and its ordering
+   * against the flyouts belongs in one place.
+   */
+  const ctxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const key = event.key
+    if (key !== 'ArrowDown' && key !== 'ArrowUp' && key !== 'Home' && key !== 'End' && key !== 'Enter') return
+    const items = [...(ctxCardRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? [])]
+    if (items.length === 0) return
+    if (key === 'Enter') {
+      // Let the button's own click handling run: preventing it here would
+      // swallow the activation the user just asked for.
+      return
+    }
+    event.preventDefault()
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    const next = key === 'Home'
+      ? 0
+      : key === 'End'
+        ? items.length - 1
+        : key === 'ArrowDown'
+          ? (at + 1) % items.length
+          : (at <= 0 ? items.length - 1 : at - 1)
+    items[next]?.focus()
+  }
+
   return (
     <>
       {createPortal(
@@ -1762,8 +1835,12 @@ export function BranchMenu({
               title={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
               aria-label={allExpanded ? t('menuCollapseAll') : t('menuExpandAll')}
               // The group headers fold too, so the tool stays live whenever
-              // any row exists — folders alone no longer gate it.
-              disabled={rows.length === 0}
+              // any row exists — folders alone no longer gate it. The
+              // search view is the one exception: it renders a flat,
+              // force-expanded list with no folders to fold, so the button
+              // would toggle state nobody can see (and then surprise the
+              // user with it once the query clears).
+              disabled={rows.length === 0 || needle !== ''}
               onClick={toggleAll}
             >
               {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
@@ -1903,9 +1980,9 @@ export function BranchMenu({
           className={css.popCard}
           style={createFlyPos ?? FLY_MEASURE}
           role="dialog"
-          aria-label={t('createFlyAsk')}
+          aria-label={createAsk}
         >
-          <p className={css.popAsk}>{t('createFlyAsk')}</p>
+          <p className={css.popAsk}>{createAsk}</p>
           <input
             ref={createInputRef}
             className={css.menuCreate}
@@ -1996,7 +2073,14 @@ export function BranchMenu({
           style={ctxPos ?? FLY_MEASURE}
           role="menu"
           aria-label={ctx.name}
+          onKeyDown={ctxKeyDown}
         >
+          {/* Whose row this is. The menu is cursor-anchored and clamped to
+            * the viewport, so near an edge it detaches from the row that
+            * opened it — and with the double-click gone this menu is the
+            * only mouse path to every verb in it. Naming the target is what
+            * keeps "delete branch" from being a guess. */}
+          <div className={css.ctxHeader} title={ctx.name}>{ctx.name}</div>
           {ctxItems.map(item => (
             <button key={item.id} type="button" role="menuitem" className={css.ctxItem} onClick={item.run}>
               {item.icon}

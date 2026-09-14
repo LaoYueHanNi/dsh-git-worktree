@@ -222,6 +222,10 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
   }
 
   const validCount = scan.status === 'ready' ? scan.entries.filter(entry => entry.repoName !== null).length : 0
+  /** Directories the scan could not read as a worktree. They sit in their
+   * own trailing group, so the headline count must say they exist — a bare
+   * "3 worktrees" over four groups reads as a miscount. */
+  const orphanCount = scan.status === 'ready' ? scan.entries.length - validCount : 0
 
   return (
     <>
@@ -236,7 +240,10 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         {scan.status === 'error' && <div className={css.error} role="alert">{t('manager.loadFailed', { message: scan.error })}</div>}
         {scan.status === 'ready' && (
           <div className={css.body}>
-            <div className={css.count} role="status">{t('manager.count', { n: validCount })}</div>
+            <div className={css.count} role="status">
+              {t('manager.count', { n: validCount })}
+              {orphanCount > 0 && t('manager.countOrphans', { n: orphanCount })}
+            </div>
             {scan.truncated && <div className={css.warn} role="status">{t('manager.truncated')}</div>}
             {scan.entries.length === 0 && <div className={css.empty}>{t('manager.empty')}</div>}
             <div className={css.list}>

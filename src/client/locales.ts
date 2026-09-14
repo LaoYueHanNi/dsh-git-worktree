@@ -35,6 +35,8 @@ export type GitWorktreeKey =
   | 'renameBranchTitle'
   | 'renameBranchBusy'
   | 'createFlyAsk'
+  | 'createFlyAskFrom'
+  | 'cutoutFlyAsk'
   | 'createCheckoutConfirm'
   | 'deleteBranchAsk'
   | 'deleteBranchBusy'
@@ -75,7 +77,6 @@ export type GitWorktreeKey =
   | 'cardGroupSidebarLabel'
   | 'cardGroupSidebarHint'
   | 'cardGroupSidebarMark'
-  | 'cardGroupSidebarNote'
   | 'cardGroupSidebarBusy'
   | 'cardSwitchFailed'
   | 'cardManageWorktrees'
@@ -93,20 +94,19 @@ export type GitWorktreeKey =
   | 'cardPruneHistoryNone'
   | 'cardPruneHistorySkipped'
   | 'cardPruneHistoryFailed'
+  | 'cardPruneHistoryMore'
+  | 'cardPruneHistoryLess'
   | 'manager.title'
   | 'manager.loading'
   | 'manager.loadFailed'
   | 'manager.empty'
   | 'manager.count'
   | 'manager.truncated'
+  | 'manager.countOrphans'
   | 'manager.orphans'
-  | 'manager.colRepo'
-  | 'manager.colBranch'
-  | 'manager.colActivity'
   | 'manager.activityNever'
   | 'manager.dirty.one'
   | 'manager.dirty.other'
-  | 'manager.unknown'
   | 'manager.running'
   | 'manager.purgeMenu'
   | 'manager.purgeAria'
@@ -114,7 +114,6 @@ export type GitWorktreeKey =
   | 'worktreePurge.desc'
   | 'worktreePurge.busy'
   | 'manager.removeAria'
-  | 'manager.removeFailed'
   | 'fetchWarning'
   | 'pruneDone'
   | 'pruneFailed'
@@ -239,8 +238,10 @@ export const en: Record<GitWorktreeKey, string> = {
   renameBranchTitle: 'Rename {branch}',
   renameBranchBusy: 'Renaming…',
   createFlyAsk: 'Enter a new branch name',
-  createCheckoutConfirm: 'Check out',
-  deleteBranchAsk: 'Delete branch {branch}?',
+  createFlyAskFrom: 'New branch from {branch}',
+  cutoutFlyAsk: 'Cut a new branch from {branch} into a worktree',
+  createCheckoutConfirm: 'Create and check out',
+  deleteBranchAsk: 'Delete branch {branch}? Unmerged branches are refused.',
   deleteBranchBusy: 'Deleting…',
   fetchDone: 'Remote branches synced',
   updateDone: '{branch} fast-forwarded to its upstream',
@@ -277,17 +278,16 @@ export const en: Record<GitWorktreeKey, string> = {
   sidebarMain: 'Main',
   sidebarRailExpand: 'Expand sidebar',
   cardGroupSidebarLabel: 'Group workspaces',
-  cardGroupSidebarHint: 'DSH does not yet expose a multi-workspace grouping API, so this replaces the native sidebar 1:1 and adds same-repo worktree grouping.',
+  cardGroupSidebarHint: 'Collect same-repo workspaces into one tree. Turn it off at any time to get the native list back.',
   cardGroupSidebarMark: '(experimental)',
-  cardGroupSidebarNote: 'Turn it off to restore the native list if anything breaks; we will switch to the official API as soon as it ships.',
   cardGroupSidebarBusy: 'Switching sidebar…',
   cardSwitchFailed: 'This switch did not save. Try again.',
   cardManageWorktrees: 'Manage worktrees…',
-  cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces. Removal follows the same flow as the sidebar.',
+  cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces.',
   cardFetchBeforeCreateLabel: 'Fetch upstream before creating',
   cardFetchBeforeCreateHint: 'Runs fetch --all --prune before each worktree creation. A failed sync never blocks the creation.',
   cardAutoPruneLabel: 'Auto-remove stale worktrees',
-  cardAutoPruneHint: 'Checked lazily after each creation: once the global count exceeds the cap, the least recently used worktrees are removed (folders only — branches are kept). Worktrees with uncommitted changes or a running session are never auto-removed.',
+  cardAutoPruneHint: 'Over the cap, creating a worktree removes the least recently used ones (folders only — branches are kept). Uncommitted changes or a running session are never removed.',
   cardKeepWorktreesLabel: 'Worktrees to keep',
   cardKeepWorktreesHint: 'Global cap across all repositories, minimum 1.',
   cardKeepWorktreesBad: 'Enter an integer of at least 1',
@@ -297,31 +297,29 @@ export const en: Record<GitWorktreeKey, string> = {
   cardPruneHistoryNone: 'Nothing to remove this round',
   cardPruneHistorySkipped: '{n} skipped (uncommitted changes)',
   cardPruneHistoryFailed: '{n} failed',
+  cardPruneHistoryMore: 'Show all {n}',
+  cardPruneHistoryLess: 'Show less',
   'manager.title': 'Manage worktrees',
   'manager.loading': 'Scanning worktrees…',
   'manager.loadFailed': 'Scan failed: {message}',
   'manager.empty': 'The worktree storage root is empty.',
   'manager.count': '{n} worktree(s)',
   'manager.truncated': 'Too many directories to scan; showing the first batch. Check that the storage folder is set correctly.',
+  'manager.countOrphans': ', {n} unrecognized',
   'manager.orphans': 'Unrecognized directories',
-  'manager.colRepo': 'Repository',
-  'manager.colBranch': 'Branch',
-  'manager.colActivity': 'Last used',
   'manager.activityNever': 'no sessions',
   'manager.dirty.one': '{n} uncommitted file',
   'manager.dirty.other': '{n} uncommitted files',
-  'manager.unknown': 'Unrecognized (not a git repository)',
   'manager.running': 'A session is running here; removal is unavailable',
   'manager.purgeMenu': 'Delete folder',
   'manager.purgeAria': 'Delete the leftover folder “{path}”',
   'worktreePurge.title': 'Delete leftover folder',
-  'worktreePurge.desc': 'This directory has no git record anymore (not a valid worktree) — most likely a deletion that was interrupted by a file lock. The folder and everything in it will be deleted directly. This cannot be undone.',
+  'worktreePurge.desc': 'This directory has no git record anymore. It will be deleted along with everything in it. This cannot be undone.',
   'worktreePurge.busy': 'Deleting folder…',
   'manager.removeAria': 'Remove the worktree “{path}”',
-  'manager.removeFailed': 'Removal failed: {message}',
   fetchWarning: 'Upstream sync failed; created from the local state: {message}',
   pruneDone: 'Auto-removed {n} stale worktree(s)',
-  pruneFailed: '{n} worktree(s) could not be auto-removed — check the manager in settings',
+  pruneFailed: '{n} worktree(s) could not be auto-removed',
   'group.ungrouped': 'Ungrouped',
   'session.new': 'New Session',
   'section.workspaces': 'Workspaces',
@@ -444,8 +442,10 @@ export const zh: Record<GitWorktreeKey, string> = {
   renameBranchTitle: '重命名 {branch}',
   renameBranchBusy: '重命名中…',
   createFlyAsk: '输入新分支名称',
-  createCheckoutConfirm: '检出',
-  deleteBranchAsk: '是否删除分支 {branch}？',
+  createFlyAskFrom: '从 {branch} 新建分支',
+  cutoutFlyAsk: '从 {branch} 切出新分支并创建工作树',
+  createCheckoutConfirm: '新建并检出',
+  deleteBranchAsk: '是否删除分支 {branch}？未合并的分支会被拒绝。',
   deleteBranchBusy: '删除中…',
   fetchDone: '远程分支已同步',
   updateDone: '{branch} 已快进到远程最新',
@@ -482,17 +482,16 @@ export const zh: Record<GitWorktreeKey, string> = {
   sidebarMain: '主仓库',
   sidebarRailExpand: '展开侧栏',
   cardGroupSidebarLabel: '聚合工作区',
-  cardGroupSidebarHint: 'DSH 尚未开放多工作区聚合接口，因此按原生侧边栏 1:1 替换左侧列表，并加上同仓库工作树分组。',
+  cardGroupSidebarHint: '把同仓库的工作区收成一棵树。出问题可随时关掉，回到原生列表。',
   cardGroupSidebarMark: '（测试功能）',
-  cardGroupSidebarNote: '使用中若遇问题，关掉即可回到原生；官方接口一旦开放，会第一时间改用原生实现。',
   cardGroupSidebarBusy: '正在切换侧栏…',
   cardSwitchFailed: '该开关未保存，请重试。',
   cardManageWorktrees: '管理工作树…',
-  cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录；删除与侧栏的删除工作树走同一流程。',
+  cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录。',
   cardFetchBeforeCreateLabel: '创建工作树前同步上游',
   cardFetchBeforeCreateHint: '每次创建工作树前先执行 fetch --all --prune 同步远程引用；同步失败不会阻断创建。',
   cardAutoPruneLabel: '自动删除旧工作树',
-  cardAutoPruneHint: '在每次新建工作树后惰性检查一次：全局工作树数量超过保留数量时，按最近使用时间从最不活跃的开始自动删除（只删目录，不删分支）。有未提交更改或进行中会话的工作树不会被自动删除。',
+  cardAutoPruneHint: '超出保留数量时，新建工作树后自动删除最久未用的（只删目录，保留分支）。有未提交改动或进行中会话的不会被删。',
   cardKeepWorktreesLabel: '保留工作树数量',
   cardKeepWorktreesHint: '所有仓库合计的全局上限，最小为 1。',
   cardKeepWorktreesBad: '请输入不小于 1 的整数',
@@ -502,31 +501,29 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardPruneHistoryNone: '本轮无需清理',
   cardPruneHistorySkipped: '{n} 个因未提交改动跳过',
   cardPruneHistoryFailed: '{n} 个失败',
+  cardPruneHistoryMore: '展开全部 {n} 条',
+  cardPruneHistoryLess: '收起',
   'manager.title': '管理工作树',
   'manager.loading': '正在扫描工作树…',
   'manager.loadFailed': '扫描失败：{message}',
   'manager.empty': '工作树存放目录暂无内容。',
   'manager.count': '{n} 个工作树',
   'manager.truncated': '目录过多，仅显示前一批。请检查存放目录是否设置正确。',
+  'manager.countOrphans': '，{n} 个无法识别',
   'manager.orphans': '无法识别的目录',
-  'manager.colRepo': '所属项目',
-  'manager.colBranch': '工作树分支',
-  'manager.colActivity': '最近使用',
   'manager.activityNever': '无会话',
   'manager.dirty.one': '{n} 个未提交文件',
   'manager.dirty.other': '{n} 个未提交文件',
-  'manager.unknown': '无法识别（不是 git 仓库）',
   'manager.running': '有进行中的会话，暂不能删除',
   'manager.purgeMenu': '删除文件夹',
   'manager.purgeAria': '删除残留文件夹“{path}”',
   'worktreePurge.title': '删除残留文件夹',
-  'worktreePurge.desc': '该目录已没有 git 记录（不是有效的工作树），多半是某次删除被文件占用中断后的残留。将直接删除文件夹及其全部内容，此操作不可恢复。',
+  'worktreePurge.desc': '该目录已无 git 记录，将连同全部内容一并删除，此操作不可恢复。',
   'worktreePurge.busy': '正在删除文件夹…',
   'manager.removeAria': '删除工作树“{path}”',
-  'manager.removeFailed': '删除失败：{message}',
   fetchWarning: '上游同步失败，已按本地状态创建：{message}',
   pruneDone: '已自动清理 {n} 个旧工作树',
-  pruneFailed: '{n} 个工作树自动清理失败，可在设置中打开管理查看',
+  pruneFailed: '{n} 个工作树自动清理失败',
   'group.ungrouped': '未分组',
   'session.new': '新会话',
   'section.workspaces': '工作区',

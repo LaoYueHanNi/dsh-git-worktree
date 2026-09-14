@@ -557,6 +557,20 @@
   gap: 2px;
 }
 
+/* The target row's name, above the verbs. Unlike the items this one holds
+ * a branch name, so it is the one line allowed to hit the 280px cap and
+ * ellipsize (the full name rides in a title). Secondary tone and no hover
+ * affordance: it is a label, not a seventh item. */
+.ctxHeader {
+  padding: 4px 8px 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Menu-item rows: the .menuRow geometry at a hair lighter weight — a
  * launcher's labels read as commands, not data. nowrap: the labels are
  * fixed copy (no branch names), the 280px cap is unreachable by design. */
@@ -579,8 +593,16 @@
   cursor: pointer;
 }
 
-.ctxItem:hover {
+.ctxItem:hover,
+.ctxItem:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* The arrow-key walk lands here, so the focused item must read as strongly
+ * as a hovered one — the tint above carries it, the default ring would sit
+ * outside the 8px radius. */
+.ctxItem:focus-visible {
+  outline: none;
 }
 
 /* Leading glyph rides the label tone, a step quieter. */

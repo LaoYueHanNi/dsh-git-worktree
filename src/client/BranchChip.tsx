@@ -340,7 +340,18 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
    * per-tool — one shared flag made both arrows rotate at once. */
   const [fetchBusy, setFetchBusy] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
-  const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  /** Toasts wait their turn instead of overwriting each other. One flow
+   * can raise two in a row — a worktree creation whose fetch warned, then
+   * the auto-prune's report — and a single-slot state made the second
+   * silently erase the first before anyone read it. Head renders, `onDone`
+   * shifts. */
+  const [toasts, setToasts] = useState<readonly { seq: number; text: string }[]>([])
+  const toastSeq = useRef(0)
+  const pushToast = useCallback((text: string) => {
+    toastSeq.current += 1
+    const seq = toastSeq.current
+    setToasts(queue => [...queue, { seq, text }])
+  }, [])
   const chipRef = useRef<HTMLButtonElement | null>(null)
   const busyRef = useRef(false)
 
@@ -388,8 +399,8 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   }, [refresh])
 
   const showError = useCallback((message: string) => {
-    setToast({ seq: Date.now(), text: t('errorGeneric', { message }) })
-  }, [t])
+    pushToast(t('errorGeneric', { message }))
+  }, [pushToast, t])
 
   /** Run one guarded confirm action: single-flight, toast on failure. On
    * success the confirm clears; the MENU closes unless `keepOpen` (the row
@@ -481,8 +492,8 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return
     }
     await refresh()
-    setToast({ seq: Date.now(), text: t('fetchDone') })
-  }, [cwd, refresh, showError, t])
+    pushToast(t('fetchDone'))
+  }, [cwd, pushToast, refresh, showError, t])
 
   /** Update-current-branch flow: POST /update (fetch every remote, then
    * fast-forward the checked-out branch to its upstream), then refetch the
@@ -506,11 +517,8 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return
     }
     await refresh()
-    setToast({
-      seq: Date.now(),
-      text: result.updated ? t('updateDone', { branch: result.branch }) : t('updateUpToDate'),
-    })
-  }, [cwd, refresh, showError, t])
+    pushToast(result.updated ? t('updateDone', { branch: result.branch }) : t('updateUpToDate'))
+  }, [cwd, pushToast, refresh, showError, t])
 
   /** Worktree-group flow: hop the session into the EXISTING worktree
    * directory. No git action, no confirm — the row menu's hop IS the jump
@@ -548,23 +556,20 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return cause instanceof Error ? cause.message : String(cause)
     }
     if (result.fetchWarning !== undefined) {
-      setToast({ seq: Date.now(), text: t('fetchWarning', { message: result.fetchWarning }) })
+      pushToast(t('fetchWarning', { message: result.fetchWarning }))
     }
     void pruneWorktrees?.(result.path).then((report) => {
       if (report === undefined) return
       if (report.removed.length > 0) {
-        setToast({
-          seq: Date.now(),
-          text: report.failed.length > 0
-            ? `${t('pruneDone', { n: report.removed.length })} ${t('pruneFailed', { n: report.failed.length })}`
-            : t('pruneDone', { n: report.removed.length }),
-        })
+        pushToast(report.failed.length > 0
+          ? `${t('pruneDone', { n: report.removed.length })} ${t('pruneFailed', { n: report.failed.length })}`
+          : t('pruneDone', { n: report.removed.length }))
       } else if (report.failed.length > 0) {
-        setToast({ seq: Date.now(), text: t('pruneFailed', { n: report.failed.length }) })
+        pushToast(t('pruneFailed', { n: report.failed.length }))
       }
     }).catch(() => { /* a prune failure must not disturb the session flow */ })
     return undefined
-  }), [adoptWorktree, pruneWorktrees, cwd, runGuarded, t])
+  }), [adoptWorktree, pruneWorktrees, cwd, pushToast, runGuarded, t])
 
   const facts = repo.facts
   // The session sits in a linked worktree when its directory's toplevel is
@@ -632,11 +637,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
    * name. Remote worktree picks keep the ask line SHORT and name the
    * branch on its own weight-500 line. */
   const confirmBundle = confirm === null ? null : {
-    // The cutout dialog asks for the NAME (createFlyAsk) — the base is the
-    // row the menu was opened on, the input is what needs typing; the
-    // delete/worktree asks name their consequence instead.
+    // The cutout dialog asks for the NAME, and names the base while it is
+    // at it: the row that was right-clicked is gone by the time this
+    // flyout replaces the menu, and "cut from which branch" is the half of
+    // the action the input cannot express. The delete/worktree asks name
+    // their consequence instead.
     ask: confirm.kind === 'worktree-cutout'
-      ? t('createFlyAsk')
+      ? t('cutoutFlyAsk', { branch: confirm.branch })
       : confirm.kind === 'delete'
         ? t('deleteBranchAsk', { branch: confirm.branch })
         : confirm.remote === true
@@ -747,7 +754,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
           // sends every pick back to the main checkout, where the worktree
           // verbs (and the whole action surface) live.
           if (inLinkedWorktree) {
-            setToast({ seq: Date.now(), text: t('mainRepoOnly') })
+            pushToast(t('mainRepoOnly'))
             return
           }
           const row = rows.find(r => r.name === branch)
@@ -775,7 +782,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
           {...cutoutHint === undefined ? {} : { draftHint: cutoutHint }}
         />
       )}
-      {toast !== null && <Toast key={toast.seq} text={toast.text} onDone={() => { setToast(null) }} />}
+      {toasts[0] !== undefined && (
+        <Toast
+          key={toasts[0].seq}
+          text={toasts[0].text}
+          onDone={() => { setToasts(queue => queue.slice(1)) }}
+        />
+      )}
     </>
   )
 }
