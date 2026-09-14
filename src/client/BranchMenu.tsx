@@ -601,6 +601,14 @@ export function BranchMenu({
    * has toggled), but the reset itself still needs the freshest list. */
   const latestRows = useRef(rows)
   latestRows.current = rows
+  /** Latest checked-out branch for the open-reset effect. The reset must
+   * fire on OPEN only: 签出 is keep-open, so the owner's refresh moves
+   * `currentBranch` while the menu stands — keying the effect on it would
+   * wipe the search text, the folder state, and any half-typed flyout
+   * right after the switch the user meant to follow up on. The seeding
+   * still needs the fresh value, hence the ref. */
+  const currentBranchRef = useRef(currentBranch)
+  currentBranchRef.current = currentBranch
   /** Always-fresh pick for the stale-safe document keydown listener. */
   const pickRef = useRef<(el: HTMLElement | null, name: string) => void>(() => {})
   const confirmOpen = confirm !== null
@@ -703,9 +711,10 @@ export function BranchMenu({
   // naming form. The tree's opening depth follows the list size: past
   // TREE_MIN_ROWS the local group (plus the checked-out branch's folder
   // chain) starts open while the remote group starts closed, at or under
-  // it every group and folder does. Rows come through a ref — the effect
-  // keys on [open, currentBranch] so a mid-open refresh never resets
-  // folders the user has toggled by hand.
+  // it every group and folder does. Rows and the current branch both come
+  // through refs — the effect keys on [open] ALONE so neither a mid-open
+  // refresh nor a keep-open 签出 (which moves currentBranch) resets the
+  // search text and the folders the user has toggled by hand.
   useEffect(() => {
     if (!open) return
     setQuery('')
@@ -726,10 +735,10 @@ export function BranchMenu({
     setWorktreeGroupOpen(true)
     setExpanded(
       many
-        ? new Set([...chainExpanded(currentBranch)].map(p => groupKey('local', p)))
+        ? new Set([...chainExpanded(currentBranchRef.current)].map(p => groupKey('local', p)))
         : new Set([...localPaths, ...remotePaths]),
     )
-  }, [open, currentBranch])
+  }, [open])
 
   // A selection that no longer exists in the rows (worktree toggle, refresh)
   // must not linger as a phantom Enter target.
@@ -1109,13 +1118,22 @@ export function BranchMenu({
   if (!open || pos === null) return null
 
   const needle = query.trim().toLowerCase()
+  /** The worktree rows that are actually OFFERED. Without `canAdopt` the
+   * group is not rendered at all (a started session's directory is fixed),
+   * so those rows must leave every derived set too — `visible` feeds the
+   * search-Enter commit and the empty-state test, and a row that reaches
+   * neither the eye nor the pointer must not be reachable by keyboard
+   * either (an unrendered hit used to hop the session into a worktree the
+   * gate had just withheld) nor count as "something matched" under an
+   * empty list. */
+  const pickableWorktreeRows = canAdopt ? grouped.worktreeRows : []
   // Search matches the DISPLAY names — what the rows actually show. With a
   // single remote that is the prefix-stripped form (searching "origin" no
   // longer matches; the user searches what they see), with several remotes
   // the full name.
   const visible = needle === ''
-    ? rows
-    : [...grouped.localRows, ...grouped.worktreeRows, ...grouped.remoteDisplayRows]
+    ? (canAdopt ? rows : rows.filter(row => row.kind !== 'worktree'))
+    : [...grouped.localRows, ...pickableWorktreeRows, ...grouped.remoteDisplayRows]
       .filter(row => row.name.toLowerCase().includes(needle))
 
   /** Enter in the search field: commit the first visible row (its rendered
@@ -1759,11 +1777,11 @@ export function BranchMenu({
                   {grouped.localRows.length > 0 && renderGroupHeader(t('menuLocalBranches'), grouped.localRows.length, localGroupOpen,
                     () => setLocalGroupOpen(value => !value))}
                   {localGroupOpen && renderTree(localTree, 1, 'local:')}
-                  {canAdopt && grouped.worktreeRows.length > 0 && (
+                  {pickableWorktreeRows.length > 0 && (
                     <>
-                      {renderGroupHeader(t('menuWorktrees'), grouped.worktreeRows.length, worktreeGroupOpen,
+                      {renderGroupHeader(t('menuWorktrees'), pickableWorktreeRows.length, worktreeGroupOpen,
                         () => setWorktreeGroupOpen(value => !value))}
-                      {worktreeGroupOpen && grouped.worktreeRows.map(row => renderFlatLeaf(row, 'worktree:'))}
+                      {worktreeGroupOpen && pickableWorktreeRows.map(row => renderFlatLeaf(row, 'worktree:'))}
                     </>
                   )}
                   {grouped.remoteDisplayRows.length > 0 && (
@@ -1782,10 +1800,10 @@ export function BranchMenu({
                       {renderSearch(localTree, 1, 'local:')}
                     </>
                   )}
-                  {canAdopt && grouped.worktreeRows.some(row => row.name.toLowerCase().includes(needle)) && (
+                  {pickableWorktreeRows.some(row => row.name.toLowerCase().includes(needle)) && (
                     <>
-                      {renderGroupHeader(t('menuWorktrees'), grouped.worktreeRows.filter(row => row.name.toLowerCase().includes(needle)).length, true)}
-                      {grouped.worktreeRows
+                      {renderGroupHeader(t('menuWorktrees'), pickableWorktreeRows.filter(row => row.name.toLowerCase().includes(needle)).length, true)}
+                      {pickableWorktreeRows
                         .filter(row => row.name.toLowerCase().includes(needle))
                         .map(row => renderFlatLeaf(row, 'worktree:'))}
                     </>
