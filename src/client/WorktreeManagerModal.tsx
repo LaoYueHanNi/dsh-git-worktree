@@ -1,12 +1,15 @@
 /**
  * WorktreeManagerModal: the settings card's second-level dialog listing EVERY
  * direct child of the worktree storage root — across repositories, orphan
- * directories included. Each row spells the belonging (repository), the
- * checked-out branch, and the last-use time (the freshest qualifying
- * session's updatedAt, the same activity the lazy prune orders by); the
- * delete button rides the shared removal flow, so a removal here is
- * behaviorally the sidebar's removal: confirm with dirty/ahead facts, git
- * first, archives and unregistration after. Unrecognized directories
+ * directories included. Belonging is structural: each repository renders as
+ * a card whose tinted header bar carries the folder icon, the repo name and
+ * its worktree count, and every row steps in under that header — the
+ * project→worktree ownership is readable from the layout alone. A row
+ * spells the checked-out branch and the last-use time (the freshest
+ * qualifying session's updatedAt, the same activity the lazy prune orders
+ * by); the delete button rides the shared removal flow, so a removal here
+ * is behaviorally the sidebar's removal: confirm with dirty/ahead facts,
+ * git first, archives and unregistration after. Unrecognized directories
  * (probe finds no git repository) render read-only — deleting someone
  * else's folder is outside "worktree management" — and directories with a
  * running session withhold their delete button.
@@ -15,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconFolderClose16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './sidebar-search.ts'
@@ -256,7 +259,11 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
               {groupScanEntries(scan.entries).map(group => (
                 <div key={group.repoName ?? '<orphans>'} className={css.group}>
                   <div className={css.groupHead} role="presentation">
-                    {group.repoName ?? t('manager.orphans')}
+                    <span className={css.groupIcon} aria-hidden="true"><IconFolderClose16 size={13} /></span>
+                    <span className={css.groupName}>{group.repoName ?? t('manager.orphans')}</span>
+                    {group.repoName !== null && (
+                      <span className={css.groupCount}>{t('manager.count', { n: group.entries.length })}</span>
+                    )}
                   </div>
                   {group.entries.map((entry) => {
                     const unknown = entry.repoName === null
