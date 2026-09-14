@@ -77,6 +77,7 @@ export type GitWorktreeKey =
   | 'cardGroupSidebarMark'
   | 'cardGroupSidebarNote'
   | 'cardGroupSidebarBusy'
+  | 'cardSwitchFailed'
   | 'cardManageWorktrees'
   | 'cardManageHint'
   | 'cardFetchBeforeCreateLabel'
@@ -97,6 +98,7 @@ export type GitWorktreeKey =
   | 'manager.loadFailed'
   | 'manager.empty'
   | 'manager.count'
+  | 'manager.truncated'
   | 'manager.orphans'
   | 'manager.colRepo'
   | 'manager.colBranch'
@@ -279,6 +281,7 @@ export const en: Record<GitWorktreeKey, string> = {
   cardGroupSidebarMark: '(experimental)',
   cardGroupSidebarNote: 'Turn it off to restore the native list if anything breaks; we will switch to the official API as soon as it ships.',
   cardGroupSidebarBusy: 'Switching sidebar…',
+  cardSwitchFailed: 'This switch did not save. Try again.',
   cardManageWorktrees: 'Manage worktrees…',
   cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces. Removal follows the same flow as the sidebar.',
   cardFetchBeforeCreateLabel: 'Fetch upstream before creating',
@@ -299,6 +302,7 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.loadFailed': 'Scan failed: {message}',
   'manager.empty': 'The worktree storage root is empty.',
   'manager.count': '{n} worktree(s)',
+  'manager.truncated': 'Too many directories to scan; showing the first batch. Check that the storage folder is set correctly.',
   'manager.orphans': 'Unrecognized directories',
   'manager.colRepo': 'Repository',
   'manager.colBranch': 'Branch',
@@ -482,6 +486,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardGroupSidebarMark: '（测试功能）',
   cardGroupSidebarNote: '使用中若遇问题，关掉即可回到原生；官方接口一旦开放，会第一时间改用原生实现。',
   cardGroupSidebarBusy: '正在切换侧栏…',
+  cardSwitchFailed: '该开关未保存，请重试。',
   cardManageWorktrees: '管理工作树…',
   cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录；删除与侧栏的删除工作树走同一流程。',
   cardFetchBeforeCreateLabel: '创建工作树前同步上游',
@@ -502,6 +507,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.loadFailed': '扫描失败：{message}',
   'manager.empty': '工作树存放目录暂无内容。',
   'manager.count': '{n} 个工作树',
+  'manager.truncated': '目录过多，仅显示前一批。请检查存放目录是否设置正确。',
   'manager.orphans': '无法识别的目录',
   'manager.colRepo': '所属项目',
   'manager.colBranch': '工作树分支',

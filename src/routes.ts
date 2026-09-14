@@ -84,6 +84,13 @@ const GROUP_PATHS_LIMIT = 256
  * an unreasonable number of concurrent git processes. */
 const GROUP_BATCH_SIZE = 16
 
+/** Upper bound on children one /worktrees-all scan probes. The storage root
+ * is this plugin's own slot directory, so a healthy one stays far below;
+ * the cap exists so a root pointed at something enormous (a misconfigured
+ * rootDir, a home directory) cannot turn one dialog open into thousands of
+ * git spawns. Past it the scan answers its first slice plus `truncated`. */
+const SCAN_CHILDREN_LIMIT = 512
+
 /**
  * POST /group — git belonging facts for a batch of workspace directories.
  * Deduplicates, validates, probes in bounded batches, and answers 200 with
@@ -131,13 +138,18 @@ export async function handleGroupWorktrees(deps: RouteDeps, body: unknown): Prom
  * child that probes as no git repository comes back with null facts rather
  * than being dropped — the dialog shows it as unrecognized). A missing
  * storage root answers an empty list; per-child probe failures degrade to
- * null facts, never a 500 — the dialog must render, not error out.
+ * null facts, never a 500 — the dialog must render, not error out. A root
+ * holding more than {@link SCAN_CHILDREN_LIMIT} children answers its first
+ * slice plus `truncated`, so a misconfigured rootDir cannot turn one dialog
+ * open into thousands of git spawns.
  * @param deps - host dependencies.
  */
 export async function handleWorktreesAll(deps: RouteDeps): Promise<RouteOutcome> {
   const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
   const listDir = deps.listDir ?? fsListDir
-  const children = await listDir(rootDir)
+  const listed = await listDir(rootDir)
+  const truncated = listed.length > SCAN_CHILDREN_LIMIT
+  const children = truncated ? listed.slice(0, SCAN_CHILDREN_LIMIT) : listed
   const facts: WorktreesAllResult['worktrees'] = []
   for (let start = 0; start < children.length; start += GROUP_BATCH_SIZE) {
     const batch = children.slice(start, start + GROUP_BATCH_SIZE)
@@ -154,7 +166,7 @@ export async function handleWorktreesAll(deps: RouteDeps): Promise<RouteOutcome>
     }))
     facts.push(...probed)
   }
-  return { status: 200, body: { worktrees: facts } }
+  return { status: 200, body: { worktrees: facts, ...truncated ? { truncated } : {} } }
 }
 
 /** Real fs-backed recursive force rm (Windows file-lock retries included). */

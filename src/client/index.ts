@@ -426,7 +426,7 @@ export function apply(ctx: ClientContext): void {
     listWorktrees: async () => {
       const result = await requestWorktreesAll()
       if (!result.ok) throw new Error(result.error)
-      return result.worktrees
+      return { worktrees: result.worktrees, ...result.truncated === undefined ? {} : { truncated: result.truncated } }
     },
     inspectWorktree: async (path) => {
       const result = await requestInspectWorktree(path)

@@ -40,6 +40,14 @@
   padding: 12px 0;
 }
 
+/* The scan-cap notice. Not .error: the list below it is real and usable,
+ * the sentence only says it is a first slice — and unlike .error it carries
+ * prose, so no break-all. */
+.warn {
+  font-size: 12px;
+  color: var(--dsw-alias-label-warning, #b07000);
+}
+
 /* The scroll region: worktree counts grow without bound, the dialog must
  * not (BranchMenu's cap posture, dialog-scaled). */
 .list {

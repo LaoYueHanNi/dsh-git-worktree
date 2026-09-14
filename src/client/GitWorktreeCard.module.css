@@ -388,6 +388,15 @@
   color: var(--dsw-alias-label-danger, #d64545);
 }
 
+/* Write-through switches flip optimistically, so a rejected write shows up
+ * as the control snapping back. This note sits in the switch's own text
+ * column and says which one did not take. */
+.switchBad {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-danger, #d64545);
+}
+
 /* The auto-prune audit trail (清理记录): newest first, one run per line —
  * relative time, the removed directories with their belonging, then the
  * run's exceptions in the secondary tone. */

@@ -19,6 +19,7 @@ import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './sidebar-search.ts'
+import { mapLimit } from './concurrency.ts'
 import { groupScanEntries } from './scan-groups.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { freshestUpdatedAt, pathKey } from './worktree-prune.ts'
@@ -27,8 +28,9 @@ import css from './WorktreeManagerModal.module.css'
 /** Structural minimums of the browser facts the dialog reads; the slot
  * entry injects these from the framework snapshots. */
 export interface WorktreeManagerFace {
-  /** Scan the storage root; rejects with the host error text. */
-  readonly listWorktrees: () => Promise<WorktreeScanEntry[]>
+  /** Scan the storage root; rejects with the host error text. `truncated`
+   * marks a root that held more children than the host probes. */
+  readonly listWorktrees: () => Promise<{ worktrees: WorktreeScanEntry[]; truncated?: boolean }>
   /** Pre-delete facts of one directory; rejects with the host error text. */
   readonly inspectWorktree: (path: string) => Promise<{ dirty: number; ahead: number | undefined }>
   /** Registered workspaces (path → identity + session membership). */
@@ -58,11 +60,16 @@ export interface WorktreeManagerModalProps {
 
 type ScanState =
   | { status: 'loading' }
-  | { status: 'ready'; entries: WorktreeScanEntry[] }
+  | { status: 'ready'; entries: WorktreeScanEntry[]; truncated: boolean }
   | { status: 'error'; error: string }
 
 /** Per-directory pre-delete facts, probed for every valid row up front. */
 type InspectMap = Readonly<Record<string, { dirty: number; ahead: number | undefined }>>
+
+/** Concurrent inspects while the dialog loads. One inspect is one git
+ * process on the host, so this is the browser-side twin of the /group
+ * route's batch cap. */
+const INSPECT_CONCURRENCY = 8
 
 /** One removal the confirm dialog is staged for. `git` targets ride the
  * shared removal flow; `orphan` targets (no git identity) are purged
@@ -98,7 +105,11 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
-  const [now] = useState(() => Date.now())
+  /** The "last used" column's reference point. Re-read on every OPEN: this
+   * component is mounted for as long as the settings card is expanded (the
+   * `open` prop only drives the Modal), so a value frozen at mount would
+   * have the dialog quoting hour-old distances. */
+  const [now, setNow] = useState(() => Date.now())
 
   // One scan per open; the derived workspace/session facts come from the
   // same frame's snapshots, so the whole dialog data is coherent.
@@ -109,10 +120,11 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
     setInspects({})
     setRemoveTarget(null)
     setRemoveError(null)
+    setNow(Date.now())
     void face.listWorktrees().then(
-      async (entries) => {
+      async ({ worktrees: entries, truncated }) => {
         if (!live) return
-        setScan({ status: 'ready', entries })
+        setScan({ status: 'ready', entries, truncated: truncated === true })
         const valid = entries.filter(entry => entry.repoName !== null)
         const workspaces = face.workspaces()
         const running = new Set<string>()
@@ -122,13 +134,18 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
           }
         }
         setRunningPaths(running)
-        const facts = await Promise.all(valid.map(async (entry) => {
+        // Bounded fan-out: every inspect is one git process on the host,
+        // and a storage root can hold dozens of directories. An unbounded
+        // Promise.all here would spawn all of them at once (Windows feels
+        // it most) — the /group route caps its own batch for the same
+        // reason.
+        const facts = await mapLimit(valid, INSPECT_CONCURRENCY, async (entry) => {
           try {
             return [entry.path, await face.inspectWorktree(entry.path)] as const
           } catch {
             return [entry.path, undefined] as const
           }
-        }))
+        })
         if (!live) return
         setInspects(Object.fromEntries(facts.filter(([, value]) => value !== undefined)) as InspectMap)
       },
@@ -182,7 +199,9 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         setRemoving(false)
         setRemoveTarget(null)
         // Refresh the list in place: the removed row is gone, facts follow.
-        void face.listWorktrees().then((entries) => { setScan({ status: 'ready', entries }) })
+        void face.listWorktrees().then(({ worktrees: entries, truncated }) => {
+          setScan({ status: 'ready', entries, truncated: truncated === true })
+        })
       },
       (reason: unknown) => {
         setRemoving(false)
@@ -218,6 +237,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         {scan.status === 'ready' && (
           <div className={css.body}>
             <div className={css.count} role="status">{t('manager.count', { n: validCount })}</div>
+            {scan.truncated && <div className={css.warn} role="status">{t('manager.truncated')}</div>}
             {scan.entries.length === 0 && <div className={css.empty}>{t('manager.empty')}</div>}
             <div className={css.list}>
               {groupScanEntries(scan.entries).map(group => (
@@ -325,7 +345,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
               if (workspace === undefined) return null
               const ids = archiveIdsFor(face, workspace.sessionIds)
               if (ids.length === 0) return null
-              return <div className={css.removeFact}>{t('worktreeRemove.sessions.other', { n: ids.length })}</div>
+              return <div className={css.removeFact}>{t(ids.length === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: ids.length })}</div>
             })()}
           </div>
         )}

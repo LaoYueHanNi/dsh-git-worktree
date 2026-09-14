@@ -43,14 +43,31 @@ export function recordPruneRun(entry: PruneRunEntry): void {
   }
 }
 
+/** Structural check of ONE stored run. The payload is browser-local JSON an
+ * older build (or anything else holding this key) may have written in a
+ * different shape, and the settings card reads `run.removed.length` straight
+ * into its render — a top-level `Array.isArray` alone would let `[1, 2]`
+ * through and take the whole card down with a TypeError. Only the fields the
+ * card actually touches are checked; their element shapes stay trusted (a
+ * malformed member degrades one line, not the page). */
+function isPruneRunEntry(value: unknown): value is PruneRunEntry {
+  if (typeof value !== 'object' || value === null) return false
+  const entry = value as Record<string, unknown>
+  return typeof entry.at === 'number'
+    && Array.isArray(entry.removed)
+    && Array.isArray(entry.skippedDirty)
+    && Array.isArray(entry.failed)
+}
+
 /** The recorded runs, newest first; an unreadable/foreign payload reads as
- * "no history" rather than throwing into the settings render. */
+ * "no history" rather than throwing into the settings render — entry by
+ * entry, so one bad record costs its own line and nothing else. */
 export function readPruneHistory(): readonly PruneRunEntry[] {
   try {
     const raw = localStorage.getItem(KEY)
     if (raw === null) return []
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed as PruneRunEntry[] : []
+    return Array.isArray(parsed) ? parsed.filter(isPruneRunEntry) : []
   } catch {
     return []
   }

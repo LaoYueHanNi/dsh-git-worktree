@@ -99,4 +99,45 @@ describe('prune history storage', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  // The settings card reads run.removed.length straight into its render, so
+  // a foreign payload that survives the read takes the whole card down.
+  it('drops entries that are not shaped like a run, keeping the good ones', () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    })
+    try {
+      const good = run(7, ['/wt/a'])
+      store.set('git-worktree:prune-history', JSON.stringify([
+        1,
+        null,
+        'run',
+        { at: 'yesterday', removed: [], skippedDirty: [], failed: [] },
+        { at: 3, removed: [], skippedDirty: [] },
+        { at: 4, removed: 'none', skippedDirty: [], failed: [] },
+        good,
+      ]))
+      const history = readPruneHistory()
+      expect(history).toHaveLength(1)
+      expect(history[0]?.at).toBe(7)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('reads a non-array payload as no history', () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    })
+    try {
+      store.set('git-worktree:prune-history', JSON.stringify({ at: 1 }))
+      expect(readPruneHistory()).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

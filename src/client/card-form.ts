@@ -54,6 +54,11 @@ export interface CardStore {
   set(next: CardState): void
 }
 
+/** Which write-through switch failed to persist, if any. Unlike the staged
+ * root field these flip immediately, so a rejected write leaves the control
+ * silently snapping back — the card needs to say which one did not take. */
+export type SwitchField = 'groupSidebar' | 'fetchBeforeCreate' | 'autoPruneWorktrees'
+
 /** What the git-worktree settings card renders. */
 export interface CardState {
   /** False while the namespace is not served to this client; the card renders nothing. */
@@ -84,6 +89,9 @@ export interface CardState {
    * An invalid DRAFT disables saving; an invalid STORED value (host-side
    * hand edit) just disables the prune's usefulness, not the card. */
   keepWorktreesValid: boolean
+  /** The write-through switch whose last flip did not persist; null once a
+   * later flip succeeds. The card renders a retry note beside it. */
+  switchFailed: SwitchField | null
 }
 
 /** The form actions the card's slot entry injects. */
@@ -126,6 +134,7 @@ export class CardForm {
   private failed = false
   private groupingPending = false
   private groupingDraft: boolean | undefined
+  private switchFailed: SwitchField | null = null
 
   /**
    * @param scope - the bound settings scope for the `git-worktree` namespace.
@@ -203,11 +212,22 @@ export class CardForm {
   /**
    * Flip a write-through switch with no seat swap to wait for (unlike the
    * grouping switch): optimistic publish, persist, done.
+   *
+   * A rejected write is CAUGHT, not propagated: the card invokes these from
+   * a checkbox `onChange` that discards the promise, so an escaping
+   * rejection would be an unhandled one AND would leave the control
+   * snapping back with no explanation. The failure is recorded instead and
+   * the card renders a retry note beside the switch.
    */
   private async setSimpleFlag(field: 'fetchBeforeCreate' | 'autoPruneWorktrees', value: boolean): Promise<void> {
     const current = this.scope.getSnapshot().value?.[field] ?? false
     if (value === current) return
-    await this.scope.set(field, value)
+    try {
+      await this.scope.set(field, value)
+      if (this.switchFailed === field) this.switchFailed = null
+    } catch (_switchWriteFailure) {
+      this.switchFailed = field
+    }
     this.publish()
   }
 
@@ -229,6 +249,11 @@ export class CardForm {
     try {
       await this.scope.set('groupSidebar', value)
       if (this.afterGroupSidebarWrite !== undefined) await this.afterGroupSidebarWrite(value)
+      if (this.switchFailed === 'groupSidebar') this.switchFailed = null
+    } catch (_switchWriteFailure) {
+      // Same contract as setSimpleFlag: the caller discards this promise,
+      // so the failure has to become visible state rather than escape.
+      this.switchFailed = 'groupSidebar'
     } finally {
       this.groupingPending = false
       this.groupingDraft = undefined
@@ -332,6 +357,7 @@ export class CardForm {
       autoPruneWorktrees: this.scope.getSnapshot().value?.autoPruneWorktrees ?? false,
       keepWorktreesText: keepText,
       keepWorktreesValid: keepParsed !== undefined && keepParsed >= 1,
+      switchFailed: this.switchFailed,
     }
   }
 

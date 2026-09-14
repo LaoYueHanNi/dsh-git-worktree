@@ -271,6 +271,44 @@ describe('CardForm write-through switches', () => {
     const form = new CardForm(scope)
     expect(form.bind().getSnapshot()).toMatchObject({ keepWorktreesText: '30', keepWorktreesValid: true, dirty: false })
   })
+
+  // The card invokes these from a checkbox onChange that drops the promise:
+  // a rejection must become visible state, never an unhandled rejection.
+  it('records a rejected simple-flag write instead of rethrowing', async () => {
+    const scope = new FakeScope({})
+    scope.set = () => Promise.reject(new Error('document locked'))
+    const form = new CardForm(scope)
+    const store = form.bind()
+    await expect(form.actions().setFetchBeforeCreate(true)).resolves.toBeUndefined()
+    expect(store.getSnapshot().switchFailed).toBe('fetchBeforeCreate')
+  })
+
+  it('records a rejected grouping write and still clears pending', async () => {
+    const scope = new FakeScope({})
+    scope.set = () => Promise.reject(new Error('document locked'))
+    const form = new CardForm(scope)
+    const store = form.bind()
+    await expect(form.actions().setGroupSidebar(false)).resolves.toBeUndefined()
+    expect(store.getSnapshot()).toMatchObject({ switchFailed: 'groupSidebar', groupingPending: false })
+  })
+
+  it('clears the switch failure once the same switch writes successfully', async () => {
+    const scope = new FakeScope({})
+    const realSet = scope.set.bind(scope)
+    scope.set = () => Promise.reject(new Error('document locked'))
+    const form = new CardForm(scope)
+    const store = form.bind()
+    await form.actions().setAutoPruneWorktrees(true)
+    expect(store.getSnapshot().switchFailed).toBe('autoPruneWorktrees')
+    scope.set = realSet
+    await form.actions().setAutoPruneWorktrees(true)
+    expect(store.getSnapshot()).toMatchObject({ switchFailed: null, autoPruneWorktrees: true })
+  })
+
+  it('reports no switch failure on a clean card', () => {
+    const scope = new FakeScope({})
+    expect(new CardForm(scope).bind().getSnapshot().switchFailed).toBeNull()
+  })
 })
 
 describe('CardForm keep-cap staging', () => {

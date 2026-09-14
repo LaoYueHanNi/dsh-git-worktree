@@ -342,6 +342,10 @@ export interface WorktreeScanEntry {
  * resolved storage root; the root's absence answers an empty list. */
 export interface WorktreesAllResult {
   worktrees: WorktreeScanEntry[]
+  /** Present and true when the storage root held more children than the
+   * scan probes: the list is the first slice, and the client says so rather
+   * than presenting a truncated scan as the whole picture. */
+  truncated?: boolean
 }
 
 /** POST purge request body. */

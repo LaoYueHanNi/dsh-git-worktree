@@ -15,11 +15,11 @@
  * @module git-worktree/client/GitWorktreeCard
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { IconChevronDownOutline14, IconLoadingOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CardActions, CardStore } from './card-form.ts'
-import { readPruneHistory } from './prune-history.ts'
+import { readPruneHistory, type PruneRunEntry } from './prune-history.ts'
 import { timeLabel } from './sidebar-search.ts'
 import { WorktreeManagerModal, type WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import css from './GitWorktreeCard.module.css'
@@ -55,6 +55,17 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
   const [open, setOpen] = useState(false)
   const [picking, setPicking] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
+  /** The prune log and the clock it is measured against, both read ONCE per
+   * card expansion. Reading localStorage (and Date.now) from the render body
+   * made every unrelated re-render re-parse the log and shift the relative
+   * times underneath the user. */
+  const [history, setHistory] = useState<readonly PruneRunEntry[]>([])
+  const [historyNow, setHistoryNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!open) return
+    setHistory(readPruneHistory())
+    setHistoryNow(Date.now())
+  }, [open])
   const { t } = props
   const state = props.useGitWorktreeCard(snapshot => snapshot)
   if (!state.available) return null
@@ -137,6 +148,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
                 </span>
                 <span className={css.toggleHint}>{t('cardGroupSidebarHint')}</span>
                 <span className={css.toggleNote}>{t('cardGroupSidebarNote')}</span>
+                {state.switchFailed === 'groupSidebar' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
               </span>
               <span className={css.toggleControl}>
                 {state.groupingPending
@@ -172,6 +184,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
               <span className={css.toggleText}>
                 <span className={css.toggleLabel}>{t('cardFetchBeforeCreateLabel')}</span>
                 <span className={css.toggleHint}>{t('cardFetchBeforeCreateHint')}</span>
+                {state.switchFailed === 'fetchBeforeCreate' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
               </span>
               <span className={css.toggleControl}>
                 <input
@@ -187,6 +200,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
               <span className={css.toggleText}>
                 <span className={css.toggleLabel}>{t('cardAutoPruneLabel')}</span>
                 <span className={css.toggleHint}>{t('cardAutoPruneHint')}</span>
+                {state.switchFailed === 'autoPruneWorktrees' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
               </span>
               <span className={css.toggleControl}>
                 <input
@@ -217,20 +231,18 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
             </label>
             {/* The auto-prune's audit trail (browser-local, newest first):
               * which run removed whose worktrees, so a misjudged activity
-              * is discoverable after the toast has faded. Read at render —
-              * expanding the card re-reads, a finished prune shows on the
-              * next look. */}
+              * is discoverable after the toast has faded. Read once per
+              * expansion — a finished prune shows on the next look. */}
             {state.autoPruneWorktrees && (
               <div className={`${css.field} ${css.historyRow}`}>
                 <span className={css.fieldLabel}>{t('cardPruneHistoryLabel')}</span>
-                {(() => {
-                  const history = readPruneHistory()
-                  if (history.length === 0) return <span className={css.toggleHint}>{t('cardPruneHistoryEmpty')}</span>
-                  return (
+                {history.length === 0
+                  ? <span className={css.toggleHint}>{t('cardPruneHistoryEmpty')}</span>
+                  : (
                     <ul className={css.history}>
                       {history.map(run => (
                         <li key={run.at} className={css.historyRun}>
-                          <span className={css.historyTime}>{timeLabel(run.at, Date.now(), t)}</span>
+                          <span className={css.historyTime}>{timeLabel(run.at, historyNow, t)}</span>
                           {run.removed.length > 0
                             ? (
                               <span className={css.historyLine}>
@@ -248,8 +260,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
                         </li>
                       ))}
                     </ul>
-                  )
-                })()}
+                  )}
               </div>
             )}
             <WorktreeManagerModal

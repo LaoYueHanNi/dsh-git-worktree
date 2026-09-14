@@ -915,6 +915,32 @@ describe('handleWorktreesAll', () => {
     if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
     expect(outcome.body.worktrees).toEqual([{ path: wtA, repoName: null, branch: null }])
   })
+
+  // A rootDir pointed at something enormous (a home directory, say) must not
+  // turn one dialog open into thousands of git spawns.
+  it('caps the scan at 512 children and says the list is truncated', async () => {
+    const children = Array.from({ length: 600 }, (_, index) => `child-${String(index)}`)
+    const outcome = await handleWorktreesAll(deps({
+      listDir: async () => children,
+      exec: perDir({}),
+    }))
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
+    expect(outcome.body.worktrees).toHaveLength(512)
+    expect(outcome.body.truncated).toBe(true)
+    expect(outcome.body.worktrees.at(-1)?.path).toBe(join(ROOT, 'child-511'))
+  })
+
+  it('leaves the truncated flag absent at exactly the cap', async () => {
+    const children = Array.from({ length: 512 }, (_, index) => `child-${String(index)}`)
+    const outcome = await handleWorktreesAll(deps({
+      listDir: async () => children,
+      exec: perDir({}),
+    }))
+    if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
+    expect(outcome.body.worktrees).toHaveLength(512)
+    expect(outcome.body).not.toHaveProperty('truncated')
+  })
 })
 
 describe('handlePurgeDirectory', () => {
