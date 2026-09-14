@@ -48,19 +48,12 @@
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
-/* The leftmost segment rounds only its left corners so it tucks into the dock. */
-.chip:first-child {
-  border-top-left-radius: 6px;
-  border-bottom-left-radius: 6px;
-}
-
 .branch {
   max-width: 16em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 
 /* Confirm flyout: the second-level panel opening right of the branch
  * card (the base Menu's submenu posture: r20, elevation-prominent
@@ -535,12 +528,15 @@
 /* ── Row context menu (BranchMenu right-click) ─────────────────────
  * Cursor-anchored transient over the branch card: the same card chrome
  * family as .popCard (--dsw-specific-menu, elevation-prominent hairline,
- * lv3 fallback) at a smaller radius — a two-item menu wears r20 like a
- * pill, r12 keeps the corners proportionate. Width hugs the widest item
+ * lv3 fallback) at a smaller radius — r20 would round a launcher this
+ * short into a pill, r12 keeps the corners proportionate to a handful of
+ * rows (two on a worktree row, up to six plus a header on a branch row).
+ * Width hugs the widest item
  * (shrink-to-fit, no design width) with a generous cap for safety —
  * a launcher reads better snug than stretched. Positioned once at open
- * (see BranchMenu's ctx placement pass); z-index one step above the
- * popCard so it never slides under the confirm flyout. */
+ * and dismissed rather than re-placed when the page moves (see
+ * BranchMenu's ctx placement pass); z-index one step above the popCard so
+ * it never slides under the confirm flyout. */
 .ctxCard {
   box-sizing: border-box;
   position: fixed;

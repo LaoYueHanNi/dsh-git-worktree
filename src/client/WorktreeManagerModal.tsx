@@ -14,7 +14,7 @@
  * @module git-worktree/client/WorktreeManagerModal
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
@@ -111,6 +111,15 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
    * have the dialog quoting hour-old distances. */
   const [now, setNow] = useState(() => Date.now())
 
+  /** Workspaces indexed by their normalized path. Every row's "last used"
+   * cell needs one, and the removal flow needs two more — as linear finds
+   * that is rows × workspaces per render, on a list whose whole point is
+   * holding every worktree of every repository. */
+  const workspaceAt = useMemo(() => {
+    const byPath = new Map(face.workspaces().map(ws => [pathKey(ws.path), ws] as const))
+    return (path: string) => byPath.get(pathKey(path))
+  }, [face])
+
   // One scan per open; the derived workspace/session facts come from the
   // same frame's snapshots, so the whole dialog data is coherent.
   useEffect(() => {
@@ -167,7 +176,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
     const target = removeTarget
     setRemoving(true)
     setRemoveError(null)
-    const workspace = face.workspaces().find(ws => pathKey(ws.path) === pathKey(target.path))
+    const workspace = workspaceAt(target.path)
     const work = target.kind === 'orphan'
       ? (async () => {
           await face.purgeDirectory(target.path)
@@ -210,11 +219,8 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
     )
   }
 
-  const workspaceIdOf = (path: string): string | undefined =>
-    face.workspaces().find(ws => pathKey(ws.path) === pathKey(path))?.workspaceId
-
   const activityOf = (path: string): number => {
-    const workspace = face.workspaces().find(ws => pathKey(ws.path) === pathKey(path))
+    const workspace = workspaceAt(path)
     if (workspace === undefined) return 0
     // The same helper the lazy prune orders by — the manager's last-use
     // column and the prune's victim order cannot disagree.
@@ -348,7 +354,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
               <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: inspects[removeTarget.path]?.ahead ?? 0 })}</div>
             )}
             {removeTarget !== null && (() => {
-              const workspace = face.workspaces().find(ws => pathKey(ws.path) === pathKey(removeTarget.path))
+              const workspace = workspaceAt(removeTarget.path)
               if (workspace === undefined) return null
               const ids = archiveIdsFor(face, workspace.sessionIds)
               if (ids.length === 0) return null

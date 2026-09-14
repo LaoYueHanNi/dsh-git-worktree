@@ -20,7 +20,13 @@ import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
 
 /** Client component sources the gate watches. */
-const WATCHED = ['GroupedSidebar.tsx', 'sidebar-rows.tsx', 'BranchChip.tsx', 'GitWorktreeCard.tsx'] as const
+const WATCHED = [
+  'GroupedSidebar.tsx', 'sidebar-rows.tsx', 'BranchChip.tsx', 'GitWorktreeCard.tsx',
+  // BranchMenu builds a lot of JSX during render (the row renderers, the
+  // ctxItems array) and WorktreeManagerModal builds its rows the same way
+  // — precisely the shape this gate exists for.
+  'BranchMenu.tsx', 'WorktreeManagerModal.tsx',
+] as const
 
 /** One violation: a later-declared const referenced by an earlier JSX const. */
 interface ForwardUse {

@@ -104,25 +104,16 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { branchNameIssue } from '../normalize.ts'
+import {
+  buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows,
+  type BranchRow, type TreeNode,
+} from './branch-tree.ts'
 import css from './BranchChip.module.css'
 
-/** One selectable branch row. `name` is the ACTION name sent to the owner —
- * for a remote row the full `origin/feat-x`; the group model derives the
- * DISPLAY name (see groupRows). `ahead`/`behind` are local-row-only
- * upstream divergence counts (absent without an upstream or in sync).
- * `path` is worktree-row-only: the directory a pick hops the session into.
- * `locked` rows are DIMMED but clickable — a pick still reaches the owner,
- * which answers with the main-checkout hint inside a linked-worktree
- * session (deliberately NOT the HTML disabled attribute: a disabled button
- * swallows the click, and the hint would never fire). */
-export interface BranchRow {
-  name: string
-  kind: 'local' | 'remote' | 'worktree'
-  path?: string
-  ahead?: number
-  behind?: number
-  locked?: boolean
-}
+// The row type travels with the component for every caller (BranchChip
+// imports both from here): the split is an implementation detail of where
+// the tree logic can be tested, not a new module boundary for consumers.
+export type { BranchRow }
 
 /** The confirm flyout bundle, owned and localized by the caller. */
 export interface BranchConfirmFly {
@@ -300,154 +291,85 @@ const TREE_MIN_ROWS = 8
  * content), so leaf padding is 8 + 12×depth + 18. */
 const LEAF_CHEVRON_SLOT = 18
 
-/** One node of the '/' prefix tree built from the row list: every segment
- * boundary is a folder level, so `feature/x/y` nests under `feature` and
- * `x`, and the leaves (rows) sit at the terminal nodes. */
-interface TreeNode {
-  /** This node's own segment (the label text). */
-  segment: string
-  /** Full path: segments joined by '/'. Empty only at the root list. */
-  path: string
-  /** Depth from the root (root children are depth 0). */
-  depth: number
-  /** The branch named exactly `path`, if any — may coexist with children
-   * (`feature` plus `feature/x` are both legal git branch names). */
-  leaf: BranchRow | null
-  /** Children, sorted folders-first then by segment. */
-  children: TreeNode[]
-  /** Leaf branches under this node, including its own leaf. */
-  total: number
-}
-
-/** Every folder path that renders a header, walking the tree depth-first. */
-function collectFolderPaths(nodes: TreeNode[], out: string[] = []): string[] {
-  for (const node of nodes) {
-    if (node.children.length > 0) {
-      out.push(node.path)
-      collectFolderPaths(node.children, out)
-    }
-  }
-  return out
-}
-
-const segCmp = (a: string, b: string): number =>
-  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-
 /**
- * The menu's group model derived from the flat row list: local rows as
- * they are, remote rows displayed under their group header, and worktree
- * rows collected as-is (one per linked worktree, direct hop targets). With
- * a SINGLE remote the `<remote>/` prefix is dropped from the display
- * (`origin/feat/x` reads as `feat/x` — the header already says "remote",
- * and a dropped display name can never collide with a local row because
- * the host hides remote branches that have a local twin); with SEVERAL
- * remotes the full name stays, so `origin`/`upstream` become the folder
- * layer that keeps same-named branches apart. `remoteNameMap` maps a
- * displayed remote name back to the action name (an identity map when
- * nothing was dropped).
+ * Place one flyout of the picker's family (confirm / create / rename).
+ *
+ * All three share one posture, and it used to be written out three times:
+ * **row-menu-staged** flyouts replace the menu AT its cursor point (the
+ * pointer never leaves the conversation), everything else anchors to the
+ * card's right edge — never over the branch list — vertically centered on
+ * its own anchor and clamped into the viewport. The width is
+ * content-driven through a measure-then-place pass: the flyout first lays
+ * out hidden at FLY_MEASURE (real offsets, no flash), place() clamps its
+ * inline max-width to the room right of the card, then pins the box.
+ *
+ * @param active - whether the flyout is showing; false clears the position.
+ * @param flyRef - the flyout element being placed.
+ * @param cardRef - the picker card it hangs off.
+ * @param pointRef - the staged row-menu point, or null-valued for the card-side posture.
+ * @param verticalAnchor - the box whose center the flyout rides; null centers on the card.
+ * @param deps - extra re-place triggers (a re-pick moves the anchor row).
+ * @returns the placed position, or null while unmeasured.
  */
-interface BranchGroups {
-  localRows: BranchRow[]
-  remoteDisplayRows: BranchRow[]
-  worktreeRows: BranchRow[]
-  remoteNameMap: ReadonlyMap<string, string>
-}
-
-/** Split rows into the three groups and derive the remote display names. */
-function groupRows(rows: readonly BranchRow[]): BranchGroups {
-  const localRows: BranchRow[] = []
-  const remoteRows: BranchRow[] = []
-  const worktreeRows: BranchRow[] = []
-  for (const row of rows) {
-    if (row.kind === 'remote') remoteRows.push(row)
-    else if (row.kind === 'worktree') worktreeRows.push(row)
-    else localRows.push(row)
-  }
-  const first = remoteRows[0]?.name ?? ''
-  const slash = first.indexOf('/')
-  const soleRemote = slash > 0 && remoteRows.every(row => row.name.startsWith(first.slice(0, slash + 1)))
-    ? first.slice(0, slash)
-    : undefined
-  const display = (name: string): string => soleRemote === undefined ? name : name.slice(soleRemote.length + 1)
-  return {
-    localRows,
-    remoteDisplayRows: remoteRows.map(row => ({ ...row, name: display(row.name) })),
-    worktreeRows,
-    remoteNameMap: new Map(remoteRows.map(row => [display(row.name), row.name])),
-  }
-}
-
-/** Expanded-key space: folder paths carry their group prefix so a local
- * folder can never share a toggle state with a same-named remote display
- * folder (`feat/x` on both sides). Group OPEN flags stay booleans beside
- * this set — they are not part of the path namespace at all. */
-const groupKey = (group: 'local' | 'remote', path: string): string => `${group}:${path}`
-
-/** Build the prefix tree of the rows (see TreeNode). */
-function buildTree(rows: readonly BranchRow[]): TreeNode[] {
-  /** Mutable builder node — same shape as TreeNode but built incrementally
-   * (find-by-segment walks), sorted and totalled at the end. */
-  interface M {
-    segment: string
-    path: string
-    depth: number
-    leaf: BranchRow | null
-    children: M[]
-    total: number
-  }
-  const root: M[] = []
-  const find = (level: M[], segment: string): M | undefined =>
-    level.find(n => n.segment === segment)
-  for (const row of rows) {
-    const segs = row.name.split('/').filter(s => s !== '')
-    let level = root
-    let path = ''
-    for (let i = 0; i < segs.length; i += 1) {
-      const seg = segs[i]
-      if (seg === undefined) break
-      path = path === '' ? seg : `${path}/${seg}`
-      let node = find(level, seg)
-      if (node === undefined) {
-        node = { segment: seg, path, depth: i, leaf: null, children: [], total: 0 }
-        level.push(node)
+function useFlyoutPlacement(
+  active: boolean,
+  flyRef: React.RefObject<HTMLDivElement | null>,
+  cardRef: React.RefObject<HTMLDivElement | null>,
+  pointRef: React.RefObject<{ x: number; y: number } | null>,
+  verticalAnchor: (() => DOMRect | null) | null,
+  deps: readonly unknown[],
+): { left: number; top: number } | null {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!active) {
+      setPos(null)
+      return
+    }
+    const place = (): void => {
+      const fly = flyRef.current
+      if (fly === null) return
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const fw = fly.offsetWidth
+      const fh = fly.offsetHeight
+      const point = pointRef.current
+      if (point !== null) {
+        setPos({
+          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
+          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
+        })
+        return
       }
-      if (i === segs.length - 1) node.leaf = row
-      level = node.children
+      const card = cardRef.current
+      if (card === null) return
+      const cr = card.getBoundingClientRect()
+      const anchor = verticalAnchor === null ? cr : verticalAnchor()
+      if (anchor === null) return
+      const left = cr.right + GAP
+      // Fit the right side: content width first, clamped by the room left
+      // of the viewport margin (the 200px floor keeps the buttons usable
+      // on very narrow windows, at the cost of spilling past the margin).
+      const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
+      fly.style.maxWidth = `${room}px`
+      const top = Math.min(
+        Math.max(anchor.top + anchor.height / 2 - fh / 2, MARGIN),
+        Math.max(MARGIN, vh - fh - MARGIN),
+      )
+      setPos({ left: Math.min(left, vw - MARGIN - fw), top })
     }
-  }
-  const finish = (nodes: M[]): void => {
-    for (const node of nodes) finish(node.children)
-    nodes.sort((a, b) => {
-      const af = a.children.length > 0 ? 0 : 1
-      const bf = b.children.length > 0 ? 0 : 1
-      return af !== bf ? af - bf : segCmp(a.segment, b.segment)
-    })
-  }
-  finish(root)
-  const count = (nodes: M[]): void => {
-    for (const node of nodes) {
-      count(node.children)
-      node.total = (node.leaf === null ? 0 : 1)
-        + node.children.reduce((sum, c) => sum + c.total, 0)
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
     }
-  }
-  count(root)
-  return root as unknown as TreeNode[]
-}
-
-/** The folders that must start expanded so the checked-out branch is
- * immediately visible in the tree: every proper ancestor of its path. */
-function chainExpanded(branch: string): Set<string> {
-  const segs = branch.split('/').filter(s => s !== '')
-  const set = new Set<string>()
-  let path = ''
-  for (let i = 0; i < segs.length - 1; i += 1) {
-    const seg = segs[i]
-    if (seg === undefined) break
-    path = path === '' ? seg : `${path}/${seg}`
-    set.add(path)
-  }
-  return set
+    // Refs are stable by construction and deliberately absent here;
+    // `deps` carries whatever else moves the anchor (a mid-open re-pick).
+    // Each call site passes a fixed-length `deps`, so the array length
+    // never changes across renders.
+  }, [active, verticalAnchor, ...deps])
+  return pos
 }
 
 /** Hover tooltip: set the native `title` ONLY when the label is actually
@@ -476,13 +398,6 @@ export function BranchMenu({
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
-  /**
-   * Search-field ref callback: focus the field the moment it mounts. The
-   * card mounts in two stages (open flips, then pos resolves a render
-   * later), so an [open]-keyed passive effect fires while the input is
-   * still unmounted — its focus() no-ops against a null ref. Focusing at
-   * mount time is immune to that race by construction.
-   */
   /**
    * Search-field ref callback: focus the field the moment it mounts. The
    * card mounts in two stages (open flips, then pos resolves a render
@@ -519,7 +434,6 @@ export function BranchMenu({
    * stays true, so a ref mutation re-renders nothing). */
   const [pendingName, setPendingName] = useState<string | null>(null)
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
-  const [flyPos, setFlyPos] = useState<{ left: number; top: number } | null>(null)
   const [query, setQuery] = useState('')
   /** Expanded folder set, keyed by group-prefixed node path (see groupKey).
    * Re-seeded on every open so the current branch's chain is visible
@@ -553,11 +467,9 @@ export function BranchMenu({
    * confirm). Opened only from a row context menu; reset on menu open. */
   const [renaming, setRenaming] = useState<{ name: string; draft: string } | null>(null)
   const renameFlyRef = useRef<HTMLDivElement | null>(null)
-  const [renameFlyPos, setRenameFlyPos] = useState<{ left: number; top: number } | null>(null)
-  /** The create flyout element and its placed position (see its place
-   * pass below; same measure-then-place posture as the confirm flyout). */
+  /** The create flyout element (placed by useFlyoutPlacement below, the
+   * same measure-then-place posture as the confirm and rename flyouts). */
   const createFlyRef = useRef<HTMLDivElement | null>(null)
-  const [createFlyPos, setCreateFlyPos] = useState<{ left: number; top: number } | null>(null)
   /** The row context menu (right-click): the target row plus the cursor
    * point in viewport coordinates; null while closed. Placement is
    * computed once at open — a cursor-anchored transient does not track
@@ -839,155 +751,18 @@ export function BranchMenu({
     return () => { cancelAnimationFrame(raf) }
   }, [open, centerCurrentRow])
 
-  // Flyout lifecycle: horizontally anchored to the card's right edge (so
-  // it never overlaps the branch list), vertically centered on the picked
-  // row, clamped into the viewport. Width is content-driven: place()
-  // clamps the flyout's inline max-width to the room right of the card
-  // (CSS caps the design width), then measures the laid-out hidden flyout
-  // and pins it. Re-runs when the pending ROW changes — confirmOpen alone
-  // stays true across re-picks, which used to leave the flyout stranded
-  // at the first row. Scroll/resize re-fit while open.
-  useLayoutEffect(() => {
-    if (!confirmOpen || pendingName === null) {
-      setFlyPos(null)
-      return
-    }
-    const place = (): void => {
-      const fly = flyRef.current
-      if (fly === null) return
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      const fw = fly.offsetWidth
-      const fh = fly.offsetHeight
-      // Staged from the row menu: replace it AT its point (clamped), not
-      // beside the row — the cursor never leaves the conversation.
-      const point = ctxPointRef.current
-      if (point !== null) {
-        setFlyPos({
-          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
-          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
-        })
-        return
-      }
-      const pending = pendingRef.current
-      const card = cardRef.current
-      if (pending === null || card === null) return
-      const row = pending.el.getBoundingClientRect()
-      const cr = card.getBoundingClientRect()
-      const left = cr.right + GAP
-      // Fit the right side: content width first, clamped by the room left
-      // of the viewport margin (floor keeps the buttons usable on very
-      // narrow windows, at the cost of spilling past the margin).
-      const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
-      fly.style.maxWidth = `${room}px`
-      // The picked row's center rides the flyout's vertical center.
-      const top = Math.min(
-        Math.max(row.top + row.height / 2 - fh / 2, MARGIN),
-        Math.max(MARGIN, vh - fh - MARGIN),
-      )
-      setFlyPos({ left: Math.min(left, vw - MARGIN - fw), top })
-    }
-    place()
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [confirmOpen, pendingName])
-
-  // Create flyout placement: anchored to the card's right edge (never
-  // overlapping the branch list), vertically centered on the card, clamped
-  // into the viewport. Content-driven width via the same measure-then-place
-  // pass the confirm flyout uses (hidden layout, then real offsets).
-  useLayoutEffect(() => {
-    if (!creating) {
-      setCreateFlyPos(null)
-      return
-    }
-    const place = (): void => {
-      const fly = createFlyRef.current
-      if (fly === null) return
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      const fw = fly.offsetWidth
-      const fh = fly.offsetHeight
-      // Staged from the row menu (its only entry since the plus left):
-      // replace the menu AT its point, clamped into the viewport.
-      const point = ctxPointRef.current
-      if (point !== null) {
-        setCreateFlyPos({
-          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
-          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
-        })
-        return
-      }
-      const card = cardRef.current
-      if (card === null) return
-      const cr = card.getBoundingClientRect()
-      const left = cr.right + GAP
-      const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
-      fly.style.maxWidth = `${room}px`
-      const top = Math.min(
-        Math.max(cr.top + cr.height / 2 - fh / 2, MARGIN),
-        Math.max(MARGIN, vh - fh - MARGIN),
-      )
-      setCreateFlyPos({ left: Math.min(left, vw - MARGIN - fw), top })
-    }
-    place()
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [creating])
-
-  // Rename flyout placement: the create flyout's posture verbatim (card's
-  // right edge, viewport-clamped, measure-then-place), keyed on the rename
-  // state instead of the create flag.
-  useLayoutEffect(() => {
-    if (renaming === null) {
-      setRenameFlyPos(null)
-      return
-    }
-    const place = (): void => {
-      const fly = renameFlyRef.current
-      if (fly === null) return
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      const fw = fly.offsetWidth
-      const fh = fly.offsetHeight
-      // Row-menu-staged: replace the menu AT its point (see the create
-      // flyout's placement pass).
-      const point = ctxPointRef.current
-      if (point !== null) {
-        setRenameFlyPos({
-          left: Math.min(Math.max(point.x, MARGIN), Math.max(MARGIN, vw - MARGIN - fw)),
-          top: Math.min(Math.max(point.y, MARGIN), Math.max(MARGIN, vh - MARGIN - fh)),
-        })
-        return
-      }
-      const card = cardRef.current
-      if (card === null) return
-      const cr = card.getBoundingClientRect()
-      const left = cr.right + GAP
-      const room = Math.min(FLY_MAX_WIDTH, Math.max(200, vw - MARGIN - left))
-      fly.style.maxWidth = `${room}px`
-      const top = Math.min(
-        Math.max(cr.top + cr.height / 2 - fh / 2, MARGIN),
-        Math.max(MARGIN, vh - fh - MARGIN),
-      )
-      setRenameFlyPos({ left: Math.min(left, vw - MARGIN - fw), top })
-    }
-    place()
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [renaming])
+  // The three flyouts (confirm / create / rename) share one placement
+  // posture — see useFlyoutPlacement. Only the vertical anchor differs:
+  // the confirm centers on the PICKED ROW, the other two on the card.
+  const flyPos = useFlyoutPlacement(
+    confirmOpen && pendingName !== null, flyRef, cardRef, ctxPointRef,
+    // The pending row's box, read at place() time (a mid-open re-pick
+    // moves it). Keyed on pendingName below so a re-pick re-places.
+    useCallback(() => pendingRef.current?.el.getBoundingClientRect() ?? null, []),
+    [pendingName],
+  )
+  const createFlyPos = useFlyoutPlacement(creating, createFlyRef, cardRef, ctxPointRef, null, [])
+  const renameFlyPos = useFlyoutPlacement(renaming !== null, renameFlyRef, cardRef, ctxPointRef, null, [renaming])
 
   // Row-menu placement: cursor-anchored, clamped into the viewport with one
   // measure-then-place pass (the FLY_MEASURE posture gives real offsets).

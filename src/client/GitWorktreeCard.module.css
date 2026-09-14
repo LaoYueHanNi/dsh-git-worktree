@@ -343,7 +343,8 @@
 }
 
 /* Keep-cap row: the number input rides the toggle row's title column, and
- * stays disabled while the auto-prune switch is off (the联动 gate). */
+ * stays disabled while the auto-prune switch is off (the cap means nothing
+ * without the prune that enforces it). */
 .keepRow {
   display: flex;
   flex-direction: column;
