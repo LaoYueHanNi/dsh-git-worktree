@@ -52,6 +52,15 @@ const REPO_CALLS = {
   },
 } satisfies Record<string, Partial<ExecResult>>
 
+/** The same repository, but asked about from INSIDE the linked worktree: the
+ * queried toplevel is the linked folder while the shared `.git` still lives
+ * in the main checkout. */
+const LINKED_CALLS = {
+  ...REPO_CALLS,
+  'rev-parse --show-toplevel': { stdout: '/root/repo/feat-x\n' },
+  'branch --show-current': { stdout: 'feat/x\n' },
+} satisfies Record<string, Partial<ExecResult>>
+
 function deps(over: Partial<RouteDeps> = {}): RouteDeps {
   return {
     exec: scripted(REPO_CALLS),
@@ -83,6 +92,21 @@ describe('handleStatus', () => {
     expect(outcome.body.repoName).toBe('repo')
     expect(outcome.body.rootDir).toBe(DEFAULT_ROOT)
     expect(outcome.body.branches.map(b => b.name)).toEqual(['main', 'feat/x', 'origin/dev'])
+    // The session-scope trigger the chip reads: /repo IS the main checkout.
+    expect(outcome.body.main).toBe(true)
+  })
+
+  it('reports main:false when the queried directory is a linked worktree', async () => {
+    const outcome = await handleStatus(deps({ exec: scripted(LINKED_CALLS) }), '/root/repo/feat-x')
+    if (!('repo' in outcome.body) || !outcome.body.repo) throw new Error('expected repo facts')
+    // Same repository (repoRoot/repoName), different answer: the branch list
+    // and worktree list still come from the shared checkout, but the queried
+    // directory is NOT it.
+    // repoRoot is dirname(resolve(...)) — an absolute platform path, not the
+    // normalize()-only shape `p` produces for a bare POSIX literal.
+    expect(outcome.body.repoRoot).toBe(resolve('/repo'))
+    expect(outcome.body.main).toBe(false)
+    expect(outcome.body.currentBranch).toBe('feat/x')
   })
 
   it('answers with a configured absolute rootDir', async () => {
@@ -477,6 +501,37 @@ describe('handleUpdate', () => {
     }
     const outcome = await handleUpdate(deps({ exec }), { repoPath: '/repo' })
     expect(outcome).toEqual({ status: 200, body: { branch: 'main', updated: true } })
+  })
+
+  it('updates the worktree the session sits in, not the main checkout', async () => {
+    const calls = {
+      ...LINKED_CALLS,
+      'fetch --all --prune': {},
+      'rev-parse HEAD': { stdout: 'aaa111\n' },
+      'merge --ff-only @{u}': { stdout: 'Already up to date.\n' },
+    } as Record<string, Partial<ExecResult>>
+    const base = scripted(calls)
+    const seen: { args: string; cwd: string }[] = []
+    const exec: Exec = async (file, args, options) => {
+      seen.push({ args: args.join(' '), cwd: options.cwd })
+      return base(file, args, options)
+    }
+    const outcome = await handleUpdate(deps({ exec }), { repoPath: '/root/repo/feat-x' })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'feat/x', updated: false } })
+    /** Every cwd the one command ran with. */
+    const cwdsOf = (args: string): string[] =>
+      seen.filter(entry => entry.args === args).map(entry => entry.cwd)
+    // The checkout-level commands run in the session's OWN worktree — the
+    // same directory a session-level `git merge --ff-only` would run in by
+    // hand. Rooting them at `repoRoot` fast-forwards the main checkout
+    // instead, behind the user's back (regression: the repoRoot field stopped
+    // naming the queried directory and nothing here noticed).
+    expect(cwdsOf('fetch --all --prune')).toEqual([p('/root/repo/feat-x')])
+    expect(cwdsOf('merge --ff-only @{u}')).toEqual([p('/root/repo/feat-x')])
+    expect(cwdsOf('rev-parse HEAD')).toEqual([p('/root/repo/feat-x'), p('/root/repo/feat-x')])
+    // Repository-wide reads keep the shared checkout (the branch list and the
+    // worktree list belong to the repository, not to one worktree).
+    expect(cwdsOf('worktree list --porcelain')).toEqual([resolve('/repo')])
   })
 
   it('maps a diverged branch to a 400 envelope', async () => {

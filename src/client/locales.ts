@@ -10,7 +10,6 @@ export type GitWorktreeKey =
   | 'menuLocalBranches'
   | 'menuWorktrees'
   | 'menuRemoteBranches'
-  | 'mainRepoOnly'
   | 'menuSearchPlaceholder'
   | 'menuNoMatches'
   | 'menuNoBranches'
@@ -213,7 +212,6 @@ export const en: Record<GitWorktreeKey, string> = {
   menuLocalBranches: 'Local branches',
   menuWorktrees: 'Worktrees',
   menuRemoteBranches: 'Remote branches',
-  mainRepoOnly: 'Branch operations start from the main checkout',
   menuSearchPlaceholder: 'Search branches',
   menuNoMatches: 'No matching branches',
   menuNoBranches: 'No branches yet',
@@ -417,7 +415,6 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuLocalBranches: '本地分支',
   menuWorktrees: '工作树',
   menuRemoteBranches: '远程分支',
-  mainRepoOnly: '分支操作请在主仓库发起',
   menuSearchPlaceholder: '搜索分支',
   menuNoMatches: '没有匹配的分支',
   menuNoBranches: '暂无分支',

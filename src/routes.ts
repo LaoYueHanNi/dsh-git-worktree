@@ -272,6 +272,7 @@ export async function handleStatus(deps: RouteDeps, path: string | undefined): P
       repo: true,
       repoName: facts.repoName,
       repoRoot: facts.repoRoot,
+      main: facts.main,
       currentBranch: facts.currentBranch,
       branches: facts.branches,
       worktrees: facts.worktrees,
@@ -455,7 +456,12 @@ export async function handleCreateBranch(deps: RouteDeps, body: unknown): Promis
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    const created = await createBranch(deps.exec, facts.repoRoot, name, from, checkout === true)
+    // The session's OWN worktree: the no-`from` shape cuts from — and checks
+    // out in — the queried directory's HEAD, and `from` + `checkout` checks
+    // out HERE. `repoRoot` would move the main checkout instead of the
+    // worktree the session sits in (identical directory when it IS the main
+    // checkout).
+    const created = await createBranch(deps.exec, facts.toplevel, name, from, checkout === true)
     const result: CreateBranchResult = { branch: created }
     return { status: 200, body: result }
   } catch (error) {
@@ -565,7 +571,11 @@ export async function handleUpdate(deps: RouteDeps, body: unknown): Promise<Rout
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    const outcome = await updateBranch(deps.exec, facts.repoRoot)
+    // The session's OWN worktree, not the main checkout: in a linked-worktree
+    // session "update current branch" means the branch that worktree holds.
+    // `repoRoot` would fast-forward the main checkout behind the user's back
+    // (both are the same directory when the session IS the main checkout).
+    const outcome = await updateBranch(deps.exec, facts.toplevel)
     const result: UpdateResult = { branch: outcome.branch, updated: outcome.updated }
     return { status: 200, body: result }
   } catch (error) {

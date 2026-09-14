@@ -306,19 +306,6 @@
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
-/* Locked rows (a linked-worktree session answers every non-current pick
- * with the main-checkout toast): dimmed with a default cursor, but KEEP
- * the click path alive — no disabled attribute, the row menu's 签出 is
- * the toast's stage. Hover stays quiet: nothing is on offer here. */
-.menuRowLocked {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.menuRowLocked:hover {
-  background: transparent;
-}
-
 /* The checked-out branch: a persistent tint a step above the resting rows
  * so it reads as "you are here" the moment the list scrolls it into view
  * (BranchMenu centers it on open) — the trailing check alone is easy to

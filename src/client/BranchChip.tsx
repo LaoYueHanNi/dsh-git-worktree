@@ -5,15 +5,22 @@
  * the worktree isolation toggle — because that is the moment to choose the
  * environment for the conversation, and starting a worktree is a main-repo
  * decision. Once the session starts, the worktree toggle is withdrawn (its
- * directory is fixed). A session inside a LINKED worktree scopes the whole
- * entry down: blank, the menu lists every branch for READING but every
- * pick but the current branch answers with the main-checkout hint (and
- * neither the toggle nor the in-place new-branch tool exists there);
- * started, the menu shows nothing but the session's own branch — fetch and
- * update-current stay, since neither moves the checkout (probeRepo still
- * roots at the session directory's toplevel, never the main checkout).
- * Non-git directories and load failures render nothing. The confirm
- * dialogs and the error toast live here too.
+ * directory is fixed). A session inside a LINKED worktree scopes the entry
+ * down to TWO things, blank or started alike: the branch this worktree
+ * holds (the position marker, trailing check included) and the 「工作树」
+ * group of every OTHER worktree — the main checkout included, since from
+ * in here that is another place to go — whose rows carry the hop. The
+ * directory's identity IS its branch, so every other BRANCH would be a row
+ * the owner must refuse — a menu of refusals is not a menu (the same
+ * judgement that removed the toggle and the in-place new-branch tool here).
+ * A worktree row is different in kind: hopping there registers that folder
+ * and opens a fresh session, touching no checkout, so it stays legal here —
+ * and it is the one action a linked-worktree session most needs, since
+ * moving between worktrees is the point of having them. What also stays is
+ * the two tools that never move a checkout: fetch, and update-current — the
+ * update fast-forwards the session's OWN worktree, the fetch is
+ * repository-wide metadata. Non-git directories and load failures render
+ * nothing. The confirm dialogs and the error toast live here too.
  *
  * Checking the worktree toggle pops the cutout confirm dialog right away:
  * confirming it cuts a NEW branch (`<current>-wt`, suffixes past taken
@@ -38,12 +45,15 @@
  * its fresh worktree. Both rides go through the existing /switch and
  * /worktree routes, which already resolve `<remote>/name` display names.
  *
- * Branches held by linked worktrees get their own 「工作树」 group (blank
- * sessions only): they have left the local group — git refuses to check
- * them out twice, so a local-group row would be a dead end — and the row
- * menu's 「跳到此工作树」 hops the session straight into that worktree
- * directory (adoptWorktree; no git action, no confirm). A started session's
- * directory is fixed, so the group only exists while blank.
+ * Worktrees get their own 「工作树」 group, listing every worktree but the
+ * one the session sits in: the row menu's 「跳到此工作树」 registers that
+ * directory and opens a blank session in it (adoptWorktree; no git action,
+ * no confirm). On the main checkout's BLANK session the group doubles as
+ * the only way to reach a branch held by a worktree — those have left the
+ * local group (git refuses to check them out twice, so a local-group row
+ * would be a dead end). A linked-worktree session keeps that group and
+ * gains the main checkout row (see {@link buildLinkedWorktreeRows}); a
+ * started MAIN-checkout session drops the group — its directory is fixed.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -137,44 +147,91 @@ function displayBranch(branch: string): string {
 }
 
 /**
- * Build the branch rows for the picker in three kinds: LOCAL branches not
- * held by a linked worktree, REMOTE branches, and one WORKTREE row per
- * linked worktree. A branch held by a worktree LEAVES the local group —
- * git refuses to check it out twice, so the row would be a dead end; the
- * worktree group is the way INTO it instead (a direct session hop, see
- * the owner's onAdoptWorktree). The main worktree and detached worktrees
- * don't come along: the main checkout is home, not a hop target, and a
- * detached worktree has no branch name to offer.
+ * Build the branch rows for the picker on the MAIN checkout, in three
+ * kinds: LOCAL branches not held by a linked worktree, REMOTE branches,
+ * and one WORKTREE row per linked worktree. A branch held by a worktree
+ * LEAVES the local group — git refuses to check it out twice, so the row
+ * would be a dead end; the worktree group is the way INTO it instead (a
+ * direct session hop, see the owner's onAdoptWorktree).
  *
- * Inside a linked-worktree session every row but the current branch is
- * LOCKED (dimmed, still clickable): a pick reaches the owner, which
- * answers with the main-checkout hint — the dimming reads as "not usable
- * here" at a glance while the click keeps its explanation.
+ * The worktree group is "every worktree EXCEPT the one this session sits
+ * in" — here that is the main checkout itself (the session IS the main
+ * checkout), so `w.main` drops out: hopping home is not a hop. A detached
+ * worktree drops out too — it has no branch name to show or hop by.
+ * (Linked-worktree sessions express the same rule from the other side, and
+ * therefore DO list the main checkout: see
+ * {@link buildLinkedWorktreeRows}.)
+ *
+ * Only the MAIN checkout's sessions call this: a linked-worktree session
+ * renders its own pair of rows instead (see
+ * {@link buildLinkedWorktreeRows}), so nothing here ever has to express
+ * "not usable in this directory".
  */
 function buildBranchRows(
   branches: readonly BranchEntry[],
   worktrees: readonly WorktreeEntry[],
-  currentBranch: string,
-  inLinkedWorktree: boolean,
 ): BranchRow[] {
   const held = new Set(worktrees.flatMap(w => w.main || w.branch === undefined ? [] : [w.branch]))
-  const lock = (name: string): boolean => inLinkedWorktree && name !== currentBranch
   return [
     ...branches.filter(b => b.kind === 'local' && !held.has(b.name)).map(b => ({
       name: b.name,
       kind: 'local' as const,
       ...b.ahead === undefined ? {} : { ahead: b.ahead },
       ...b.behind === undefined ? {} : { behind: b.behind },
-      locked: lock(b.name),
     })),
     ...branches.filter(b => b.kind === 'remote').map(b => ({
       name: b.name,
       kind: 'remote' as const,
-      locked: lock(b.name),
     })),
     ...worktrees.flatMap(w => w.main || w.branch === undefined
       ? []
-      : [{ name: w.branch, kind: 'worktree' as const, path: w.path, locked: lock(w.branch) }]),
+      : [{ name: w.branch, kind: 'worktree' as const, path: w.path }]),
+  ]
+}
+
+/**
+ * Build the rows for a LINKED-worktree session: the branch this worktree
+ * holds, plus one row per OTHER worktree of the repository.
+ *
+ * The worktree rows are here for the HOP: 「跳到此工作树」 registers that
+ * directory and opens a blank session in it (`adoptWorktree`) — a
+ * session-level jump that never touches a checkout, so a linked-worktree
+ * session can offer it on the same terms the main checkout's blank session
+ * does. Hopping between worktrees is the whole point of having them.
+ *
+ * The exclusion is the SAME rule as {@link buildBranchRows} states from the
+ * main checkout's side — "every worktree except the one you are in" — which
+ * here means excluding by BRANCH (`w.branch === currentBranch`) rather than
+ * by `w.main`. The main checkout therefore STAYS in the list: from inside a
+ * linked worktree it is exactly the other place you want to go, and unlike
+ * the worktree you are sitting in, its row is not a hop to where you
+ * already are. Detached worktrees still drop out (no branch name to show),
+ * as does this session's own worktree (it already owns the local row above,
+ * which carries the trailing check as the "you are here" mark).
+ *
+ * What stays absent is every OTHER branch, local or remote: the directory's
+ * identity is its branch, so those rows could only ever be offered as
+ * refusals (see the component doc).
+ */
+function buildLinkedWorktreeRows(
+  branches: readonly BranchEntry[],
+  worktrees: readonly WorktreeEntry[],
+  currentBranch: string,
+): BranchRow[] {
+  const current = branches.find(b => b.kind === 'local' && b.name === currentBranch)
+  return [
+    ...current === undefined
+      ? []
+      : [{
+          name: current.name,
+          kind: 'local' as const,
+          ...current.ahead === undefined ? {} : { ahead: current.ahead },
+          ...current.behind === undefined ? {} : { behind: current.behind },
+        }],
+    // The main checkout is NOT filtered out here: it is another place to go.
+    ...worktrees.flatMap(w => w.branch === undefined || w.branch === currentBranch
+      ? []
+      : [{ name: w.branch, kind: 'worktree' as const, path: w.path }]),
   ]
 }
 
@@ -572,31 +629,23 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   }), [adoptWorktree, pruneWorktrees, cwd, pushToast, runGuarded, t])
 
   const facts = repo.facts
-  // The session sits in a linked worktree when its directory's toplevel is
-  // NOT the main worktree entry — the trigger for the scoped menu (see
-  // below) and for hiding the worktree toggle.
-  const inLinkedWorktree = facts !== null
-    && facts.worktrees.find(w => w.main)?.path !== facts.repoRoot
+  // The session sits in a linked worktree when its own directory is NOT the
+  // main checkout — the trigger for the scoped menu (see below) and for
+  // hiding the worktree toggle. Read from `facts.main`, never from comparing
+  // `facts.repoRoot` against the main entry of `facts.worktrees`: repoRoot IS
+  // the main checkout from every worktree (it comes from the shared
+  // `--git-common-dir`), so that comparison was a tautology and the whole
+  // scope stayed silently off.
+  const inLinkedWorktree = facts !== null && !facts.main
   const rows = useMemo(() => {
     if (facts === null) return []
-    // A STARTED linked-worktree session shows nothing but its own branch:
-    // the menu there is a position marker plus the fetch/update tools, not
-    // a picker — every other branch lives behind the main checkout. A BLANK
-    // one shows the full list for reading; its picks are answered with the
-    // main-checkout hint (see onSelect).
-    if (inLinkedWorktree && !session.blank) {
-      const current = facts.branches.find(b => b.kind === 'local' && b.name === facts.currentBranch)
-      return current === undefined
-        ? []
-        : [{
-            name: current.name,
-            kind: 'local' as const,
-            ...current.ahead === undefined ? {} : { ahead: current.ahead },
-            ...current.behind === undefined ? {} : { behind: current.behind },
-          }]
-    }
-    return buildBranchRows(facts.branches, facts.worktrees, facts.currentBranch, inLinkedWorktree)
-  }, [facts, inLinkedWorktree, session.blank])
+    // A linked-worktree session gets its own branch plus the OTHER
+    // worktrees as hop targets — never another BRANCH (see the two builders).
+    // A main-checkout session gets the full list; that is where the whole
+    // action surface lives and where the environment gets chosen.
+    if (inLinkedWorktree) return buildLinkedWorktreeRows(facts.branches, facts.worktrees, facts.currentBranch)
+    return buildBranchRows(facts.branches, facts.worktrees)
+  }, [facts, inLinkedWorktree])
   // Every already-taken LOCAL name feeds the new-branch namespaces (cutout
   // prefill and the duplicate checks): local rows and worktree rows alike
   // (a worktree row IS a checked-out branch), while a remote row is no
@@ -709,7 +758,14 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         currentBranch={facts.currentBranch}
         confirm={confirmBundle}
         canCreate={!inLinkedWorktree}
-        canAdopt={session.blank}
+        // The hop group is offered wherever a hop makes sense: the main
+        // checkout's BLANK session (where the environment is chosen) and
+        // ANY linked-worktree session (moving between worktrees is what a
+        // linked worktree is for, and the hop opens a fresh session without
+        // touching any checkout). A STARTED main-checkout session keeps it
+        // off — that is the one place where the group was ruled out, and
+        // nothing here reopens it.
+        canAdopt={session.blank || inLinkedWorktree}
         canWorktree={session.blank && !inLinkedWorktree}
         onWorktree={(branch) => {
           // The reuse/new/remote-twin confirm staged from a RIGHT-CLICKED
@@ -747,14 +803,6 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
           // closes on success; the session moved).
           if (branch === facts.currentBranch) {
             setMenuOpen(false)
-            return
-          }
-          // A linked-worktree session stages NO branch action — not plain
-          // switches, not remote checkouts, not worktree hops. One hint
-          // sends every pick back to the main checkout, where the worktree
-          // verbs (and the whole action surface) live.
-          if (inLinkedWorktree) {
-            pushToast(t('mainRepoOnly'))
             return
           }
           const row = rows.find(r => r.name === branch)

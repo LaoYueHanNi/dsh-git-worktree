@@ -44,6 +44,17 @@ export interface RepoFacts {
   repoRoot: string
   /** Main repository directory basename. */
   repoName: string
+  /** The QUERIED directory's own toplevel — the worktree the session
+   * actually sits in. Repository-wide commands (branch refs, fetch,
+   * worktree registration) run at {@link RepoFacts.repoRoot}; commands that
+   * act on the session's own checkout (switch/update/create-and-check-out)
+   * run HERE, or a linked-worktree session would silently operate on the
+   * main checkout instead. */
+  toplevel: string
+  /** Whether the QUERIED directory is the main worktree — see
+   * {@link isMainWorktree}. `repoRoot` cannot answer this: it names the main
+   * checkout from every worktree by construction. */
+  main: boolean
   /** Branch checked out by the queried directory. */
   currentBranch: string
   branches: BranchEntry[]
@@ -115,6 +126,28 @@ function isDirBusyGitError(error: GitError): boolean {
 }
 
 /**
+ * Whether a directory IS the main worktree of its repository: exactly when
+ * its own toplevel holds the SHARED `.git` that `--git-common-dir` names.
+ * From a linked worktree that path resolves to the shared `<repo>/.git` too,
+ * but its toplevel is the linked folder — so the two differ and the answer
+ * is false.
+ *
+ * Deliberately NOT "is the first entry of `worktree list`": that list is
+ * filtered by directory existence downstream (a stale main registration
+ * would flip the answer), it costs a second git spawn, and its `main` flag
+ * describes a different question — which entry git considers main, not
+ * which directory was asked about. Same rule as {@link probeWorkspaceGit}
+ * applies for the sidebar's grouping, extracted here so both answers are the
+ * same answer.
+ * @param toplevel - the queried directory's own `--show-toplevel`.
+ * @param gitDir - the SHARED git dir (`--git-common-dir`) every worktree
+ * resolves back to.
+ */
+function isMainWorktree(toplevel: string, gitDir: string): boolean {
+  return normalize(resolve(toplevel, '.git')) === gitDir
+}
+
+/**
  * Resolve a directory to repository facts, or undefined outside any git
  * repository (including the `git` binary missing: ENOENT surfaces as a
  * non-zero exit through the seam).
@@ -142,6 +175,8 @@ export async function probeRepo(exec: Exec, path: string, dirExists: DirExists =
   return {
     repoRoot,
     repoName: basename(dirname(gitDir)),
+    toplevel,
+    main: isMainWorktree(toplevel, gitDir),
     currentBranch: await currentBranch(exec, path),
     branches: await listBranches(exec, repoRoot),
     // A stale registration (directory removed behind git's back) must not
@@ -631,6 +666,6 @@ export async function probeWorkspaceGit(exec: Exec, path: string): Promise<Works
     repoRoot: dirname(gitDir),
     repoName: basename(dirname(gitDir)),
     branch: branchName === '' || branchName === 'HEAD' ? null : branchName,
-    main: normalize(resolve(toplevel, '.git')) === gitDir,
+    main: isMainWorktree(toplevel, gitDir),
   }
 }

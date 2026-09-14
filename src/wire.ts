@@ -89,6 +89,11 @@ export type RepoStatus =
       repoName: string
       /** Absolute path of the main worktree directory. */
       repoRoot: string
+      /** True when the queried directory IS the main worktree (its own
+       * toplevel holds the shared `.git`). The client's "session sits in a
+       * linked worktree" trigger — `repoRoot` cannot answer it, since it
+       * names the main checkout from every worktree by construction. */
+      main: boolean
       /** Branch checked out by the directory the client asked about. */
       currentBranch: string
       /** Local branches plus every remote's remote-only branches (those

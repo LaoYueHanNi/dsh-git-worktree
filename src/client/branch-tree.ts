@@ -19,17 +19,16 @@
  * DISPLAY name (see groupRows). `ahead`/`behind` are local-row-only
  * upstream divergence counts (absent without an upstream or in sync).
  * `path` is worktree-row-only: the directory a pick hops the session into.
- * `locked` rows are DIMMED but clickable — a pick still reaches the owner,
- * which answers with the main-checkout hint inside a linked-worktree
- * session (deliberately NOT the HTML disabled attribute: a disabled button
- * swallows the click, and the hint would never fire). */
+ * Every row here is actionable: a linked-worktree session does not send the
+ * branches it must refuse down this path at all (its list is its own branch,
+ * see the owner's `rows`), so there is no "dimmed but clickable" state to
+ * encode. */
 export interface BranchRow {
   name: string
   kind: 'local' | 'remote' | 'worktree'
   path?: string
   ahead?: number
   behind?: number
-  locked?: boolean
 }
 
 /** One node of the '/' prefix tree built from the row list: every segment

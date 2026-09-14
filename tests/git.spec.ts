@@ -60,6 +60,10 @@ describe('probeRepo', () => {
     expect(facts).toBeDefined()
     expect(facts?.repoName).toBe('repo')
     expect(facts?.currentBranch).toBe('main')
+    // The queried directory IS the main checkout: its toplevel holds the
+    // shared .git the common dir names.
+    expect(facts?.toplevel).toBe(p('/repo'))
+    expect(facts?.main).toBe(true)
     // Every remote's remote-only branches come through: `<remote>/HEAD` and
     // branches with a local twin (origin/main) drop, the rest keep their
     // remote prefix — origin and upstream side by side, no first-remote fold.
@@ -97,6 +101,13 @@ describe('probeRepo', () => {
     expect(facts?.repoRoot).toBe(resolve('/root/repo'))
     expect(facts?.repoName).toBe('repo')
     expect(facts?.currentBranch).toBe('feat-x')
+    // Still rooted at the main checkout for repository-wide work, but the
+    // queried directory is NOT it: its own toplevel is the linked folder, so
+    // `main` is false and `toplevel` names the linked worktree. This is the
+    // pair the session-scope trigger reads — comparing `repoRoot` against the
+    // main worktree entry can only ever answer true.
+    expect(facts?.toplevel).toBe(p('/root/repo/feat-x'))
+    expect(facts?.main).toBe(false)
   })
 
   it('marks a detached worktree branchless', async () => {

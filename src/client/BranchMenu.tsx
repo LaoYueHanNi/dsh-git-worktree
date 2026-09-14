@@ -67,6 +67,12 @@
  * The flyouts are separate portals (not clipped by the card's
  * overflow:hidden); their width is content-driven, capped in CSS, wrapping.
  *
+ * Every row is actionable, by construction: the owner never sends a branch
+ * this directory cannot act on (a linked-worktree session gets its own
+ * branch plus the OTHER worktrees — never another branch, see the chip's
+ * `rows`), so there is no dimmed/locked state, no verb withheld per-row for
+ * that reason, and nothing for the search field's Enter commit to skip.
+ *
  * Close semantics: outside pointerdown (card, flyouts, row menu, and chip
  * excluded) cancels the confirm and closes the menu; Escape unwinds tier
  * by tier — row menu, confirm, create flyout, rename flyout, search text,
@@ -157,9 +163,13 @@ export interface BranchMenuProps {
   /** Every branch as a row (local, remote, and one worktree row per live
    * linked worktree; remote rows carry their `<remote>/name` action name). */
   rows: readonly BranchRow[]
-  /** Whether the worktree group is offered (a session hop only makes
-   * sense while the session is blank — a started session's directory is
-   * fixed). Blank sessions show the group, started ones never do. */
+  /** Whether the worktree group is offered. The owner answers this: the
+   * group shows on the main checkout's BLANK session and on every linked-
+   * worktree session (hopping between worktrees is what they are for, and
+   * a hop opens a fresh session without moving any checkout); a STARTED
+   * main-checkout session keeps it off. With it off the group is not
+   * rendered at all, so its rows leave every derived set too (see
+   * `pickableWorktreeRows`). */
   canAdopt: boolean
   /** The branch currently checked out (trailing check, HEAD tint). */
   currentBranch: string
@@ -176,8 +186,10 @@ export interface BranchMenuProps {
   /** Whether the WORKTREE verbs are offered (创建工作树 / 新建分支并创建
    * 工作树): only while the session is BLANK of the main checkout — a
    * started session's directory is fixed, so isolating a new worktree from
-   * here is meaningless (the 「工作树」 hop group hides under the same
-   * condition). The old toggle that used to arm a mode bit is gone — the
+   * here is meaningless. A SEPARATE gate from `canAdopt`: these verbs
+   * CREATE a worktree and belong to the main checkout's blank moment, while
+   * the hop group is a read-and-jump surface that linked-worktree sessions
+   * also get. The old toggle that used to arm a mode bit is gone — the
    * verbs are explicit menu items now. */
   canWorktree: boolean
   /** Stage the worktree CONFIRM (the reuse/new/remote-twin ask) for a
@@ -586,14 +598,6 @@ export function BranchMenu({
     ...collectFolderPaths(localTree).map(p => groupKey('local', p)),
     ...collectFolderPaths(remoteTree).map(p => groupKey('remote', p)),
   ], [localTree, remoteTree])
-  /** Locked row names (dimmed, pick-answered-with-hint) — a Set for the
-   * click gate. MUST sit before the `!open` early return: a hook after it
-   * would change the hook count between a closed and an open menu
-   * (React #310, seen live as the whole dock unmounting on first open). */
-  const lockedRows = useMemo(
-    () => new Set(rows.filter(r => r.locked === true).map(r => r.name)),
-    [rows],
-  )
   const allExpanded = folderPaths.every(p => expanded.has(p)) && localGroupOpen && remoteGroupOpen
     && (!canAdopt || worktreeGroupOpen)
   const toggleAll = (): void => {
@@ -609,14 +613,12 @@ export function BranchMenu({
     // Locate, don't restructure: only ADD the current branch's ancestor
     // folders if they happen to be closed (the row must exist to scroll
     // to it) — folders the user expanded/collapsed stay untouched. The
-    // LOCAL group opens too: the current branch usually lives there. In a
-    // blank linked-worktree session, though, the branch is HELD by the
-    // worktree this session sits in and its row was filed into the
-    // WORKTREE group — that group must open as well, or the scroll target
-    // never renders. Then center the row one frame later, once the
-    // re-render has committed.
+    // LOCAL group opens too: the current branch ALWAYS lives there — a
+    // worktree row never carries it (the main checkout is not a hop target,
+    // and a linked-worktree session excludes its own worktree from the hop
+    // group). Then center the row one frame later, once the re-render has
+    // committed.
     setLocalGroupOpen(true)
-    if (grouped.worktreeRows.some(row => row.name === currentBranch)) setWorktreeGroupOpen(true)
     setExpanded(prev => {
       const next = new Set(prev)
       for (const p of chainExpanded(currentBranch)) next.add(groupKey('local', p))
@@ -927,13 +929,13 @@ export function BranchMenu({
 
   const needle = query.trim().toLowerCase()
   /** The worktree rows that are actually OFFERED. Without `canAdopt` the
-   * group is not rendered at all (a started session's directory is fixed),
-   * so those rows must leave every derived set too — `visible` feeds the
-   * search-Enter commit and the empty-state test, and a row that reaches
-   * neither the eye nor the pointer must not be reachable by keyboard
-   * either (an unrendered hit used to hop the session into a worktree the
-   * gate had just withheld) nor count as "something matched" under an
-   * empty list. */
+   * group is not rendered at all (a STARTED main-checkout session, see the
+   * prop), so those rows must leave every derived set too — `visible` feeds
+   * the search-Enter commit and the empty-state test, and a row that
+   * reaches neither the eye nor the pointer must not be reachable by
+   * keyboard either (an unrendered hit used to hop the session into a
+   * worktree the gate had just withheld) nor count as "something matched"
+   * under an empty list. */
   const pickableWorktreeRows = canAdopt ? grouped.worktreeRows : []
   // Search matches the DISPLAY names — what the rows actually show. With a
   // single remote that is the prefix-stripped form (searching "origin" no
@@ -1013,21 +1015,15 @@ export function BranchMenu({
     onRename(renaming.name, renaming.draft, () => { setRenaming(null) })
   }
 
-  /** Row class composition: base + HEAD tint + selection (selection wins)
-   * + the locked dim. (`css` is an index-signature record, so noUncheckedIndexedAccess
-   * types every class as possibly absent — the base falls back to ''.) */
-  const rowClass = (row: BranchRow | null, name: string): string => {
+  /** Row class composition: base + HEAD tint + selection (selection wins).
+   * (`css` is an index-signature record, so noUncheckedIndexedAccess types
+   * every class as possibly absent — the base falls back to ''.) */
+  const rowClass = (name: string): string => {
     let cls = css.menuRow ?? ''
     if (name === currentBranch) cls += ` ${css.menuRowSelected}`
     if (name === selected) cls += ` ${css.menuRowPicked}`
-    if (row?.locked === true) cls += ` ${css.menuRowLocked}`
     return cls
   }
-
-  /** Locked rows keep the click path ALIVE (the owner answers picks with
-   * the main-checkout toast) but stay unselected — a dimmed row wearing
-   * the blue selection would read as "chosen yet unusable". */
-  const isLocked = (name: string): boolean => lockedRows.has(name)
 
   /** The upstream divergence arrows of a local row (IDEA's ↑N/↓N) ahead of
    * the trailing check: plain text marks in the secondary tone — no base
@@ -1048,12 +1044,10 @@ export function BranchMenu({
   /** A row's click behavior: with a dialog open (delete confirm or a
    * worktree pick), clicking a row re-picks it (the flyout re-anchors);
    * without one it just selects (Enter or the row menu executes the
-   * selected row — 签出 directly, no dialog). Locked rows do neither:
-   * dimmed rows are not selectable, the row-menu 签出 is the hint's stage.
+   * selected row — 签出 directly, no dialog).
    * `el` is nullable like {@link pick}'s anchor: a row whose button is
    * already unmounted still selects/picks, it just re-anchors nothing. */
   const rowClick = (el: HTMLButtonElement | null, name: string): void => {
-    if (isLocked(name)) return
     if (confirmOpen) pick(el, name)
     else setSelected(name)
   }
@@ -1193,8 +1187,7 @@ export function BranchMenu({
       role="menuitem"
       data-branch={node.path}
       data-kind={node.leaf?.kind}
-      className={rowClass(node.leaf ?? null, node.path)}
-      title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
+      className={rowClass(node.path)}
       style={{ paddingLeft: 8 + depth * 12 + LEAF_CHEVRON_SLOT }}
       {...rowEvents(node.leaf, node.path)}
     >
@@ -1219,8 +1212,8 @@ export function BranchMenu({
       role="menuitem"
       data-branch={row.name}
       data-kind={row.kind}
-      className={rowClass(row, row.name)}
-      title={row.locked === true ? t('mainRepoOnly') : row.path}
+      className={rowClass(row.name)}
+      title={row.path}
       style={{ paddingLeft: 8 + 12 + LEAF_CHEVRON_SLOT }}
       {...rowEvents(row, row.name)}
     >
@@ -1288,8 +1281,7 @@ export function BranchMenu({
             role="menuitem"
             data-branch={node.path}
             data-kind={node.leaf?.kind}
-            className={rowClass(node.leaf ?? null, node.path)}
-            title={node.leaf?.locked === true ? t('mainRepoOnly') : undefined}
+            className={rowClass(node.path)}
             style={{ paddingLeft: 8 + depth * 12 + LEAF_CHEVRON_SLOT }}
             {...rowEvents(node.leaf, node.path)}
           >
@@ -1330,8 +1322,10 @@ export function BranchMenu({
    * refuses a delete of the checked-out branch anyway), worktree mode and
    * linked-worktree sessions drop the write trio + delete (canCreate — the
    * gate the removed toolbar plus lived under), remote rows drop 重命名
-   * and 删除 (a remote branch is not ours to rename or delete). 签出 and
-   * the hop go through `pick` DIRECTLY — no confirmation step (the owner
+   * and 删除 (a remote branch is not ours to rename or delete), and a
+   * LOCKED row drops 签出 and the hop — the owner answers those picks
+   * with the main-checkout toast, so the verb leaves with the refusal.
+   * 签出 and the hop go through `pick` DIRECTLY — no confirmation step (the owner
    * executes the switch in place, keep-open; a worktree-mode pick stages
    * the owner's worktree dialog instead). 新建 / 新建并检出 open the
    * create flyout with the row as the start point (`from`; 新建并检出 adds
@@ -1353,6 +1347,12 @@ export function BranchMenu({
   if (ctx !== null) {
     const { row, name, x, y } = ctx
     const isWorktree = row?.kind === 'worktree'
+    // The two EXECUTION verbs (签出 and 跳到此工作树) are withheld from the
+    // CURRENT branch: git refuses a second checkout of a branch that is
+    // already out, so the verb would be a guaranteed dead end there. Every
+    // other row is actionable by construction (the owner never sends a
+    // branch this directory must refuse — see the component doc).
+    const executable = name !== currentBranch
     // Every verb that can stage a second-level flyout records where the
     // menu stood FIRST (setCtx below clears the menu state): the flyout
     // then replaces it in place instead of anchoring to the card.
@@ -1368,7 +1368,7 @@ export function BranchMenu({
       setCreating(true)
     }
     if (isWorktree) {
-      if (name !== currentBranch) {
+      if (executable) {
         ctxItems.push({
           id: 'hop',
           label: t('ctxHop'),
@@ -1392,7 +1392,7 @@ export function BranchMenu({
         },
       })
     } else {
-      if (name !== currentBranch) {
+      if (executable) {
         ctxItems.push({
           id: 'checkout',
           label: t('ctxCheckout'),
