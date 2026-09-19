@@ -21,7 +21,7 @@ import ts from 'typescript'
 
 /** Client component sources the gate watches. */
 const WATCHED = [
-  'GroupedSidebar.tsx', 'sidebar-rows.tsx', 'BranchChip.tsx', 'GitWorktreeCard.tsx',
+  'BranchChip.tsx', 'GitWorktreeCard.tsx',
   // BranchMenu builds a lot of JSX during render (the row renderers, the
   // ctxItems array) and WorktreeManagerModal builds its rows the same way
   // — precisely the shape this gate exists for.

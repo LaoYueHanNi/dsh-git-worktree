@@ -2,6 +2,9 @@
 
 Status: implemented
 
+> [!NOTE]
+> 本决策的侧栏遮蔽已被 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0.1.6-alpha.2.md) 废弃：上游 0.1.6 自带按工作区树的层级推断，且未开放行级扩展点，遮蔽的维护成本不再成立。`sidebar.workspaces` 已交还原生 `ui-workspace`，本文记录的实现随之移除（git 命令探测路由 `/group` 等基础设施仍在）。
+
 ## Problem
 
 每个被注册为 DSH 工作区的 worktree（`adoptWorktree` 流程）都在左侧平铺为一个顶层条目：主仓库 `dsh-git-worktree` 与它的工作树 `dsh-git-worktree-feat-x` 之间没有任何视觉关联，工作树一多列表就被同仓库的分身条目淹没；同时「某个会话属于哪个仓库的哪个分支」从列表本身读不出来。DSH 原生没有层级/分组工作区概念，也不开放多工作区聚合接口。

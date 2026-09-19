@@ -131,6 +131,12 @@ export interface CreateWorktreeResult {
    * never consumes the fetch), this carries git's stderr summary for the
    * client to toast. */
   fetchWarning?: string
+  /** Present only when the idempotent write of `/.dsh/gitworktree/` into
+   * `<repo>/.git/info/exclude` failed: the worktree was created anyway (it
+   * cannot be rolled back), so the SOURCE REPOSITORY now shows an untracked
+   * `.dsh/` directory — the client must toast this or the user's next
+   * `git status` reads as a mystery. */
+  excludeWarning?: string
 }
 
 /** POST switch request body. */
@@ -319,7 +325,7 @@ export interface PathExistsResult {
 /** POST ensure-directory request body. */
 export interface EnsureDirectoryBody {
   /** The missing directory to create (absolute; must sit directly inside the
-   * worktree storage root). */
+   * legacy storage root or a repository's `.dsh/gitworktree`). */
   path: string
 }
 
@@ -330,7 +336,16 @@ export interface EnsureDirectoryResult {
   created: boolean
 }
 
-/** One direct child directory of the worktree storage root. */
+/** POST worktrees-all request body (all-optional for shape compatibility). */
+export interface WorktreesAllBody {
+  /** Absolute directories of the REGISTERED workspaces, from which the host
+   * derives the repository-root set to scan `<repo>/.dsh/gitworktree` under
+   * (each probed once, deduplicated). Absent/empty scans only the legacy
+   * storage root. */
+  workspaces?: string[]
+}
+
+/** One direct child directory of a worktree storage location. */
 export interface WorktreeScanEntry {
   /** Absolute directory path. */
   path: string
@@ -341,22 +356,35 @@ export interface WorktreeScanEntry {
   /** Branch checked out by the directory; null = unrecognized, detached, or
    * unborn HEAD. */
   branch: string | null
+  /** Where the directory lives: `project` = inside `<repo>/.dsh/gitworktree`
+   * (the current layout, auto-nested under its repository by the workspace
+   * tree), `legacy` = inside the historical central storage root. */
+  source: 'legacy' | 'project'
 }
 
-/** POST worktrees-all response body — one entry per DIRECT child of the
- * resolved storage root; the root's absence answers an empty list. */
+/** POST worktrees-all response body — one entry per DIRECT child of each
+ * scanned storage location; a missing location answers its half as an empty
+ * list. */
 export interface WorktreesAllResult {
   worktrees: WorktreeScanEntry[]
-  /** Present and true when the storage root held more children than the
-   * scan probes: the list is the first slice, and the client says so rather
-   * than presenting a truncated scan as the whole picture. */
+  /** The resolved LEGACY storage root (historical central location): kept
+   * read-only in the settings card so existing users can still find where
+   * their old worktrees live. */
+  legacyRoot: string
+  /** False when the legacy root does not exist on disk — "未使用" rather
+   * than hiding the field. */
+  legacyRootExists: boolean
+  /** Present and true when either scanned location held more children than
+   * the scan probes: the list is the first slice, and the client says so
+   * rather than presenting a truncated scan as the whole picture. */
   truncated?: boolean
 }
 
 /** POST purge request body. */
 export interface PurgeDirectoryBody {
   /** The leftover directory to delete (absolute; must sit directly inside
-   * the worktree storage root AND have no git identity). */
+   * the legacy storage root or a repository's `.dsh/gitworktree`, AND have
+   * no git identity). */
   path: string
 }
 

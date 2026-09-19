@@ -19,6 +19,9 @@
  * DISPLAY name (see groupRows). `ahead`/`behind` are local-row-only
  * upstream divergence counts (absent without an upstream or in sync).
  * `path` is worktree-row-only: the directory a pick hops the session into.
+ * `mainWorktree` is worktree-row-only and true for the MAIN checkout listed
+ * as a hop target (a linked-worktree session's way back home): git refuses
+ * `worktree remove` on it, so the destructive verbs must gate off it.
  * Every row here is actionable: a linked-worktree session does not send the
  * branches it must refuse down this path at all (its list is its own branch,
  * see the owner's `rows`), so there is no "dimmed but clickable" state to
@@ -27,6 +30,7 @@ export interface BranchRow {
   name: string
   kind: 'local' | 'remote' | 'worktree'
   path?: string
+  mainWorktree?: boolean
   ahead?: number
   behind?: number
 }

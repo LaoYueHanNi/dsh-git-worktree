@@ -22,8 +22,8 @@ describe('freshestUpdatedAt', () => {
 })
 
 describe('groupScanEntries', () => {
-  const entry = (path: string, repoName: string | null, branch: string | null): WorktreeScanEntry =>
-    ({ path, repoName, branch } as WorktreeScanEntry)
+  const entry = (path: string, repoName: string | null, branch: string | null, source: 'legacy' | 'project' = 'project'): WorktreeScanEntry =>
+    ({ path, repoName, branch, source })
 
   it('groups by repository, alphabetical, rows by branch name', () => {
     const groups = groupScanEntries([
@@ -32,7 +32,21 @@ describe('groupScanEntries', () => {
       entry('/wt/r-a/v2', 'r-a', 'feat/v2'),
     ])
     expect(groups.map(g => g.repoName)).toEqual(['r-a', 'r-b'])
+    expect(groups.map(g => g.source)).toEqual(['project', 'project'])
     expect(groups[0]?.entries.map(e => e.branch)).toEqual(['feat/v2', 'feat/v10'])
+  })
+
+  it('splits one repository across sources, project groups first', () => {
+    const groups = groupScanEntries([
+      entry('/home/.dsh/gitworktree/r-a-old', 'r-a', 'main', 'legacy'),
+      entry('/code/r-a/.dsh/gitworktree/main', 'r-a', 'feat/x'),
+      entry('/home/.dsh/gitworktree/r-b-old', 'r-b', 'main', 'legacy'),
+    ])
+    expect(groups.map(g => [g.repoName, g.source])).toEqual([
+      ['r-a', 'project'],
+      ['r-a', 'legacy'],
+      ['r-b', 'legacy'],
+    ])
   })
 
   it('trails the unrecognized directories as their own group', () => {
@@ -41,6 +55,7 @@ describe('groupScanEntries', () => {
       entry('/wt/r-a/x', 'r-a', 'main'),
     ])
     expect(groups.map(g => g.repoName)).toEqual(['r-a', null])
+    expect(groups[1]?.source).toBe('orphans')
     expect(groups[1]?.entries).toHaveLength(1)
   })
 

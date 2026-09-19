@@ -2,6 +2,9 @@
 
 Status: implemented
 
+> [!NOTE]
+> 未分组区的**渲染**随侧栏遮蔽一并移除，见 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0.1.6-alpha.2.md)。其 host 侧自愈机制保留并扩展：`/exists` 的 `rebuildable` 判定与 `/ensure-directory` 的存放位门控现同时覆盖 legacy 根与各仓库的 `.dsh/gitworktree` 布局。
+
 ## Problem
 
 聚合侧边栏（分组视图）移植自原生浏览器，但只移植了**已记账**会话的分组——`deriveSidebarGroups` 不收集 stray 会话，未分组会话在分组视图下完全隐身（只能切"单列表"才看得见）。而失联会话并不罕见：删除 workspace 注册又重建后旧会话全部落入未分组（DSH 明确"不会自动重新接纳"），首次引导后才出现的历史会话也永远失联。更糟的是失联会话的会话头**一直携带 cwd**——它知道自己属于哪个目录——原生浏览器却只提供一个不分类的未分组大桶，插件连桶都没移植。

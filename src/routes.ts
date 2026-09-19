@@ -3,9 +3,9 @@
  * shell (index.ts) owns req/res mechanics; everything testable lives here.
  */
 
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
-import { GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type Exec } from './git.js'
+import { appendWorktreeExclude, fsExcludeSeams, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
@@ -25,6 +25,8 @@ export interface RouteDeps {
   envHome: () => string | undefined
   /** Worktree-registration existence seam (tests substitute). */
   dirExists?: DirExists
+  /** Local-ignore write seams (tests substitute). */
+  excludeSeams?: ExcludeSeams
   /** Directory probe seam over fs.stat (true = exists AND is a directory);
    * tests substitute. */
   statDirectory?: (path: string) => Promise<boolean>
@@ -130,43 +132,111 @@ export async function handleGroupWorktrees(deps: RouteDeps, body: unknown): Prom
   return { status: 200, body: { facts } }
 }
 
+/** The project-internal layout directory name every repository uses. */
+const PROJECT_LAYOUT_DIR = join('.dsh', 'gitworktree')
+
 /**
- * POST /worktrees-all — git facts for every DIRECT child directory of the
- * resolved worktree storage root (the slots this plugin plans as
- * `<repoName>-<branch>`). The management dialog's data source: one scan
- * answers for all repositories at once, orphan directories included (a
- * child that probes as no git repository comes back with null facts rather
- * than being dropped — the dialog shows it as unrecognized). A missing
- * storage root answers an empty list; per-child probe failures degrade to
- * null facts, never a 500 — the dialog must render, not error out. A root
- * holding more than {@link SCAN_CHILDREN_LIMIT} children answers its first
- * slice plus `truncated`, so a misconfigured rootDir cannot turn one dialog
+ * Whether `canonical` sits DIRECTLY inside a `<repo>/.dsh/gitworktree`
+ * layout root whose repository actually exists on disk. The layout names its
+ * own owner (two levels up must hold a `.git`), so no workspace list is
+ * needed to gate the plugin's territory — a plain fs probe decides.
+ */
+function insideProjectLayout(canonical: string, dirExists: DirExists): boolean {
+  const layout = dirname(canonical)
+  if (basename(layout) !== 'gitworktree') return false
+  const dsh = dirname(layout)
+  if (basename(dsh) !== '.dsh') return false
+  return dirExists(join(dirname(dsh), '.git'))
+}
+
+/**
+ * POST /worktrees-all — git facts for every DIRECT child directory of the two
+ * storage locations the plugin has ever used, merged:
+ *
+ * - legacy: the resolved central storage root (today a read-only historical
+ *   location — existing worktrees stay put, `rootDir` still resolves it);
+ * - project: `<repo>/.dsh/gitworktree` under every DISTINCT repository root
+ *   derived from the caller's registered workspace paths (the current
+ *   layout — its path prefix is what the workspace tree nests under).
+ *
+ * The management dialog's data source (and, through it, the lazy prune's):
+ * one scan answers for all repositories at once, orphan directories included
+ * (a child that probes as no git repository comes back with null facts
+ * rather than being dropped — the dialog shows it as unrecognized). Missing
+ * locations answer their half as an empty list; per-child probe failures
+ * degrade to null facts, never a 500 — the dialog must render, not error
+ * out. Each location that holds more than {@link SCAN_CHILDREN_LIMIT}
+ * children answers its first slice, and any truncation marks the whole
+ * response `truncated`, so a misconfigured location cannot turn one dialog
  * open into thousands of git spawns.
  * @param deps - host dependencies.
+ * @param body - parsed request body: `{ workspaces? }`.
  */
-export async function handleWorktreesAll(deps: RouteDeps): Promise<RouteOutcome> {
-  const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+export async function handleWorktreesAll(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return fail(400, 'request body must be a JSON object')
+  const workspacesRaw = (body as Record<string, unknown>).workspaces ?? []
+  if (!Array.isArray(workspacesRaw)) return fail(400, 'body key "workspaces" must be an array of absolute directories')
+  const unknownKeys = Object.keys(body as Record<string, unknown>).filter(key => key !== 'workspaces')
+  if (unknownKeys.length > 0) return fail(400, `unknown body key "${unknownKeys[0]}"`)
+  const workspaces: string[] = []
+  for (const candidate of workspacesRaw) {
+    if (typeof candidate !== 'string' || !isAbsoluteDir(candidate)) return fail(400, 'body key "workspaces" must be an array of absolute directories')
+    if (!workspaces.includes(candidate)) workspaces.push(candidate)
+  }
+  if (workspaces.length > GROUP_PATHS_LIMIT) return fail(400, `body key "workspaces" accepts at most ${String(GROUP_PATHS_LIMIT)} distinct directories`)
+
   const listDir = deps.listDir ?? fsListDir
-  const listed = await listDir(rootDir)
-  const truncated = listed.length > SCAN_CHILDREN_LIMIT
-  const children = truncated ? listed.slice(0, SCAN_CHILDREN_LIMIT) : listed
   const facts: WorktreesAllResult['worktrees'] = []
-  for (let start = 0; start < children.length; start += GROUP_BATCH_SIZE) {
-    const batch = children.slice(start, start + GROUP_BATCH_SIZE)
-    const probed = await Promise.all(batch.map(async (child) => {
-      const path = join(rootDir, child)
+  let truncated = false
+  const scanLocation = async (root: string, source: 'legacy' | 'project'): Promise<void> => {
+    const listed = await listDir(root)
+    if (listed.length > SCAN_CHILDREN_LIMIT) {
+      truncated = true
+      listed.length = SCAN_CHILDREN_LIMIT
+    }
+    for (let start = 0; start < listed.length; start += GROUP_BATCH_SIZE) {
+      const batch = listed.slice(start, start + GROUP_BATCH_SIZE)
+      const probed = await Promise.all(batch.map(async (child) => {
+        const path = join(root, child)
+        try {
+          const gitFacts = await probeWorkspaceGit(deps.exec, path)
+          return gitFacts === undefined
+            ? { path, repoName: null, branch: null, source }
+            : { path, repoName: gitFacts.repoName, branch: gitFacts.branch, source }
+        } catch {
+          return { path, repoName: null, branch: null, source }
+        }
+      }))
+      facts.push(...probed)
+    }
+  }
+
+  const legacyRoot = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+  await scanLocation(legacyRoot, 'legacy')
+  const statDirectory = deps.statDirectory ?? fsStatDirectory
+  const legacyRootExists = await statDirectory(legacyRoot)
+
+  // Project half: one belonging probe per DISTINCT workspace path (bounded
+  // batches, same as /group), then one scan per DISTINCT repository root.
+  const repoRoots = new Set<string>()
+  for (let start = 0; start < workspaces.length; start += GROUP_BATCH_SIZE) {
+    const batch = workspaces.slice(start, start + GROUP_BATCH_SIZE)
+    const probed = await Promise.all(batch.map(async (path) => {
       try {
-        const gitFacts = await probeWorkspaceGit(deps.exec, path)
-        return gitFacts === undefined
-          ? { path, repoName: null, branch: null }
-          : { path, repoName: gitFacts.repoName, branch: gitFacts.branch }
+        return await probeWorkspaceGit(deps.exec, path)
       } catch {
-        return { path, repoName: null, branch: null }
+        return undefined
       }
     }))
-    facts.push(...probed)
+    for (const workspaceFacts of probed) {
+      if (workspaceFacts !== undefined) repoRoots.add(workspaceFacts.repoRoot)
+    }
   }
-  return { status: 200, body: { worktrees: facts, ...truncated ? { truncated } : {} } }
+  for (const repoRoot of repoRoots) {
+    await scanLocation(join(repoRoot, PROJECT_LAYOUT_DIR), 'project')
+  }
+
+  return { status: 200, body: { worktrees: facts, legacyRoot, legacyRootExists, ...truncated ? { truncated } : {} } }
 }
 
 /** Real fs-backed recursive force rm (Windows file-lock retries included). */
@@ -174,15 +244,22 @@ export async function fsRmRecursive(path: string): Promise<void> {
   await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
 }
 
+/** Create the layout root through the deps seam (tests substitute a no-op). */
+function mkdirSlot(deps: RouteDeps, layoutRoot: string): Promise<void> {
+  const mkdirRecursive = deps.mkdirRecursive ?? fsMkdirRecursive
+  return mkdirRecursive(layoutRoot)
+}
+
 /**
- * POST /purge — delete a NON-git directory sitting DIRECTLY inside the
- * resolved worktree storage root: the orphaned leftover a half-failed
- * `worktree remove` can leave behind (git registration and the .git file
- * already gone, contents stranded on disk). Triple-gated: one level below
- * the root (resolved forms, same slot boundary as /ensure-directory), a
- * real directory, and NOT a git repository — anything git still recognizes
- * must go through /remove, where the removal carries the session-archive
- * and unregistration half. Deletion is a plain recursive force rm.
+ * POST /purge — delete a NON-git directory sitting DIRECTLY inside one of the
+ * plugin's two storage layouts: the legacy central root or a repository's
+ * `.dsh/gitworktree`. The orphaned leftover a half-failed `worktree remove`
+ * can leave behind (git registration and the .git file already gone,
+ * contents stranded on disk). Triple-gated: one level below a storage
+ * location (resolved forms, same slot boundary as /ensure-directory), a real
+ * directory, and NOT a git repository — anything git still recognizes must
+ * go through /remove, where the removal carries the session-archive and
+ * unregistration half. Deletion is a plain recursive force rm.
  * @param deps - host dependencies.
  * @param body - parsed request body: `{ path }`.
  */
@@ -197,8 +274,8 @@ export async function handlePurgeDirectory(deps: RouteDeps, body: unknown): Prom
   }
   const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
   const canonical = resolve(path)
-  if (dirname(canonical) !== resolve(rootDir)) {
-    return fail(400, `"${canonical}" is outside the worktree storage root "${resolve(rootDir)}"`)
+  if (dirname(canonical) !== resolve(rootDir) && !insideProjectLayout(canonical, deps.dirExists ?? fsDirExists)) {
+    return fail(400, `"${canonical}" is outside the plugin's worktree storage locations`)
   }
   const statDirectory = deps.statDirectory ?? fsStatDirectory
   if (!(await statDirectory(canonical))) {
@@ -319,9 +396,14 @@ function isOutcome(value: unknown): value is RouteOutcome {
 }
 
 /**
- * POST /worktree 鈥?create or reuse the worktree for a branch, then report the
- * directory so the client can register it as a workspace. With `cutout: true`
- * the branch is the CURRENT checkout (occupied by the main worktree, so git
+ * POST /worktree — create or reuse the worktree for a branch, then report the
+ * directory so the client can register it as a workspace. The worktree lands
+ * at `<repo>/.dsh/gitworktree/<branch>` (path prefix = repository, so the
+ * native workspace tree nests it under its repository automatically); an
+ * existing registration for the branch ANYWHERE is reused first (the
+ * repository-wide worktree list is location-independent — legacy-central
+ * worktrees keep being returned, never duplicated). With `cutout: true` the
+ * branch is the CURRENT checkout (occupied by the main worktree, so git
  * refuses to add it): a new branch is cut out of it (`<branch>-wt`, first
  * free `-wt<N>` suffix) and isolated in the fresh worktree instead.
  * @param deps - host dependencies.
@@ -333,14 +415,17 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
   const { repoPath, branch, cutout, name } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (branch.trim() === '') return fail(400, '"branch" must be non-empty')
-  const configured = deps.sectionRootDir()?.trim()
-  if (configured !== undefined && configured !== '' && !isAbsoluteConfigPath(configured)) {
-    return fail(400, `configured rootDir "${String(deps.sectionRootDir())}" is not an absolute path`)
-  }
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+    // Local-ignore first, creation second: the rule is harmless when the
+    // creation later fails (the directory simply does not exist), while the
+    // reverse order leaves a created worktree visible as untracked on the
+    // next `git status` when the write fails. A write failure never blocks
+    // the creation — the worktree cannot be rolled back — it rides the
+    // successful response as `excludeWarning` for the client to toast.
+    const excludeWarning = await appendWorktreeExclude(deps.excludeSeams ?? fsExcludeSeams, facts.repoRoot)
+    const layoutRoot = join(facts.repoRoot, PROJECT_LAYOUT_DIR)
     // Optional pre-create remote sync — but only when the branch actually
     // consumes remote data: a LOCAL branch's worktree (or an existing twin)
     // never reads the fetched refs, so the resolve runs first and the fetch
@@ -360,6 +445,7 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
         }
       }
     }
+    const warnings = { ...fetchWarning === undefined ? {} : { fetchWarning }, ...excludeWarning === undefined ? {} : { excludeWarning } }
     if (cutout === true) {
       // An explicit name skips the `-wt` suffix walk and is used verbatim —
       // both for the branch and the storage folder. A leading dash would
@@ -368,33 +454,31 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
       const custom = name?.trim()
       if (custom !== undefined && custom !== '') {
         if (custom.startsWith('-')) return fail(400, '"name" must not start with "-"')
-        const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(custom)}`)
-        await mkdir(rootDir, { recursive: true })
+        const target = join(layoutRoot, sanitizeBranchDir(custom))
+        await mkdirSlot(deps, layoutRoot)
         await addWorktreeCutout(deps.exec, facts.repoRoot, branch, custom, target)
-        return { status: 200, body: { path: target, created: true, ...fetchWarning === undefined ? {} : { fetchWarning } } }
+        return { status: 200, body: { path: target, created: true, ...warnings } }
       }
       // The new branch name must be known before the folder name can be
-      // computed: the folder carries `<repoName>-<NEW branch>`. The name
-      // must be free in BOTH namespaces — the branch table and the storage
-      // folder: a leftover folder of a since-deleted branch would otherwise
-      // fail `worktree add` with a bare "already exists", so the suffix
-      // walk probes the folder too.
+      // computed: the folder carries the NEW branch's directory name. The
+      // name must be free in BOTH namespaces — the branch table and the
+      // storage folder: a leftover folder of a since-deleted branch would
+      // otherwise fail `worktree add` with a bare "already exists", so the
+      // suffix walk probes the folder too.
       const dirExists = deps.dirExists ?? fsDirExists
       const newBranch = await cutoutBranchName(deps.exec, facts.repoRoot, branch, (candidate) =>
-        dirExists(join(rootDir, `${facts.repoName}-${sanitizeBranchDir(candidate)}`)),
+        dirExists(join(layoutRoot, sanitizeBranchDir(candidate))),
       )
-      const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(newBranch)}`)
-      await mkdir(rootDir, { recursive: true })
+      const target = join(layoutRoot, sanitizeBranchDir(newBranch))
+      await mkdirSlot(deps, layoutRoot)
       await addWorktreeCutout(deps.exec, facts.repoRoot, branch, newBranch, target)
-      return { status: 200, body: { path: target, created: true, ...fetchWarning === undefined ? {} : { fetchWarning } } }
+      return { status: 200, body: { path: target, created: true, ...warnings } }
     }
-    // The folder name carries the belonging itself: `<repoName>-<branch>` —
-    // the sidebar group title (the folder basename) then reads as the parent
-    // repository plus the branch instead of a bare branch word.
-    const target = join(rootDir, `${facts.repoName}-${sanitizeBranchDir(branch)}`)
-    await mkdir(rootDir, { recursive: true })
+    // The folder name carries the branch: `<repo>/.dsh/gitworktree/<branch>`.
+    const target = join(layoutRoot, sanitizeBranchDir(branch))
+    await mkdirSlot(deps, layoutRoot)
     const result = await addWorktree(deps.exec, facts.repoRoot, branch, target, deps.dirExists)
-    return { status: 200, body: { ...result, ...fetchWarning === undefined ? {} : { fetchWarning } } }
+    return { status: 200, body: { ...result, ...warnings } }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)
     return fail(500, error instanceof Error ? error.message : String(error))
@@ -665,23 +749,26 @@ export async function handlePathExists(deps: RouteDeps, body: unknown): Promise<
     exists[path] = await statDirectory(path).catch(() => false)
   }))
   // Rebuildability is a STORAGE-SLOT fact, not a general one: only a missing
-  // path sitting DIRECTLY inside the resolved worktree root is a slot this
-  // plugin planned, so recreating the empty directory is safe self-healing
-  // (its sessions reattach by realpath once the folder is back). Paths
-  // outside the root are the user's own territory — never rebuilt here.
+  // path sitting DIRECTLY inside one of the plugin's storage locations (the
+  // legacy root, or a repository's `.dsh/gitworktree`) is a slot this plugin
+  // planned, so recreating the empty directory is safe self-healing (its
+  // sessions reattach by realpath once the folder is back). Paths outside
+  // both are the user's own territory — never rebuilt here.
   const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
+  const dirExists = deps.dirExists ?? fsDirExists
   const rebuildable: PathExistsResult['rebuildable'] = {}
   for (const path of distinct) {
     if (exists[path]) continue
-    rebuildable[path] = dirname(resolve(path)) === resolve(rootDir)
+    rebuildable[path] = dirname(resolve(path)) === resolve(rootDir) || insideProjectLayout(resolve(path), dirExists)
   }
   return { status: 200, body: { exists, ...Object.values(rebuildable).some(Boolean) ? { rebuildable } : {} } }
 }
 
 /**
  * POST /ensure-directory — recreate a MISSING worktree storage slot
- * (`mkdir -p`). Strictly gated to paths sitting DIRECTLY inside the resolved
- * worktree storage root: those slots were planned and created by this plugin,
+ * (`mkdir -p`). Strictly gated to paths sitting DIRECTLY inside one of the
+ * plugin's two storage layouts (the legacy central root, or a repository's
+ * `.dsh/gitworktree`): those slots were planned and created by this plugin,
  * so rebuilding the empty folder is self-healing (historical sessions
  * reattach automatically once realpath matches again — DSH keeps the
  * workspace accounting and filters membership by the session header's cwd).
@@ -701,10 +788,10 @@ export async function handleEnsureDirectory(deps: RouteDeps, body: unknown): Pro
   }
   const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
   const canonical = resolve(path)
-  // Exactly one level below the root, compared on resolved forms so `..`
-  // and spelling drift cannot escape the slot boundary.
-  if (dirname(canonical) !== resolve(rootDir)) {
-    return fail(400, `"${canonical}" is outside the worktree storage root "${resolve(rootDir)}"`)
+  // Exactly one level below a storage location, compared on resolved forms
+  // so `..` and spelling drift cannot escape the slot boundary.
+  if (dirname(canonical) !== resolve(rootDir) && !insideProjectLayout(canonical, deps.dirExists ?? fsDirExists)) {
+    return fail(400, `"${canonical}" is outside the plugin's worktree storage locations`)
   }
   const mkdirRecursive = deps.mkdirRecursive ?? fsMkdirRecursive
   try {

@@ -1,99 +1,19 @@
-/* git-worktree settings card on the Plugins configuration tab. Visual
- * language mirrors the settings section's own card chrome (border radius,
- * layer fills, pending badge, footer buttons) so cards from different
- * packages sit in one list without reading as two designs; tokens only, no
- * literal colors. */
+/* git-worktree bundle configuration on the Plugins page. The page owns the
+ * chrome (title, icon, breadcrumb); this component renders either the
+ * bundle-row summary line or the configuration form inside the page. Visual
+ * language mirrors the settings section's own card chrome (layer fills,
+ * footer buttons); tokens only, no literal colors. */
 
-.card {
-  list-style: none;
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 16px;
-  background: var(--dsw-alias-bg-layer-3);
-  transition: border-color .16s, background .16s;
-}
-
-.card:hover {
-  border-color: var(--dsw-alias-label-dimmed);
-}
-
-/* An open card reads as the one being worked on, not merely taller. */
-.cardOpen {
-  background: var(--dsw-alias-bg-layer-2);
-  border-color: var(--dsw-alias-label-dimmed);
-}
-
-.header {
-  width: 100%;
-  appearance: none;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
-}
-
-.header:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -2px;
-}
-
-/* Name over description, mirroring the section's own plugin cards: the
- * description is what tells one plugin's settings from another's. */
-.headText {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.name {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--dsw-alias-label-primary);
-}
-
-.description {
+/* The one-line preview on the bundle's row. */
+.summary {
+  margin: 0;
   font-size: 13px;
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* Carried on the header so a collapsed card still says it holds edits. */
-.pending {
-  flex: none;
-  border-radius: 999px;
-  corner-shape: round;
-  padding: 1px 8px;
-  font-size: 11px;
-  line-height: 17px;
-  font-weight: 500;
-  white-space: nowrap;
-  background: var(--dsw-alias-bg-module-platform);
-  color: var(--dsw-alias-label-secondary);
-}
-
-.chevron {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-  transition: transform .16s;
-}
-
-.chevronOpen {
-  transform: rotate(180deg);
-}
-
-.body {
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-  margin: 0 16px;
-  padding: 12px 0 8px;
+/* The configuration form inside the bundle's page. */
+.page {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -118,69 +38,30 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 4px 8px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-primary);
-  background-color: var(--dsw-alias-bg-layer-2);
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 6px;
-  appearance: none;
-}
-
-.input:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -1px;
-}
-
-.input:disabled {
-  opacity: 0.6;
-}
-
-/* The directory control and its native-dialog launcher share one row. */
-.inputRow {
+/* The read-only legacy storage root: text (not an input — the location is
+ * historical and cannot be edited) plus its "unused" state on one row. */
+.rootRow {
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.inputRow .input {
-  flex: 1;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
-.browse {
-  appearance: none;
-  flex: none;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font: inherit;
+.rootValue {
   font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
-  background: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.browse:hover:not(:disabled) {
+  line-height: 1.5;
   color: var(--dsw-alias-label-primary);
-  border-color: var(--dsw-alias-label-dimmed);
+  overflow-wrap: anywhere;
 }
 
-.browse:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.browse:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: 1px;
+.rootUnused {
+  flex: none;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 4px;
+  padding: 0 5px;
 }
 
 .hint {

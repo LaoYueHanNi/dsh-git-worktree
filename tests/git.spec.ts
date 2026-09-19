@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { normalize, resolve } from 'node:path'
+import { join, normalize, resolve } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch,
-  type Exec, type ExecResult,
+  addWorktree, addWorktreeCutout, appendWorktreeExclude, createBranch, cutoutBranchName, deleteBranch, fetchAll, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch, WORKTREE_EXCLUDE_RULE,
+  type ExcludeSeams, type Exec, type ExecResult,
 } from '../src/git.ts'
 
 /** Platform-correct expectation for a scripted POSIX-shaped path. */
@@ -575,5 +575,50 @@ describe('removeWorktree', () => {
     ])
     await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async () => 'occupied'))
       .rejects.toThrow('Permission denied')
+  })
+})
+
+describe('appendWorktreeExclude', () => {
+  /** In-memory file map over the seams; a path absent from the map reads as
+   * '' exactly like the real seam's ENOENT answer. */
+  function memorySeams(files = new Map<string, string>()): { seams: ExcludeSeams; files: Map<string, string> } {
+    return {
+      files,
+      seams: {
+        readFile: async path => files.get(path) ?? '',
+        appendFile: async (path, text) => { files.set(path, (files.get(path) ?? '') + text) },
+        mkdir: async () => {},
+      },
+    }
+  }
+
+  const excludeOf = (repoRoot: string): string => join(repoRoot, '.git', 'info', 'exclude')
+
+  it('appends the rule to a fresh repository (git init normally ships the file)', async () => {
+    const { seams, files } = memorySeams()
+    await expect(appendWorktreeExclude(seams, '/repo')).resolves.toBeUndefined()
+    expect(files.get(excludeOf('/repo'))).toBe(`${WORKTREE_EXCLUDE_RULE}\n`)
+  })
+
+  it('appends behind a newline guard when the file lacks a trailing newline', async () => {
+    const { seams, files } = memorySeams(new Map([[excludeOf('/repo'), '# my own rules']]))
+    await expect(appendWorktreeExclude(seams, '/repo')).resolves.toBeUndefined()
+    expect(files.get(excludeOf('/repo'))).toBe(`# my own rules\n${WORKTREE_EXCLUDE_RULE}\n`)
+  })
+
+  it('is idempotent: an existing rule leaves the file byte-identical', async () => {
+    const content = `# git ls-files --others\n${WORKTREE_EXCLUDE_RULE}\n/other/\n`
+    const { seams, files } = memorySeams(new Map([[excludeOf('/repo'), content]]))
+    await expect(appendWorktreeExclude(seams, '/repo')).resolves.toBeUndefined()
+    expect(files.get(excludeOf('/repo'))).toBe(content)
+  })
+
+  it('returns the failure text instead of throwing', async () => {
+    const seams: ExcludeSeams = {
+      readFile: async () => { throw new Error('EACCES: permission denied') },
+      appendFile: async () => {},
+      mkdir: async () => {},
+    }
+    await expect(appendWorktreeExclude(seams, '/repo')).resolves.toContain('EACCES')
   })
 })

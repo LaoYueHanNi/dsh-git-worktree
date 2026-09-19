@@ -109,6 +109,25 @@
   overflow-wrap: anywhere;
 }
 
+/* The removal confirm's consequence lines (dirty/ahead/archived sessions):
+ * subdued one-row facts under the ask, the dirty count alone in the warning
+ * tone — mirroring the manager dialog's fact block. */
+.popDetails {
+  padding: 0 8px 2px;
+}
+
+.popDetail {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, rgba(128, 128, 128, 0.9));
+  overflow-wrap: anywhere;
+}
+
+.popDetailWarn {
+  color: var(--dsw-alias-status-danger, #d5304f);
+}
+
 .popActions {
   display: flex;
   gap: 2px;
@@ -579,6 +598,19 @@
 .ctxItem:hover,
 .ctxItem:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* The running-session withhold (worktree removal): a disabled item stays
+ * visible — the reason it is missing lives on its hover title, and a verb
+ * that appears and disappears with session state reads as a bug, not a
+ * rule. No hover tint, no pointer; the label dims instead of vanishing. */
+.ctxItem:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.ctxItem:disabled:hover {
+  background: transparent;
 }
 
 /* The arrow-key walk lands here, so the focused item must read as strongly

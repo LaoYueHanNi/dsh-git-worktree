@@ -48,7 +48,11 @@
  * Worktrees get their own 「工作树」 group, listing every worktree but the
  * one the session sits in: the row menu's 「跳到此工作树」 registers that
  * directory and opens a blank session in it (adoptWorktree; no git action,
- * no confirm). On the main checkout's BLANK session the group doubles as
+ * no confirm), and its 「删除工作树」 rides the shared removal flow behind
+ * a fact-spelling confirm (uncommitted count, ahead commits, sessions to
+ * be archived — the branch itself survives; a directory holding a running
+ * session withholds the verb). On the main checkout's BLANK session the
+ * group doubles as
  * the only way to reach a branch held by a worktree — those have left the
  * local group (git refuses to check them out twice, so a local-group row
  * would be a dead end). A linked-worktree session keeps that group and
@@ -67,7 +71,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { branchNameIssue, localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
-import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestInspectWorktree, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
@@ -87,7 +91,7 @@ interface StatusState {
  * (keep-open, no confirmation step); the confirms left are the ones with
  * real consequences to spell out or inputs to carry. */
 interface ConfirmState {
-  kind: 'worktree' | 'worktree-cutout' | 'delete'
+  kind: 'worktree' | 'worktree-cutout' | 'delete' | 'remove-worktree'
   branch: string
   /** True when `branch` names a REMOTE branch (an `origin/feat-x` row):
    * the worktree confirm creates the twin plus its worktree — the ask line
@@ -97,7 +101,17 @@ interface ConfirmState {
    * the user types the new branch name themselves (the auto `<branch>-wt`
    * prefill is gone), confirm disables until the draft is valid. */
   draft?: string
+  /** The removal target directory (kind `remove-worktree` only): the row
+   * menu hands it over with the branch; the dialog's details and the
+   * eventual removal both act on it, not on `branch`. */
+  path?: string
 }
+
+/** The inspect half of one staged removal (kind `remove-worktree` only):
+ * `undefined` while the probe is in flight, `null` after it failed — the
+ * dialog still works (git itself refuses a dirty non-forced removal), just
+ * without the fact lines. */
+type RemovalFacts = { dirty: number; ahead?: number } | null | undefined
 
 /**
  * Read the repository status for a directory; refetch on demand.
@@ -229,9 +243,12 @@ function buildLinkedWorktreeRows(
           ...current.behind === undefined ? {} : { behind: current.behind },
         }],
     // The main checkout is NOT filtered out here: it is another place to go.
+    // Its row carries `mainWorktree` — the hop is legal, but git refuses
+    // `worktree remove` on the main checkout, so the destructive menu verb
+    // gates off this flag.
     ...worktrees.flatMap(w => w.branch === undefined || w.branch === currentBranch
       ? []
-      : [{ name: w.branch, kind: 'worktree' as const, path: w.path }]),
+      : [{ name: w.branch, kind: 'worktree' as const, path: w.path, ...(w.main ? { mainWorktree: true } : {}) }]),
   ]
 }
 
@@ -244,6 +261,8 @@ interface ChipConfirmProps {
   /** The branch the ask refers to, on its own weight-500 line (remote picks
    * only — the ask line says "该远程分支" and this names it). */
   subject?: string
+  /** Consequence lines under the ask (see BranchConfirmFly.details). */
+  details?: React.ReactNode
   /** Confirm-button label (progress text while busy). */
   confirmLabel: string
   /** Cancel-button label. */
@@ -277,7 +296,7 @@ interface ChipConfirmProps {
  * confirm button does so Enter commits.
  */
 function ChipConfirm({
-  anchorRef, ask, subject, confirmLabel, cancelLabel, busy,
+  anchorRef, ask, subject, details, confirmLabel, cancelLabel, busy,
   draft, onDraftChange, draftPlaceholder, draftInvalid, draftHint,
   onConfirm, onCancel,
 }: ChipConfirmProps) {
@@ -340,6 +359,7 @@ function ChipConfirm({
     <div ref={popRef} className={css.popCard} style={pos ?? POP_MEASURE} role="dialog" aria-label={ask}>
       <p className={css.popAsk}>{ask}</p>
       {subject !== undefined && <p className={css.popSubject}>{subject}</p>}
+      {details !== undefined && <div className={css.popDetails}>{details}</div>}
       {onDraftChange !== undefined && (
         <>
           <input
@@ -384,7 +404,7 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, pruneWorktrees, t }: BranchChipDockProps) {
+export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, describeWorktreeRemoval, removeWorktree, pruneWorktrees, t }: BranchChipDockProps) {
   const summary = useSessions(state => state.byId[sessionId])
   const session = useSession(s => s)
   const cwd = summary?.cwd
@@ -392,6 +412,11 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Inspect facts of the staged worktree removal, keyed to its directory:
+   * a confirm staged for one path never shows another's facts, and a restage
+   * while a probe is in flight keeps showing the new path's loading line. */
+  const [removalPath, setRemovalPath] = useState<string | null>(null)
+  const [removalFacts, setRemovalFacts] = useState<RemovalFacts>(undefined)
   /** Which arrow is spinning: fetch and update are single-flight against
    * the SAME busyRef (mutually exclusive), but the spinning state must be
    * per-tool — one shared flag made both arrows rotate at once. */
@@ -523,6 +548,41 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     return undefined
   }, true), [cwd, refresh, runGuarded])
 
+  /** Stage the worktree removal confirm from a RIGHT-CLICKED worktree row:
+   * the dialog lands immediately and the inspect fills its fact lines in
+   * place (the manager dialog's posture, one directory instead of a scan).
+   * A failed probe degrades to the plain ask — git's own refusal of a dirty
+   * non-forced removal stays the safety net. */
+  const removalPathRef = useRef<string | null>(null)
+  removalPathRef.current = removalPath
+  const stageRemoveWorktree = useCallback((path: string, branch: string) => {
+    setRemovalPath(path)
+    setRemovalFacts(undefined)
+    setConfirm({ kind: 'remove-worktree', branch, path })
+    void requestInspectWorktree(path).then(
+      (result) => {
+        setRemovalFacts(cur => cur === undefined && removalPathRef.current === path
+          ? (result.ok ? { dirty: result.dirty, ...result.ahead === undefined ? {} : { ahead: result.ahead } } : null)
+          : cur)
+      },
+      () => { setRemovalFacts(cur => cur === undefined && removalPathRef.current === path ? null : cur) },
+    )
+  }, [])
+
+  /** Worktree removal flow: the shared full removal (git first, archives
+   * and unregistration after — the branch survives), then refetch the
+   * status so the refreshed rows drop the worktree row, the menu stays. */
+  const doRemoveWorktree = useCallback((path: string) => runGuarded(async () => {
+    const dirty = removalPath === path ? removalFacts?.dirty ?? 0 : 0
+    try {
+      await removeWorktree(path, dirty > 0)
+    } catch (cause: unknown) {
+      return cause instanceof Error ? cause.message : String(cause)
+    }
+    await refresh()
+    return undefined
+  }, true), [refresh, removalFacts, removalPath, removeWorktree, runGuarded])
+
   /** Remote-sync flow: POST /fetch (fetch every remote + prune), then
    * refetch the status. Deliberately NOT runGuarded: its success closes the
    * menu, while the whole point of a sync is watching the refreshed branch
@@ -615,6 +675,9 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     if (result.fetchWarning !== undefined) {
       pushToast(t('fetchWarning', { message: result.fetchWarning }))
     }
+    if (result.excludeWarning !== undefined) {
+      pushToast(t('excludeWarning', { message: result.excludeWarning }))
+    }
     void pruneWorktrees?.(result.path).then((report) => {
       if (report === undefined) return
       if (report.removed.length > 0) {
@@ -679,6 +742,37 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     ? undefined
     : facts.worktrees.find(w => w.branch === confirmLocalName)
 
+  // The removal confirm's fact lines: only the STAGED directory's facts
+  // render (a restage keeps the loading line until its own probe lands),
+  // the dirty count reads red like the manager dialog's, and the DSH half
+  // (archived-session count) rides the injected snapshot read.
+  const removalFactsNow = confirm?.kind === 'remove-worktree' && confirm.path !== undefined && removalPath === confirm.path
+    ? removalFacts
+    : undefined
+  const removalDetails = confirm?.kind === 'remove-worktree' && confirm.path !== undefined ? (
+    <>
+      {removalFactsNow === undefined && <p className={css.popDetail}>{t('worktreeRemove.inspecting')}</p>}
+      {removalFactsNow != null && (
+        <>
+          <p className={(removalFactsNow.dirty ?? 0) > 0 ? `${css.popDetail} ${css.popDetailWarn}` : css.popDetail}>
+            {(removalFactsNow.dirty ?? 0) > 0
+              ? t((removalFactsNow.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: removalFactsNow.dirty ?? 0 })
+              : t('worktreeRemove.clean')}
+          </p>
+          {(removalFactsNow.ahead ?? 0) > 0 && (
+            <p className={css.popDetail}>{t('worktreeRemove.ahead', { n: removalFactsNow.ahead ?? 0 })}</p>
+          )}
+          {(() => {
+            const count = describeWorktreeRemoval(confirm.path).archiveCount
+            return count > 0
+              ? <p className={css.popDetail}>{t(count === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: count })}</p>
+              : null
+          })()}
+        </>
+      )}
+    </>
+  ) : undefined
+
   /** One confirm bundle shared by the menu flyout and the standalone
    * dialog (whichever is showing). Switches stage NO dialog — 签出 runs
    * directly (keep-open); what remains is the destructive delete and the
@@ -695,13 +789,17 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       ? t('cutoutFlyAsk', { branch: confirm.branch })
       : confirm.kind === 'delete'
         ? t('deleteBranchAsk', { branch: confirm.branch })
-        : confirm.remote === true
-          ? t('worktreeAskRemote')
-          : t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName }),
-    ...confirm.remote === true ? { subject: confirm.branch } : {},
+        : confirm.kind === 'remove-worktree'
+          ? t('worktreeRemove.desc', { path: confirm.path ?? confirm.branch })
+          : confirm.remote === true
+            ? t('worktreeAskRemote')
+            : t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName }),
+    ...confirm.kind === 'remove-worktree'
+      ? { subject: t('worktreeRemove.descBranch', { branch: confirm.branch }), details: removalDetails }
+      : confirm.remote === true ? { subject: confirm.branch } : {},
     confirmLabel: busy
-      ? (confirm.kind === 'delete' ? t('deleteBranchBusy') : t('worktreeBusy'))
-      : t('actionConfirm'),
+      ? (confirm.kind === 'delete' ? t('deleteBranchBusy') : confirm.kind === 'remove-worktree' ? t('worktreeRemove.busy') : t('worktreeBusy'))
+      : t(confirm.kind === 'remove-worktree' ? 'worktreeRemove.menu' : 'actionConfirm'),
     cancelLabel: t('actionCancel'),
     busy,
     // The cutout dialog carries an EDITABLE new-branch name (typed by
@@ -719,6 +817,8 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     onConfirm: () => {
       if (confirm.kind === 'delete') {
         void doDeleteBranch(confirm.branch)
+      } else if (confirm.kind === 'remove-worktree') {
+        if (confirm.path !== undefined) void doRemoveWorktree(confirm.path)
       } else if (confirm.kind === 'worktree-cutout' && !cutoutValid) {
         return
       } else {
@@ -781,6 +881,11 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
           // hand (empty start, confirm disables until valid).
           setConfirm({ kind: 'worktree-cutout', branch: base })
         }}
+        onRemoveWorktree={stageRemoveWorktree}
+        // The running-session withhold reads the live snapshot at render
+        // time (the injected face is synchronous) — a session that starts
+        // while the menu is open disarms the verb without reopening.
+        worktreeRemovalBlocked={(path) => describeWorktreeRemoval(path).running}
         busy={busy}
         onCreate={(name, from, checkout, onSettled) => { void doCreateBranch(name, from, checkout, onSettled) }}
         onRename={(name, newName, onSettled) => { void doRenameBranch(name, newName, onSettled) }}

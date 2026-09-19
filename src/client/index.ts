@@ -1,21 +1,11 @@
 /**
  * dsh-git-worktree browser half: the composer branch chip + worktree toggle
- * (conversation.input.left) for blank sessions, the plugin configuration
+ * (conversation.input.left) for blank sessions and the plugin configuration
  * card on the Plugins tab (the `git-worktree` settings namespace — the
- * worktree storage root — edited through the settings scope), and — while
- * the sidebar-grouping switch is on — the `sidebar.workspaces` occupant
- * that clusters same-repository workspaces into one tree. Repo facts and
- * worktree creation flow through the host half's own routes; session hopping
- * uses the framework's uiWorkspace navigation; the card's browse button rides
- * the same service's native directory picker (`ctx.uiWorkspace.pickDirectory`).
- *
- * The grouping seat registers DYNAMICALLY: the settings scope drives a
- * register/dispose cycle, so flipping the card's switch swaps the sidebar
- * browser without a page reload (the native browser owns the default cell,
- * this entry shadows it at a lower priority while enabled). On startup the
- * seat mounts from the last-known switch value mirrored to localStorage, so
- * a refresh renders the grouped tree immediately; the settings document
- * corrects the value once it lands.
+ * worktree storage root — edited through the settings scope). Repo facts and
+ * worktree creation flow through the host half's own routes; adopting a
+ * freshly created worktree registers it and starts a session through the
+ * framework's uiWorkspace navigation.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -33,16 +23,13 @@ import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the ui-conversation SlotMap merge (input region entries).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-// Type-only: pulls the ui-sidebar SlotMap merge ('sidebar.workspaces' and its
-// SidebarSectionOwnerProps owner share) into this program.
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 // Type-only: pulls the ui-settings SlotMap merge ('settings.section') and the
 // settingsScope service declaration into this program.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: pulls the ui-settings-plugins keyed-slot declaration
-// ('settings.plugin.item') into this program. The value face stays
-// uncompromised: cross-plugin collaboration goes through the slot system.
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+// Type-only: pulls the ui-plugin-manager keyed-slot declarations
+// ('plugins.bundle.config' and siblings) into this program. The value face
+// stays uncompromised: cross-plugin collaboration goes through the slot system.
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 // Type-only: pulls the ui-workspace service merge (ctx.uiWorkspace) into this
 // program — host 0.1.2 keeps session start and directory picking there while
 // `workspaces` is the pure Workspace-row controller.
@@ -57,12 +44,11 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
-import { GroupedSidebar, type GroupedSidebarInjected } from './GroupedSidebar.tsx'
 import type { WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import { requestEnsureDirectory, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
-import { loadGroupSidebarBoot, saveGroupSidebarBoot } from './sidebar-groups.ts'
 import { pathKey, freshestUpdatedAt, planPrune, runAutoPrune } from './worktree-prune.ts'
+import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { recordPruneRun } from './prune-history.ts'
 import type { BranchChipInjected } from './slots.ts'
 
@@ -73,25 +59,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** The git-worktree chip, dialogs, and settings card copy. */
     'git-worktree': GitWorktreeKey
-  }
-  interface SlotMap {
-    /**
-     * Directory-flow hole under the sidebar browsing region. Declared at
-     * runtime by native ui-workspace; this merge only names the key so
-     * occupancy probes type-check. This plugin must NOT re-declare the hole
-     * (SlotCore throws on a second declarer).
-     */
-    'sidebar.workspaces.directoryFlow': {
-      kind: 'single'
-      scope: 'root'
-      owner: {
-        open: boolean
-        busy: boolean
-        onPicked: (path: string) => void
-        onCancel: () => void
-        onError: (message: string) => void
-      }
-    }
   }
 }
 
@@ -104,6 +71,13 @@ const NS = 'git-worktree'
  */
 const GIT_WORKTREE_NS = 'git-worktree'
 
+/**
+ * This package's own name — the key `plugins.bundle.config` dispatches by
+ * (the slot contract keys a bundle's own configuration by the bundle's
+ * package name; it matches the `cordis.patch.yml` entry verbatim).
+ */
+const PLUGIN_PACKAGE = '@laoyuehanni/dsh-git-worktree'
+
 /** Required services: the slot ledger, session/workspace runtimes, the
  * workspace navigation/directory face, copy, and the settings scope backing
  * the plugin configuration card. */
@@ -112,10 +86,63 @@ export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'locale
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'git-worktree: dictionaries')
 
+  /** The DSH half of one worktree removal, read from the live snapshots: the
+   * workspace registration sitting on the directory, whether any of its
+   * sessions is running (the verb withholds), and the archive set —
+   * everything visible: not archived, not blank, not a subagent row, the
+   * same qualification the manager dialog and the lazy prune share. */
+  const removalFacts = (path: string): { running: boolean; workspaceId: string | undefined; archiveIds: string[] } => {
+    const workspaces = ctx.workspaces.list.getSnapshot()
+    const workspace = workspaces.items.find(item => pathKey(item.path) === pathKey(path))
+    if (workspace === undefined) return { running: false, workspaceId: undefined, archiveIds: [] }
+    const sessions = ctx.sessions.list.getSnapshot()
+    const archived = new Set(workspaces.archivedSessionIds)
+    let running = false
+    const archiveIds: string[] = []
+    for (const sessionId of workspace.sessionIds) {
+      const summary = sessions.byId[sessionId as SessionId]
+      if (summary === undefined) continue
+      if (summary.running) running = true
+      if (summary.blank || summary.origin === 'subagent') continue
+      if (!archived.has(sessionId)) archiveIds.push(sessionId)
+    }
+    return { running, workspaceId: workspace.workspaceId as string, archiveIds }
+  }
+
   const chipInjected = (): BranchChipInjected => ({
     adoptWorktree: async (path) => {
       const workspace = await ctx.workspaces.create({ path })
       ctx.uiWorkspace.startSession(workspace.workspaceId)
+    },
+    describeWorktreeRemoval: (path) => {
+      const facts = removalFacts(path)
+      return { running: facts.running, archiveCount: facts.archiveIds.length }
+    },
+    // The menu's removal confirm runs the SAME shared flow as the manager
+    // dialog and the lazy prune (git first, archives and unregistration
+    // after), so the three surfaces cannot drift apart.
+    removeWorktree: async (path, force) => {
+      const facts = removalFacts(path)
+      await removeWorktreeFully(
+        {
+          removeWorktree: async (target, targetForce) => {
+            const result = await requestRemoveWorktree(target, targetForce)
+            if (!result.ok) throw new Error(result.error)
+          },
+          probeDirectories: async (paths) => {
+            const result = await requestPathExists(paths)
+            return result.ok ? { exists: result.exists } : undefined
+          },
+          archiveSession: (sessionId) => ctx.workspaces.archiveSession(sessionId as SessionId),
+          deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
+        },
+        {
+          path,
+          force,
+          ...facts.workspaceId === undefined ? {} : { workspaceId: facts.workspaceId },
+          archiveSessionIds: facts.archiveIds,
+        },
+      )
     },
     // The lazy auto-prune, fired by the chip after a creation fully lands.
     // Everything here is a browser-side fact: the switches ride the settings
@@ -128,9 +155,9 @@ export function apply(ctx: ClientContext): void {
       if (section.status !== 'ready') return undefined
       if ((section.value?.autoPruneWorktrees ?? false) !== true) return undefined
       const keep = section.value?.keepWorktrees ?? 30
-      const scan = await requestWorktreesAll()
-      if (!scan.ok) return undefined
       const workspaces = ctx.workspaces.list.getSnapshot()
+      const scan = await requestWorktreesAll(workspaces.items.map(workspace => workspace.path))
+      if (!scan.ok) return undefined
       const sessions = ctx.sessions.list.getSnapshot()
       const archived = new Set(workspaces.archivedSessionIds)
       const activity: Record<string, number> = {}
@@ -156,8 +183,13 @@ export function apply(ctx: ClientContext): void {
         activity[key] = freshestUpdatedAt(workspace.sessionIds.map(id => sessions.byId[id]))
         archiveIdsByPath.set(key, archiveIds)
       }
-      const currentId = sessions.current
-      const currentCwd = currentId === undefined ? undefined : sessions.byId[currentId]?.cwd
+      // Host 0.1.6 dropped `sessions.current` (navigation belongs to view
+      // owners): the main-view session is whichever row the main view
+      // retains — the same derivation as upstream ui-workspace's
+      // mainSessionId.
+      const currentCwd = Object.values(sessions.byId).find(
+        session => (session.retainedBy.mainView ?? 0) > 0,
+      )?.cwd
       if (currentCwd !== undefined) exclude.add(pathKey(currentCwd))
       const plan = planPrune({
         paths: scan.worktrees.filter(entry => entry.repoName !== null).map(entry => entry.path),
@@ -221,199 +253,6 @@ export function apply(ctx: ClientContext): void {
 
   const groupingScope = ctx.settingsScope.bind<SectionValue>({ namespace: GIT_WORKTREE_NS })
 
-  // Seat apply is a Promise the settings card awaits: `scope.set` only
-  // stores the document. Enable waits until GroupedSidebar reports ready
-  // (a matching facts cache paints immediately; a cache miss waits for
-  // the first /group). Disable waits until the occupant is disposed and
-  // a frame has painted so the native browser can commit. Subscribe still
-  // drives apply for startup and out-of-band writes.
-  //
-  // Startup mounts the seat from the LAST-KNOWN switch value (mirrored to
-  // localStorage by the boot cache) instead of waiting for the settings
-  // document to cross from the Host: without it every refresh renders the
-  // native browser first and swaps to the grouped tree seconds later. The
-  // ready snapshot remains the authority and corrects a stale cache
-  // through the normal change path.
-  const SEAT_READY_TIMEOUT_MS = 20_000
-  const SNAPSHOT_WAIT_MS = 8_000
-  let groupingDisposer: (() => void) | undefined
-  let groupingEnabled: boolean | undefined
-  let seatEpoch = 0
-  let seatReady = Promise.resolve()
-  let seatReadyResolve: (() => void) | undefined
-  let seatTimer: ReturnType<typeof setTimeout> | undefined
-
-  const finishSeat = (): void => {
-    if (seatTimer !== undefined) {
-      window.clearTimeout(seatTimer)
-      seatTimer = undefined
-    }
-    const resolve = seatReadyResolve
-    seatReadyResolve = undefined
-    resolve?.()
-  }
-
-  const afterPaint = (): Promise<void> => new Promise((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => { requestAnimationFrame(() => { resolve() }) })
-      return
-    }
-    setTimeout(resolve, 0)
-  })
-
-  const groupingMatches = (enabled: boolean): boolean => {
-    const snapshot = groupingScope.getSnapshot()
-    return snapshot.status === 'ready' && (snapshot.value?.groupSidebar ?? true) === enabled
-  }
-
-  const waitSnapshotMatches = async (enabled: boolean): Promise<void> => {
-    if (groupingMatches(enabled)) return
-    await new Promise<void>((resolve) => {
-      const stop = groupingScope.subscribe(() => {
-        if (!groupingMatches(enabled)) return
-        stop()
-        window.clearTimeout(timer)
-        resolve()
-      })
-      const timer = window.setTimeout(() => {
-        stop()
-        resolve()
-      }, SNAPSHOT_WAIT_MS)
-      if (groupingMatches(enabled)) {
-        window.clearTimeout(timer)
-        stop()
-        resolve()
-      }
-    })
-  }
-
-  /** Inject the `sidebar.workspaces` occupant (priority -1 shadows the native
-   * browser at priority 0) and arm its readiness epoch. */
-  const registerGroupingSeat = (): void => {
-    const epoch = ++seatEpoch
-    seatReady = new Promise<void>((resolve) => { seatReadyResolve = resolve })
-    const injectFace = (): GroupedSidebarInjected => ({
-      openSession: (sessionId: string) => {
-        ctx.sessions.open(sessionId as SessionId)
-      },
-      startSession: (workspaceId?: string) => {
-        ctx.uiWorkspace.startSession(workspaceId as WorkspaceId | undefined)
-      },
-      loadFacts: async (paths: readonly string[]) => {
-        const result = await requestGroupWorktrees(paths)
-        return result.ok ? result.facts : undefined
-      },
-      searchSessions: async (query, signal) => {
-        const result = await ctx.sessions.search(query, signal)
-        if (!result.ok) throw new Error(result.error.message)
-        return result.value
-      },
-      searchResultLimit: ctx.sessions.searchResultLimit,
-      renameSession: async (sessionId, title) => {
-        const session = ctx.sessions.binding(sessionId as SessionId)?.session
-        if (session === undefined) throw new Error(`unknown session "${sessionId}"`)
-        const result = await session.rename(title)
-        if (!result.ok) throw new Error(result.error.message)
-      },
-      forkSession: (sessionId) => {
-        ctx.sessions.fork({ sessionId: sessionId as SessionId, increaseTitle: true }).then((childId) => {
-          ctx.sessions.open(childId)
-        }).catch(() => { /* fork failure is silent, matching native */ })
-      },
-      renameWorkspace: async (workspaceId, title) => {
-        await ctx.workspaces.rename(workspaceId as WorkspaceId, title)
-      },
-      deleteWorkspace: async (workspaceId) => {
-        await ctx.workspaces.delete(workspaceId as WorkspaceId)
-      },
-      archiveSession: async (sessionId) => {
-        await ctx.workspaces.archiveSession(sessionId as SessionId)
-      },
-      inspectWorktree: async (path) => {
-        const result = await requestInspectWorktree(path)
-        if (!result.ok) throw new Error(result.error)
-        return { dirty: result.dirty, ahead: result.ahead }
-      },
-      removeWorktree: async (path, force) => {
-        const result = await requestRemoveWorktree(path, force)
-        if (!result.ok) throw new Error(result.error)
-      },
-      probeDirectories: async (paths) => {
-        const result = await requestPathExists(paths)
-        return result.ok ? { exists: result.exists, ...result.rebuildable === undefined ? {} : { rebuildable: result.rebuildable } } : undefined
-      },
-      ensureDirectory: async (path) => {
-        const result = await requestEnsureDirectory(path)
-        if (!result.ok) throw new Error(result.error)
-      },
-      createWorkspace: (input) => ctx.workspaces.create(input),
-      pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
-      // hostInfo / directoryFlow ride the reserved `hooks` compartment so the
-      // renderer binds them with bindSnapshotSelector (same as native
-      // ui-workspace). Workspace/session lists are NOT injected: the occupant
-      // reads the root kit's useWorkspaces / useSessions.
-      hooks: {
-        hostInfo: {
-          getSnapshot: () => ctx.remote.$host,
-          subscribe: (listener) => ctx.on('connection/reset', listener),
-        },
-        directoryFlow: {
-          getSnapshot: () => ctx.slots.entries('sidebar.workspaces.directoryFlow').length > 0,
-          subscribe: (listener) => ctx.slots.subscribe('sidebar.workspaces.directoryFlow', listener),
-        },
-      },
-      onReady: () => { if (epoch === seatEpoch) finishSeat() },
-    })
-    groupingDisposer = ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register({
-      name: 'sidebar.workspaces',
-      priority: -1,
-      locale: NS,
-      inject: injectFace,
-    }, GroupedSidebar))
-    seatTimer = window.setTimeout(() => { if (epoch === seatEpoch) finishSeat() }, SEAT_READY_TIMEOUT_MS)
-  }
-
-  const syncGroupingSeat = (): Promise<void> => {
-    const snapshot = groupingScope.getSnapshot()
-    if (snapshot.status !== 'ready') {
-      // Startup fast path: the settings document has not crossed from the
-      // Host yet. Mount from the last-known value immediately (absent = the
-      // composition default "on"); the ready snapshot corrects it through
-      // the normal change path once it lands.
-      if (groupingEnabled === undefined) {
-        groupingEnabled = loadGroupSidebarBoot() ?? true
-        if (groupingEnabled) registerGroupingSeat()
-      }
-      return seatReady
-    }
-    const enabled = snapshot.value?.groupSidebar ?? true
-    if (enabled === groupingEnabled) {
-      // The Host is the authority: refresh the boot cache so the next
-      // startup mounts from the value it actually stored.
-      saveGroupSidebarBoot(enabled)
-      return seatReady
-    }
-    groupingEnabled = enabled
-    saveGroupSidebarBoot(enabled)
-    if (groupingDisposer !== undefined) {
-      groupingDisposer()
-      groupingDisposer = undefined
-    }
-    const epoch = ++seatEpoch
-    seatReady = new Promise<void>((resolve) => { seatReadyResolve = resolve })
-    if (!enabled) {
-      void afterPaint().then(() => { if (epoch === seatEpoch) finishSeat() })
-      return seatReady
-    }
-    registerGroupingSeat()
-    return seatReady
-  }
-
-  const waitForGroupingSeat = async (enabled: boolean): Promise<void> => {
-    await waitSnapshotMatches(enabled)
-    await syncGroupingSeat()
-  }
-
   // The Plugins configuration tab dispatches keyed cards for the namespaces
   // the Host serves; the git-worktree host half registers this key, so the
   // storage-root card pairs with it without any upstream change. One bind
@@ -424,9 +263,21 @@ export function apply(ctx: ClientContext): void {
   // itself stays ctx-free (same discipline as the sidebar's injected face).
   const managerFace = (): WorktreeManagerFace => ({
     listWorktrees: async () => {
+      const result = await requestWorktreesAll(ctx.workspaces.list.getSnapshot().items.map(workspace => workspace.path))
+      if (!result.ok) throw new Error(result.error)
+      return {
+        worktrees: result.worktrees,
+        legacyRoot: result.legacyRoot,
+        legacyRootExists: result.legacyRootExists,
+        ...result.truncated === undefined ? {} : { truncated: result.truncated },
+      }
+    },
+    // Legacy half only: no workspaces means the scan never touches the
+    // project layouts — one cheap directory read answers the card's row.
+    describeStorage: async () => {
       const result = await requestWorktreesAll()
       if (!result.ok) throw new Error(result.error)
-      return { worktrees: result.worktrees, ...result.truncated === undefined ? {} : { truncated: result.truncated } }
+      return { legacyRoot: result.legacyRoot, legacyRootExists: result.legacyRootExists }
     },
     inspectWorktree: async (path) => {
       const result = await requestInspectWorktree(path)
@@ -465,31 +316,42 @@ export function apply(ctx: ClientContext): void {
     deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
   })
 
-  const form = new CardForm(groupingScope, waitForGroupingSeat)
+  const form = new CardForm(groupingScope)
   const store = form.bind()
-  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-    name: 'settings.plugin.item',
-    key: GIT_WORKTREE_NS,
-    priority: -1,
-    locale: NS,
-    inject: () => ({
-      hooks: { gitWorktreeCard: store },
-      ...form.actions(),
-      // The shell's own directory picker (the workspace flows' chooser):
-      // resolves the chosen absolute path, or null when the user dismisses.
-      pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
-      manager: managerFace(),
-    }),
-  }, GitWorktreeCard))
-
-  // Native ui-workspace occupies the slot's default cell (priority 0). While
-  // the switch is on, this entry shadows it at priority -1 (single cells
-  // render their LOWEST live entry), and the disposer restores the native
-  // browser the moment the switch flips or the fiber unloads.
-  void syncGroupingSeat()
-  const unsubscribeGrouping = groupingScope.subscribe(() => { void syncGroupingSeat() })
+  // The Plugins page dispatches a bundle's own configuration by the bundle's
+  // PACKAGE NAME (this package — see cordis.patch.yml), rendered on the
+  // bundle's page under `view: 'page'` and previewed under 'summary'. The
+  // registration follows the served-namespace directory through the shared
+  // describe face: a deployment whose Host half is not composed (the
+  // `git-worktree` namespace unserved) shows no trace of the card, and a
+  // late-arriving Host registration still picks it up.
+  const describeFace = ctx.settingsScope.describe()
+  let configDisposer: (() => void) | undefined
+  const syncCardSeat = (): void => {
+    const snapshot = describeFace.getSnapshot()
+    const served = snapshot.status === 'ready'
+      && (snapshot.view?.namespaces.some(entry => entry.ns === GIT_WORKTREE_NS) ?? false)
+    if (served && configDisposer === undefined) {
+      configDisposer = ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+        name: 'plugins.bundle.config',
+        key: PLUGIN_PACKAGE,
+        locale: NS,
+        inject: () => ({
+          hooks: { gitWorktreeCard: store },
+          ...form.actions(),
+          manager: managerFace(),
+        }),
+      }, GitWorktreeCard))
+    } else if (!served && configDisposer !== undefined) {
+      configDisposer()
+      configDisposer = undefined
+    }
+  }
+  const unsubscribeDescribe = describeFace.subscribe(syncCardSeat)
+  void describeFace.ensure()
+  syncCardSeat()
   ctx.effect(() => () => {
-    unsubscribeGrouping()
-    if (groupingDisposer !== undefined) groupingDisposer()
-  }, 'git-worktree: sidebar grouping lifecycle')
+    unsubscribeDescribe()
+    if (configDisposer !== undefined) configDisposer()
+  }, 'git-worktree: plugin config card lifecycle')
 }

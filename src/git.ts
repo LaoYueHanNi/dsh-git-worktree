@@ -6,8 +6,8 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, normalize, resolve } from 'node:path'
+import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 import { localBranchName } from './normalize.js'
 import type { BranchEntry, WorktreeEntry, WorkspaceGitFacts } from './wire.js'
 
@@ -667,5 +667,72 @@ export async function probeWorkspaceGit(exec: Exec, path: string): Promise<Works
     repoName: basename(dirname(gitDir)),
     branch: branchName === '' || branchName === 'HEAD' ? null : branchName,
     main: isMainWorktree(toplevel, gitDir),
+  }
+}
+
+/** The one local-ignore rule the project-internal worktree layout needs.
+ * Exactly this pattern — NOT `/.dsh/` — so project-level `.dsh/` files a user
+ * may want to commit stay trackable. */
+export const WORKTREE_EXCLUDE_RULE = '/.dsh/gitworktree/'
+
+/** fs seams for {@link appendWorktreeExclude}; tests substitute. */
+export interface ExcludeSeams {
+  /** Whole file as UTF-8 text; a missing file reads as '' (the rule is
+   * simply not there yet). */
+  readFile: (path: string) => Promise<string>
+  /** Append text to the end of the file, creating it when missing. */
+  appendFile: (path: string, text: string) => Promise<void>
+  /** Recursive mkdir for the `info` directory (git init ships it; a stripped
+   * or hand-moved clone may not). */
+  mkdir: (path: string) => Promise<void>
+}
+
+/** Real fs-backed seams. */
+export const fsExcludeSeams: ExcludeSeams = {
+  readFile: async (path) => {
+    try {
+      return await readFile(path, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    }
+  },
+  appendFile: async (path, text) => {
+    await appendFile(path, text, 'utf8')
+  },
+  mkdir: async (path) => {
+    await mkdir(path, { recursive: true })
+  },
+}
+
+/**
+ * Idempotently add {@link WORKTREE_EXCLUDE_RULE} to the repository's local
+ * ignore file (`<repo>/.git/info/exclude`, reachable from every worktree
+ * because it lives in the SHARED git dir): the git-blessed place for rules
+ * that must stay private to this clone — never committed, never cloned.
+ *
+ * The write never blocks a worktree creation (the folder cannot be rolled
+ * back once built), so a failure is returned as text for the response to
+ * carry, not thrown. Idempotent by full-content line match: an absent rule
+ * is appended behind a newline guard so it never glues onto the user's last
+ * line; an existing rule — or any pre-existing content — is left untouched.
+ * @param seams - fs seams (tests substitute).
+ * @param repoRoot - the repository's main worktree directory.
+ * @returns undefined on success (or the rule already being present); the
+ * failure text otherwise.
+ */
+export async function appendWorktreeExclude(seams: ExcludeSeams, repoRoot: string): Promise<string | undefined> {
+  try {
+    const infoDir = join(repoRoot, '.git', 'info')
+    const excludePath = join(infoDir, 'exclude')
+    const text = await seams.readFile(excludePath)
+    if (!text.split(/\r?\n/).includes(WORKTREE_EXCLUDE_RULE)) {
+      await seams.mkdir(infoDir)
+      const prefix = text === '' || text.endsWith('\n') ? '' : '\n'
+      await seams.appendFile(excludePath, `${prefix}${WORKTREE_EXCLUDE_RULE}\n`)
+    }
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
   }
 }

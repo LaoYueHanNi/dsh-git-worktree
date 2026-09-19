@@ -70,7 +70,7 @@ class FakeScope implements SettingsScope<SectionValue> {
 }
 
 describe('CardForm projection', () => {
-  it('projects the resolved value with no override and no draft', () => {
+  it('projects the resolved root value with its override mark, read-only', () => {
     const scope = new FakeScope({ rootDir: 'D:\\wt' }, { user: { rootDir: 'D:\\wt' } })
     const form = new CardForm(scope)
     expect(form.bind().getSnapshot()).toMatchObject({
@@ -98,155 +98,43 @@ describe('CardForm projection', () => {
     expect(store.getSnapshot().rootDir).toBe('/data/wt')
     expect(store.getSnapshot().overridden).toBe(true)
   })
-
-  it('defaults the grouping switch on and follows live writes', async () => {
-    const scope = new FakeScope({})
-    const form = new CardForm(scope)
-    const store = form.bind()
-    expect(store.getSnapshot().groupSidebar).toBe(true)
-    expect(store.getSnapshot().groupingPending).toBe(false)
-    await form.actions().setGroupSidebar(false)
-    expect(scope.writes).toEqual([{ op: 'set', field: 'groupSidebar', value: false }])
-    expect(store.getSnapshot().groupSidebar).toBe(false)
-    expect(store.getSnapshot().groupingPending).toBe(false)
-    expect(store.getSnapshot().dirty).toBe(false)
-    await form.actions().setGroupSidebar(true)
-    expect(store.getSnapshot().groupSidebar).toBe(true)
-  })
-
-  it('flips the switch and marks pending before the write lands', async () => {
-    const scope = new FakeScope({})
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    const originalSet = scope.set.bind(scope)
-    scope.set = async (field, value) => {
-      await gate
-      return originalSet(field, value)
-    }
-    const form = new CardForm(scope)
-    const store = form.bind()
-    const pending = form.actions().setGroupSidebar(false)
-    const deadline = Date.now() + 500
-    while (!store.getSnapshot().groupingPending && Date.now() < deadline) {
-      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
-    }
-    expect(store.getSnapshot()).toMatchObject({ groupSidebar: false, groupingPending: true, dirty: false })
-    expect(scope.writes).toEqual([])
-    release()
-    await pending
-    expect(store.getSnapshot()).toMatchObject({ groupSidebar: false, groupingPending: false })
-    expect(scope.writes).toEqual([{ op: 'set', field: 'groupSidebar', value: false }])
-  })
-
-  it('keeps groupingPending until the seat callback settles on disable and enable', async () => {
-    const scope = new FakeScope({})
-    let release!: () => void
-    let gate = new Promise<void>(resolve => { release = resolve })
-    const seen: boolean[] = []
-    const form = new CardForm(scope, async (enabled) => {
-      seen.push(enabled)
-      await gate
-    })
-    const store = form.bind()
-
-    const disable = form.actions().setGroupSidebar(false)
-    const untilPending = Date.now() + 500
-    while (!store.getSnapshot().groupingPending && Date.now() < untilPending) {
-      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
-    }
-    const untilWrite = Date.now() + 500
-    while (seen.length === 0 && Date.now() < untilWrite) {
-      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
-    }
-    expect(seen).toEqual([false])
-    expect(store.getSnapshot().groupingPending).toBe(true)
-    release()
-    await disable
-    expect(store.getSnapshot().groupingPending).toBe(false)
-
-    gate = new Promise<void>(resolve => { release = resolve })
-    const enable = form.actions().setGroupSidebar(true)
-    const untilEnable = Date.now() + 500
-    while (seen.length < 2 && Date.now() < untilEnable) {
-      await new Promise<void>(resolve => { setTimeout(resolve, 0) })
-    }
-    expect(seen).toEqual([false, true])
-    expect(store.getSnapshot().groupingPending).toBe(true)
-    release()
-    await enable
-    expect(store.getSnapshot().groupingPending).toBe(false)
-  })
-
-  it('projects a stored off switch without staging', () => {
-    const scope = new FakeScope({ groupSidebar: false }, { user: { groupSidebar: false } })
-    const form = new CardForm(scope)
-    expect(form.bind().getSnapshot()).toMatchObject({ groupSidebar: false, dirty: false })
-  })
 })
 
 describe('CardForm staging', () => {
-  it('stages an edit as dirty without writing', () => {
+  it('stages a keep-cap edit as dirty without writing', () => {
     const scope = new FakeScope({})
     const form = new CardForm(scope)
-    form.actions().editRoot('D:\\wt')
-    expect(form.bind().getSnapshot()).toMatchObject({ rootDir: 'D:\\wt', dirty: true, overridden: true })
+    form.actions().editKeepWorktrees('12')
+    expect(form.bind().getSnapshot()).toMatchObject({ keepWorktreesText: '12', dirty: true })
     expect(scope.writes).toEqual([])
   })
 
-  it('previews a clear as the default location', () => {
-    const scope = new FakeScope({ rootDir: 'D:\\wt' }, { user: { rootDir: 'D:\\wt' } })
-    const form = new CardForm(scope)
-    form.actions().clearRoot()
-    expect(form.bind().getSnapshot()).toMatchObject({ rootDir: '', dirty: true, overridden: false })
-  })
-
-  it('discard drops the staged edit', () => {
+  it('discard drops the staged keep draft', () => {
     const scope = new FakeScope({})
     const form = new CardForm(scope)
-    form.actions().editRoot('D:\\wt')
+    form.actions().editKeepWorktrees('12')
     form.actions().discard()
-    expect(form.bind().getSnapshot()).toMatchObject({ rootDir: '', dirty: false })
+    expect(form.bind().getSnapshot()).toMatchObject({ keepWorktreesText: '30', dirty: false })
   })
 })
 
 describe('CardForm save', () => {
-  it('stores a staged edit, verifies the landing, and clears the draft', async () => {
+  it('refuses to save with nothing staged', async () => {
     const scope = new FakeScope({})
     const form = new CardForm(scope)
-    form.actions().editRoot(' D:\\wt ')
-    const store = form.bind()
     await form.actions().save()
-    expect(scope.writes).toEqual([{ op: 'set', field: 'rootDir', value: 'D:\\wt' }])
-    expect(store.getSnapshot()).toMatchObject({ rootDir: 'D:\\wt', dirty: false, overridden: true, failed: false })
-  })
-
-  it('clears the field (and the override) on an empty draft', async () => {
-    const scope = new FakeScope({ rootDir: 'D:\\wt' }, { user: { rootDir: 'D:\\wt' } })
-    const form = new CardForm(scope)
-    form.actions().clearRoot()
-    await form.actions().save()
-    expect(scope.writes).toEqual([{ op: 'unset', field: 'rootDir', value: undefined }])
-    expect(form.bind().getSnapshot()).toMatchObject({ rootDir: '', overridden: false, dirty: false })
-  })
-
-  it('flags a refused write and keeps the draft staged', async () => {
-    const scope = new FakeScope({})
-    scope.applyWrites = false
-    const form = new CardForm(scope)
-    form.actions().editRoot('D:\\wt')
-    const store = form.bind()
-    await form.actions().save()
-    expect(store.getSnapshot()).toMatchObject({ rootDir: 'D:\\wt', dirty: true, failed: true })
+    expect(scope.writes).toEqual([])
+    expect(form.bind().getSnapshot().dirty).toBe(false)
   })
 
   it('clears the failure flag on the next edit', async () => {
     const scope = new FakeScope({})
     scope.applyWrites = false
     const form = new CardForm(scope)
-    form.actions().editRoot('D:\\wt')
+    form.actions().editKeepWorktrees('12')
     await form.actions().save()
     expect(form.bind().getSnapshot().failed).toBe(true)
-    form.actions().editRoot('E:\\wt')
+    form.actions().editKeepWorktrees('9')
     expect(form.bind().getSnapshot().failed).toBe(false)
   })
 })
@@ -281,15 +169,6 @@ describe('CardForm write-through switches', () => {
     const store = form.bind()
     await expect(form.actions().setFetchBeforeCreate(true)).resolves.toBeUndefined()
     expect(store.getSnapshot().switchFailed).toBe('fetchBeforeCreate')
-  })
-
-  it('records a rejected grouping write and still clears pending', async () => {
-    const scope = new FakeScope({})
-    scope.set = () => Promise.reject(new Error('document locked'))
-    const form = new CardForm(scope)
-    const store = form.bind()
-    await expect(form.actions().setGroupSidebar(false)).resolves.toBeUndefined()
-    expect(store.getSnapshot()).toMatchObject({ switchFailed: 'groupSidebar', groupingPending: false })
   })
 
   it('clears the switch failure once the same switch writes successfully', async () => {
@@ -348,28 +227,6 @@ describe('CardForm keep-cap staging', () => {
     await form.actions().save()
     expect(scope.writes).toEqual([{ op: 'set', field: 'keepWorktrees', value: 12 }])
     expect(store.getSnapshot()).toMatchObject({ keepWorktreesText: '12', dirty: false, failed: false })
-  })
-
-  it('saves a root edit and a keep edit in one stroke', async () => {
-    const scope = new FakeScope({})
-    const form = new CardForm(scope)
-    form.actions().editRoot('D:\wt')
-    form.actions().editKeepWorktrees('5')
-    await form.actions().save()
-    expect(scope.writes).toEqual([
-      { op: 'set', field: 'rootDir', value: 'D:\wt' },
-      { op: 'set', field: 'keepWorktrees', value: 5 },
-    ])
-    expect(form.bind().getSnapshot()).toMatchObject({ dirty: false, failed: false })
-  })
-
-  it('discard drops the keep draft too', () => {
-    const scope = new FakeScope({})
-    const form = new CardForm(scope)
-    form.actions().editRoot('D:\wt')
-    form.actions().editKeepWorktrees('5')
-    form.actions().discard()
-    expect(form.bind().getSnapshot()).toMatchObject({ rootDir: '', keepWorktreesText: '30', dirty: false })
   })
 
   it('flags a refused keep write and keeps the draft staged', async () => {

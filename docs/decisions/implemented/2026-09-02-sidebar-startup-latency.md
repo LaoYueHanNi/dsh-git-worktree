@@ -2,6 +2,9 @@
 
 Status: implemented
 
+> [!NOTE]
+> 本文描述的启动快路径与 boot cache 随侧栏遮蔽一并移除，见 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0.1.6-alpha.2.md)。批量探测（单次 `rev-parse` 三合一）仍服务于 `/group` 与 `/worktrees-all` 路由。
+
 > 本文是 [侧边栏按仓库聚合工作区](./2026-08-31-sidebar-workspace-grouping.md) 的启动时延后续优化，不改动分组语义本身。
 
 ## Problem

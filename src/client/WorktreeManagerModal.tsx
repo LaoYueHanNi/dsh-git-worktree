@@ -21,7 +21,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button, IconFolderClose16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
-import { timeLabel } from './sidebar-search.ts'
+import { timeLabel } from './relative-time.ts'
 import { mapLimit } from './concurrency.ts'
 import { groupScanEntries } from './scan-groups.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
@@ -31,9 +31,20 @@ import css from './WorktreeManagerModal.module.css'
 /** Structural minimums of the browser facts the dialog reads; the slot
  * entry injects these from the framework snapshots. */
 export interface WorktreeManagerFace {
-  /** Scan the storage root; rejects with the host error text. `truncated`
-   * marks a root that held more children than the host probes. */
-  readonly listWorktrees: () => Promise<{ worktrees: WorktreeScanEntry[]; truncated?: boolean }>
+  /** Scan both storage locations; rejects with the host error text.
+   * `truncated` marks a location that held more children than the host
+   * probes; `legacyRoot`/`legacyRootExists` describe the historical central
+   * location (the settings card renders it read-only). */
+  readonly listWorktrees: () => Promise<{
+    worktrees: WorktreeScanEntry[]
+    legacyRoot: string
+    legacyRootExists: boolean
+    truncated?: boolean
+  }>
+  /** The legacy storage location alone (the card's read-only row): the
+   * Host-resolved absolute root and whether it exists on disk. Rejects with
+   * the host error text. */
+  readonly describeStorage: () => Promise<{ legacyRoot: string; legacyRootExists: boolean }>
   /** Pre-delete facts of one directory; rejects with the host error text. */
   readonly inspectWorktree: (path: string) => Promise<{ dirty: number; ahead: number | undefined }>
   /** Registered workspaces (path → identity + session membership). */
@@ -257,10 +268,15 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
             {scan.entries.length === 0 && <div className={css.empty}>{t('manager.empty')}</div>}
             <div className={css.list}>
               {groupScanEntries(scan.entries).map(group => (
-                <div key={group.repoName ?? '<orphans>'} className={css.group}>
+                <div key={`${group.source}:${group.repoName ?? '<orphans>'}`} className={css.group}>
                   <div className={css.groupHead} role="presentation">
                     <span className={css.groupIcon} aria-hidden="true"><IconFolderClose16 size={13} /></span>
                     <span className={css.groupName}>{group.repoName ?? t('manager.orphans')}</span>
+                    {group.repoName !== null && (
+                      <span className={css.groupSource}>
+                        {t(group.source === 'legacy' ? 'manager.sourceLegacy' : 'manager.sourceProject')}
+                      </span>
+                    )}
                     {group.repoName !== null && (
                       <span className={css.groupCount}>{t('manager.count', { n: group.entries.length })}</span>
                     )}

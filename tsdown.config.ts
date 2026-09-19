@@ -62,8 +62,6 @@ function cssModulesInline(pluginId: string): Plugin {
  * Browser platform words shared by the shell's frozen module table: these stay
  * external so the factory's `require` resolves them from the table at runtime.
  * 0.1.2 table: react / jsx / react-dom / cordis / ui-slots / primitives.
- * `abbreviateHomePath` is not on the table, so tsdown inlines
- * `@deepseek-ai/dsh-util-workspace-path`.
  */
 const CLIENT_EXTERNALS: readonly string[] = [
   'react',

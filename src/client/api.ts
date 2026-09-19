@@ -182,8 +182,8 @@ export function requestPathExists(paths: readonly string[]): Promise<Call<PathEx
 
 /**
  * Recreate a missing worktree storage slot (`mkdir -p`). The host gates this
- * to paths directly inside the storage root; historical sessions reattach
- * automatically once the directory is back.
+ * to paths directly inside one of the plugin's storage locations; historical
+ * sessions reattach automatically once the directory is back.
  * @param path - the missing slot directory (absolute).
  */
 export function requestEnsureDirectory(path: string): Promise<Call<EnsureDirectoryResult>> {
@@ -191,19 +191,23 @@ export function requestEnsureDirectory(path: string): Promise<Call<EnsureDirecto
 }
 
 /**
- * Scan the worktree storage root: git facts for every direct child directory
- * (the slots this plugin plans). Orphan/foreign folders answer null facts —
- * the manager dialog shows them as unrecognized.
+ * Scan both worktree storage locations: the legacy central root and every
+ * repository's `.dsh/gitworktree` derived from the workspace paths. Orphan/
+ * foreign folders answer null facts — the manager dialog shows them as
+ * unrecognized.
+ * @param workspaces - absolute directories of the registered workspaces
+ * (drives the project-internal half); absent scans only the legacy root.
  */
-export function requestWorktreesAll(): Promise<Call<WorktreesAllResult>> {
-  return post<WorktreesAllResult>(ROUTE_WORKTREES_ALL, {})
+export function requestWorktreesAll(workspaces?: readonly string[]): Promise<Call<WorktreesAllResult>> {
+  return post<WorktreesAllResult>(ROUTE_WORKTREES_ALL, { ...(workspaces === undefined || workspaces.length === 0 ? {} : { workspaces: [...workspaces] }) })
 }
 
 /**
- * Delete a NON-git directory sitting directly inside the storage root (an
- * orphaned leftover whose .git is already gone). The host triple-gates this:
- * slot boundary, real directory, no git identity — anything git still
- * recognizes must go through requestRemoveWorktree instead.
+ * Delete a NON-git directory sitting directly inside one of the plugin's
+ * storage locations (an orphaned leftover whose .git is already gone). The
+ * host triple-gates this: slot boundary, real directory, no git identity —
+ * anything git still recognizes must go through requestRemoveWorktree
+ * instead.
  * @param path - the leftover directory (absolute).
  */
 export function requestPurgeDirectory(path: string): Promise<Call<PurgeDirectoryResult>> {

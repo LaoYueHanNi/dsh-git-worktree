@@ -46,7 +46,8 @@
  * the safe-delete confirm), 复制分支 — with each verb degenerating where it
  * has no object (current branch: no 签出, no 删除; canCreate gates the
  * write trio; remote rows: no rename, no delete). A worktree row keeps its
- * two-item launcher (hop + copy path). The menu is a second surface, never
+ * launcher set (hop + copy path + remove worktree). The menu is a second
+ * surface, never
  * a second semantics — it IS the execution channel (the double-click it
  * replaced is gone), alongside Enter for the keyboard.
  *
@@ -128,6 +129,10 @@ export interface BranchConfirmFly {
   /** The branch the ask refers to, on its own weight-500 line (remote
    * picks only — the ask line says "该远程分支" and this names it). */
   subject?: string
+  /** Consequence lines under the ask (the worktree removal's dirty/ahead/
+   * archived-sessions facts), each on its own subdued row — the ask states
+   * the action, the details state its price. */
+  details?: React.ReactNode
   /** Confirm-button label (progress text while busy). */
   confirmLabel: string
   /** Cancel-button label. */
@@ -202,6 +207,17 @@ export interface BranchMenuProps {
    * new-branch name starts empty and is typed by hand; the base is that
    * row's branch (any row, current checkout included). */
   onCutWorktree: (base: string) => void
+  /** Stage the worktree REMOVAL confirm for a RIGHT-CLICKED worktree row:
+   * the menu hands over the directory and its branch, the owner runs the
+   * shared removal flow (git first, archives and unregistration after — the
+   * branch itself survives). Offered wherever the worktree group is (the
+   * hop's surfaces): a removal launched from inside a worktree session
+   * always targets some OTHER worktree — the session's own never renders. */
+  onRemoveWorktree: (path: string, branch: string) => void
+  /** True when the worktree directory holds a RUNNING session — its removal
+   * item renders disabled with the reason on hover (the manager dialog's
+   * withhold rule, same cause). */
+  worktreeRemovalBlocked: (path: string) => boolean
   /** Run the create NOW. Entry shapes share one flyout: a row context
    * menu's 新建 cuts from THAT branch leaving every checkout untouched
    * (`from` set), 新建并检出 checks it out here in one stroke (`from` +
@@ -406,7 +422,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -1332,8 +1348,11 @@ export function BranchMenu({
    * `checkout` — `git switch -c <name> <from>` — while 新建 leaves every
    * checkout untouched), 重命名 the rename flyout, 删除 the owner's
    * confirm flyout (the safe `git branch -d`). A WORKTREE row keeps its
-   * two-item launcher (hop + copy path): its job is hopping, and its
-   * branch is by definition checked out elsewhere. While the session is
+   * launcher set (hop + copy path + 删除工作树): its job is hopping, and its
+   * branch is by definition checked out elsewhere — the removal deletes
+   * THAT worktree (git first, archives and unregistration after, branch
+   * kept), staged through the owner's confirm, never run directly, and a
+   * directory holding a running session withholds it. While the session is
    * BLANK (canWorktree) the two worktree verbs join the set BELOW 新建并
    * 检出 (isolation reads as the heavier variant of branching) — 创建工作
    * 树 (the owner stages the reuse/new/remote-twin ask via `onWorktree`;
@@ -1343,7 +1362,7 @@ export function BranchMenu({
    * fixed. Copy is client-only (WYSIWYG display names; a successful write
    * toasts the shared copied label). The menu opens NEITHER select NOR
    * pick — it launches, never re-semantics. */
-  const ctxItems: { id: string; label: string; icon: React.ReactNode; run: () => void }[] = []
+  const ctxItems: { id: string; label: string; icon: React.ReactNode; disabled?: boolean; title?: string; run: () => void }[] = []
   if (ctx !== null) {
     const { row, name, x, y } = ctx
     const isWorktree = row?.kind === 'worktree'
@@ -1391,6 +1410,29 @@ export function BranchMenu({
           void writeClipboard(text).then(ok => { if (ok) setCopiedSeq(Date.now()) })
         },
       })
+      // The destructive verb rides LAST (the branch rows put 删除分支 at the
+      // bottom of their write block too): hop and copy are free, removal is
+      // the one item that costs. It stages the owner's confirm — never runs
+      // directly. A RUNNING session in the directory withholds the item (the
+      // manager dialog's rule), the reason on hover; the MAIN checkout's row
+      // (a linked-worktree session's way back home) withholds it entirely —
+      // git refuses `worktree remove` on the main working tree.
+      if (row?.path !== undefined && row.mainWorktree !== true) {
+        const blocked = worktreeRemovalBlocked(row.path)
+        ctxItems.push({
+          id: 'remove-worktree',
+          label: t('worktreeRemove.menu'),
+          icon: <IconTrashOutline16 size={14} />,
+          ...blocked ? { disabled: true, title: t('manager.running') } : {},
+          run: () => {
+            confirmRef.current?.onCancel()
+            markPoint()
+            setCtx(null)
+            stagePending(buttonOf(name), name)
+            onRemoveWorktree(row.path ?? '', name)
+          },
+        })
+      }
     } else {
       if (executable) {
         ctxItems.push({
@@ -1528,7 +1570,7 @@ export function BranchMenu({
   const ctxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     const key = event.key
     if (key !== 'ArrowDown' && key !== 'ArrowUp' && key !== 'Home' && key !== 'End' && key !== 'Enter') return
-    const items = [...(ctxCardRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? [])]
+    const items = [...(ctxCardRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not([disabled])') ?? [])]
     if (items.length === 0) return
     if (key === 'Enter') {
       // Let the button's own click handling run: preventing it here would
@@ -1708,6 +1750,7 @@ export function BranchMenu({
         >
           <p className={css.popAsk}>{confirm.ask}</p>
           {confirm.subject !== undefined && <p className={css.popSubject}>{confirm.subject}</p>}
+          {confirm.details !== undefined && <div className={css.popDetails}>{confirm.details}</div>}
           {confirm.onDraftChange !== undefined && (
             <>
               <input
@@ -1857,7 +1900,15 @@ export function BranchMenu({
             * keeps "delete branch" from being a guess. */}
           <div className={css.ctxHeader} title={ctx.name}>{ctx.name}</div>
           {ctxItems.map(item => (
-            <button key={item.id} type="button" role="menuitem" className={css.ctxItem} onClick={item.run}>
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className={css.ctxItem}
+              disabled={item.disabled}
+              title={item.title}
+              onClick={item.run}
+            >
               {item.icon}
               <span className={css.ctxItemLabel}>{item.label}</span>
             </button>

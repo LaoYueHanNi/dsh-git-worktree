@@ -52,31 +52,16 @@ export type GitWorktreeKey =
   | 'actionCancel'
   | 'actionConfirm'
   | 'errorGeneric'
-  | 'cardTitle'
   | 'cardDescription'
-  | 'cardUnsaved'
-  | 'cardExpand'
-  | 'cardCollapse'
   | 'cardReadOnly'
   | 'cardRootDirLabel'
-  | 'cardBrowse'
-  | 'cardPicking'
+  | 'cardLegacyUnused'
   | 'cardRootDirHint'
   | 'cardOverridden'
   | 'cardSaveFailed'
   | 'cardDiscard'
   | 'cardSave'
   | 'cardSaving'
-  | 'sidebarSectionTitle'
-  | 'sidebarAddSession'
-  | 'sidebarNewSession'
-  | 'sidebarMainBranch'
-  | 'sidebarMain'
-  | 'sidebarRailExpand'
-  | 'cardGroupSidebarLabel'
-  | 'cardGroupSidebarHint'
-  | 'cardGroupSidebarMark'
-  | 'cardGroupSidebarBusy'
   | 'cardSwitchFailed'
   | 'cardManageWorktrees'
   | 'cardManageHint'
@@ -103,6 +88,8 @@ export type GitWorktreeKey =
   | 'manager.truncated'
   | 'manager.countOrphans'
   | 'manager.orphans'
+  | 'manager.sourceProject'
+  | 'manager.sourceLegacy'
   | 'manager.activityNever'
   | 'manager.dirty.one'
   | 'manager.dirty.other'
@@ -114,46 +101,9 @@ export type GitWorktreeKey =
   | 'worktreePurge.busy'
   | 'manager.removeAria'
   | 'fetchWarning'
+  | 'excludeWarning'
   | 'pruneDone'
   | 'pruneFailed'
-  | 'group.ungrouped'
-  | 'session.new'
-  | 'section.workspaces'
-  | 'section.sessions'
-  | 'viewOptions.label'
-  | 'groupBy.label'
-  | 'groupBy.workspace'
-  | 'groupBy.flat'
-  | 'orderBy.label'
-  | 'orderBy.manual'
-  | 'orderBy.updated'
-  | 'sessions.expand'
-  | 'sessions.collapse'
-  | 'empty.none'
-  | 'empty.noMatches'
-  | 'workspace.add'
-  | 'search'
-  | 'search.sessions.aria'
-  | 'search.placeholder'
-  | 'search.clear'
-  | 'search.results.aria'
-  | 'search.pending'
-  | 'search.unavailable'
-  | 'search.noMatches'
-  | 'search.hasMore'
-  | 'menu.addWorkspace'
-  | 'picker.loading'
-  | 'conflict.named'
-  | 'folderError.title'
-  | 'folderError.retry'
-  | 'rename'
-  | 'rename.workspace.title'
-  | 'rename.session.title'
-  | 'field.workspaceName'
-  | 'field.sessionName'
-  | 'delete.workspace'
-  | 'delete.desc'
-  | 'delete.pending'
   | 'worktreeRemove.menu'
   | 'worktreeRemove.title'
   | 'worktreeRemove.desc'
@@ -166,42 +116,13 @@ export type GitWorktreeKey =
   | 'worktreeRemove.sessions.one'
   | 'worktreeRemove.sessions.other'
   | 'worktreeRemove.busy'
-  | 'stray.unknown'
-  | 'stray.belongsTo'
-  | 'stray.missingDir'
-  | 'stray.worktreeSlot'
-  | 'stray.rebuild'
-  | 'stray.rebuild.aria'
-  | 'stray.rebuildDone'
-  | 'stray.rebuildFailed'
-  | 'stray.register'
-  | 'stray.register.aria'
-  | 'stray.registerFailed'
-  | 'menu.fork'
-  | 'menu.archiveSession'
-  | 'sessions.count.one'
-  | 'sessions.count.other'
-  | 'actions.workspace.aria'
-  | 'actions.session.aria'
-  | 'actions.newSession.aria'
-  | 'status.running'
-  | 'status.subagentsRunning.one'
-  | 'status.subagentsRunning.other'
-  | 'status.idle'
-  | 'status.waitingApproval'
-  | 'status.planReview'
-  | 'status.waitingAnswer'
-  | 'status.completed'
-  | 'hover.created'
   | 'hover.copied'
-  | 'date.ymd'
   | 'time.now'
   | 'time.minutes'
   | 'time.hours'
   | 'time.days'
   | 'time.months'
   | 'time.years'
-  | 'time.ago'
   | 'copy'
   | 'close'
   | 'cancel'
@@ -254,31 +175,16 @@ export const en: Record<GitWorktreeKey, string> = {
   actionCancel: 'Cancel',
   actionConfirm: 'Confirm',
   errorGeneric: 'Git worktree: {message}',
-  cardTitle: 'Git Worktree',
-  cardDescription: 'Where isolated worktree folders for new sessions are stored.',
-  cardUnsaved: 'Unsaved',
-  cardExpand: 'Expand',
-  cardCollapse: 'Collapse',
+  cardDescription: 'Branch visibility and git worktree isolation for sessions; new worktrees are created inside their repository.',
   cardReadOnly: 'The settings document is read-only; edits cannot be saved.',
-  cardRootDirLabel: 'Worktree storage folder',
-  cardBrowse: 'Browse…',
-  cardPicking: 'Choosing…',
-  cardRootDirHint: 'Absolute path. Empty uses the default $DSH_HOME/gitworktree (~/.dsh/gitworktree).',
+  cardRootDirLabel: 'Legacy storage folder',
+  cardLegacyUnused: 'not in use (empty historical location)',
+  cardRootDirHint: 'Historical central location, kept only for the worktrees already living there. New worktrees are created at <repo>/.dsh/gitworktree/<branch> inside their repository and locally ignored through .git/info/exclude.',
   cardOverridden: '(custom location)',
   cardSaveFailed: 'The change did not save. Check the path is absolute and try again.',
   cardDiscard: 'Discard',
   cardSave: 'Save',
   cardSaving: 'Saving…',
-  sidebarSectionTitle: 'Workspaces',
-  sidebarAddSession: 'Start a new session',
-  sidebarNewSession: 'New Session',
-  sidebarMainBranch: 'Main ({branch})',
-  sidebarMain: 'Main',
-  sidebarRailExpand: 'Expand sidebar',
-  cardGroupSidebarLabel: 'Group workspaces',
-  cardGroupSidebarHint: 'Collect same-repo workspaces into one tree. Turn it off at any time to get the native list back.',
-  cardGroupSidebarMark: '(experimental)',
-  cardGroupSidebarBusy: 'Switching sidebar…',
   cardSwitchFailed: 'This switch did not save. Try again.',
   cardManageWorktrees: 'Manage worktrees…',
   cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces.',
@@ -305,6 +211,8 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.truncated': 'Too many directories to scan; showing the first batch. Check that the storage folder is set correctly.',
   'manager.countOrphans': ', {n} unrecognized',
   'manager.orphans': 'Unrecognized directories',
+  'manager.sourceProject': 'in project',
+  'manager.sourceLegacy': 'legacy location',
   'manager.activityNever': 'no sessions',
   'manager.dirty.one': '{n} uncommitted file',
   'manager.dirty.other': '{n} uncommitted files',
@@ -316,46 +224,9 @@ export const en: Record<GitWorktreeKey, string> = {
   'worktreePurge.busy': 'Deleting folder…',
   'manager.removeAria': 'Remove the worktree “{path}”',
   fetchWarning: 'Upstream sync failed; created from the local state: {message}',
+  excludeWarning: 'The ignore rule for the repository could not be written; `.dsh/` will show as untracked: {message}',
   pruneDone: 'Auto-removed {n} stale worktree(s)',
   pruneFailed: '{n} worktree(s) could not be auto-removed',
-  'group.ungrouped': 'Ungrouped',
-  'session.new': 'New Session',
-  'section.workspaces': 'Workspaces',
-  'section.sessions': 'Sessions',
-  'viewOptions.label': 'View options',
-  'groupBy.label': 'Group by',
-  'groupBy.workspace': 'WorkSpace',
-  'groupBy.flat': 'In one list',
-  'orderBy.label': 'Order by',
-  'orderBy.manual': 'Manual',
-  'orderBy.updated': 'Last updated',
-  'sessions.expand': 'Show {n} more sessions',
-  'sessions.collapse': 'Show less',
-  'empty.none': 'No sessions yet',
-  'empty.noMatches': 'No matches',
-  'workspace.add': 'Add workspace',
-  search: 'Search',
-  'search.sessions.aria': 'Search sessions',
-  'search.placeholder': 'Search sessions...',
-  'search.clear': 'Clear search',
-  'search.results.aria': 'Search results',
-  'search.pending': 'Searching session history…',
-  'search.unavailable': 'Content search is temporarily unavailable. Showing name matches.',
-  'search.noMatches': 'No matching sessions',
-  'search.hasMore': 'Showing the first {n} results. Narrow your search.',
-  'menu.addWorkspace': 'Add workspace…',
-  'picker.loading': 'Loading workspaces…',
-  'conflict.named': 'A workspace named “{name}” already exists.',
-  'folderError.title': 'Couldn’t open folder',
-  'folderError.retry': 'Choose again',
-  rename: 'Rename',
-  'rename.workspace.title': 'Rename workspace',
-  'rename.session.title': 'Rename session',
-  'field.workspaceName': 'Workspace name',
-  'field.sessionName': 'Session name',
-  'delete.workspace': 'Delete workspace',
-  'delete.desc': 'This removes “{name}” from the workspace list. The folder and session logs will be kept. Its sessions will appear under Ungrouped.',
-  'delete.pending': 'Deleting workspace…',
   'worktreeRemove.menu': 'Remove worktree',
   'worktreeRemove.title': 'Remove worktree',
   'worktreeRemove.desc': 'This removes the worktree from git and deletes the folder “{path}”.',
@@ -368,42 +239,13 @@ export const en: Record<GitWorktreeKey, string> = {
   'worktreeRemove.sessions.one': '{n} session in this workspace will be archived too.',
   'worktreeRemove.sessions.other': '{n} sessions in this workspace will be archived too.',
   'worktreeRemove.busy': 'Removing…',
-  'stray.unknown': '(unknown directory)',
-  'stray.belongsTo': 'Stray sessions of “{name}”',
-  'stray.missingDir': 'Directory no longer exists — registering is unavailable',
-  'stray.worktreeSlot': 'A worktree storage slot: rebuild this directory (e.g. git worktree add) and its historical sessions reattach automatically',
-  'stray.rebuild': 'Rebuild empty directory',
-  'stray.rebuild.aria': 'Rebuild the directory “{name}”',
-  'stray.rebuildDone': 'Directory rebuilt; its historical sessions will reattach automatically',
-  'stray.rebuildFailed': 'Rebuild failed: {message}',
-  'stray.register': 'Register as workspace',
-  'stray.register.aria': 'Register “{name}” as a workspace',
-  'stray.registerFailed': 'Registration failed: {message}',
-  'menu.fork': 'Fork session',
-  'menu.archiveSession': 'Archive session',
-  'sessions.count.one': '{n} session',
-  'sessions.count.other': '{n} sessions',
-  'actions.workspace.aria': 'Workspace actions for {name}',
-  'actions.session.aria': 'Session actions for {name}',
-  'actions.newSession.aria': 'New session in {name}',
-  'status.running': 'Running',
-  'status.subagentsRunning.one': '{n} subagent running',
-  'status.subagentsRunning.other': '{n} subagents running',
-  'status.idle': 'Idle',
-  'status.waitingApproval': 'Waiting for approval',
-  'status.planReview': 'Plan awaiting review',
-  'status.waitingAnswer': 'Waiting for answer',
-  'status.completed': 'Completed',
-  'hover.created': 'Created {time}',
   'hover.copied': 'Copied',
-  'date.ymd': '{y}-{m}-{d}',
   'time.now': 'now',
   'time.minutes': '{n}min',
   'time.hours': '{n}h',
   'time.days': '{n}d',
   'time.months': '{n}mo',
   'time.years': '{n}y',
-  'time.ago': '{t} ago',
   copy: 'Copy',
   close: 'Close',
   cancel: 'Cancel',
@@ -457,31 +299,16 @@ export const zh: Record<GitWorktreeKey, string> = {
   actionCancel: '取消',
   actionConfirm: '确认',
   errorGeneric: 'Git 工作树：{message}',
-  cardTitle: 'Git 工作树',
-  cardDescription: '新会话的隔离工作树文件夹存放位置。',
-  cardUnsaved: '未保存',
-  cardExpand: '展开',
-  cardCollapse: '折叠',
+  cardDescription: '为会话提供分支可见性与 git 工作树隔离；新建工作树落在各仓库内。',
   cardReadOnly: '设置文档为只读，修改无法保存。',
-  cardRootDirLabel: '工作树存放目录',
-  cardBrowse: '浏览…',
-  cardPicking: '选择中…',
-  cardRootDirHint: '绝对路径。留空使用默认 $DSH_HOME/gitworktree（~/.dsh/gitworktree）。',
+  cardRootDirLabel: '历史存放目录',
+  cardLegacyUnused: '未使用（历史位置为空）',
+  cardRootDirHint: '历史集中位置，仅为已有工作树保留。新建工作树落在各仓库内 <repo>/.dsh/gitworktree/<branch>，并通过 .git/info/exclude 本地忽略。',
   cardOverridden: '（已自定义位置）',
   cardSaveFailed: '保存未生效，请检查路径是否为绝对路径后重试。',
   cardDiscard: '放弃',
   cardSave: '保存',
   cardSaving: '保存中…',
-  sidebarSectionTitle: '工作区',
-  sidebarAddSession: '发起新会话',
-  sidebarNewSession: '新会话',
-  sidebarMainBranch: '主仓库（{branch}）',
-  sidebarMain: '主仓库',
-  sidebarRailExpand: '展开侧栏',
-  cardGroupSidebarLabel: '聚合工作区',
-  cardGroupSidebarHint: '把同仓库的工作区收成一棵树。出问题可随时关掉，回到原生列表。',
-  cardGroupSidebarMark: '（测试功能）',
-  cardGroupSidebarBusy: '正在切换侧栏…',
   cardSwitchFailed: '该开关未保存，请重试。',
   cardManageWorktrees: '管理工作树…',
   cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录。',
@@ -508,6 +335,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.truncated': '目录过多，仅显示前一批。请检查存放目录是否设置正确。',
   'manager.countOrphans': '，{n} 个无法识别',
   'manager.orphans': '无法识别的目录',
+  'manager.sourceProject': '项目内',
+  'manager.sourceLegacy': '历史位置',
   'manager.activityNever': '无会话',
   'manager.dirty.one': '{n} 个未提交文件',
   'manager.dirty.other': '{n} 个未提交文件',
@@ -519,46 +348,9 @@ export const zh: Record<GitWorktreeKey, string> = {
   'worktreePurge.busy': '正在删除文件夹…',
   'manager.removeAria': '删除工作树“{path}”',
   fetchWarning: '上游同步失败，已按本地状态创建：{message}',
+  excludeWarning: '仓库忽略规则写入失败，`.dsh/` 将显示为未跟踪目录：{message}',
   pruneDone: '已自动清理 {n} 个旧工作树',
   pruneFailed: '{n} 个工作树自动清理失败',
-  'group.ungrouped': '未分组',
-  'session.new': '新会话',
-  'section.workspaces': '工作区',
-  'section.sessions': '会话',
-  'viewOptions.label': '视图选项',
-  'groupBy.label': '分组方式',
-  'groupBy.workspace': '按工作区',
-  'groupBy.flat': '单列表',
-  'orderBy.label': '排序方式',
-  'orderBy.manual': '手动排序',
-  'orderBy.updated': '最近更新',
-  'sessions.expand': '展开其余 {n} 个会话',
-  'sessions.collapse': '收起',
-  'empty.none': '暂无会话',
-  'empty.noMatches': '无匹配结果',
-  'workspace.add': '添加工作区',
-  search: '搜索',
-  'search.sessions.aria': '搜索会话',
-  'search.placeholder': '搜索会话…',
-  'search.clear': '清除搜索',
-  'search.results.aria': '搜索结果',
-  'search.pending': '正在搜索会话历史…',
-  'search.unavailable': '内容搜索暂不可用，仅显示名称匹配。',
-  'search.noMatches': '无匹配会话',
-  'search.hasMore': '仅显示前 {n} 条结果，请缩小搜索范围。',
-  'menu.addWorkspace': '添加工作区…',
-  'picker.loading': '正在加载工作区…',
-  'conflict.named': '已存在名为“{name}”的工作区。',
-  'folderError.title': '无法打开文件夹',
-  'folderError.retry': '重新选择',
-  rename: '重命名',
-  'rename.workspace.title': '重命名工作区',
-  'rename.session.title': '重命名会话',
-  'field.workspaceName': '工作区名称',
-  'field.sessionName': '会话名称',
-  'delete.workspace': '删除工作区',
-  'delete.desc': '将把“{name}”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。',
-  'delete.pending': '正在删除工作区…',
   'worktreeRemove.menu': '删除工作树',
   'worktreeRemove.title': '删除工作树',
   'worktreeRemove.desc': '将从 git 移除该工作树并删除目录“{path}”。',
@@ -571,42 +363,13 @@ export const zh: Record<GitWorktreeKey, string> = {
   'worktreeRemove.sessions.one': '该工作区下的 {n} 个会话将一并归档。',
   'worktreeRemove.sessions.other': '该工作区下的 {n} 个会话将一并归档。',
   'worktreeRemove.busy': '删除中…',
-  'stray.unknown': '（目录未知）',
-  'stray.belongsTo': '属于“{name}”的失联会话',
-  'stray.missingDir': '目录已不存在，无法注册',
-  'stray.worktreeSlot': '工作树存放位：重建此目录（如 git worktree add）后，其历史会话将自动归位',
-  'stray.rebuild': '重建空目录',
-  'stray.rebuild.aria': '重建目录“{name}”',
-  'stray.rebuildDone': '目录已重建，其历史会话将自动归位',
-  'stray.rebuildFailed': '重建失败：{message}',
-  'stray.register': '注册为工作区',
-  'stray.register.aria': '将“{name}”注册为工作区',
-  'stray.registerFailed': '注册失败：{message}',
-  'menu.fork': '分叉会话',
-  'menu.archiveSession': '归档会话',
-  'sessions.count.one': '{n} 个会话',
-  'sessions.count.other': '{n} 个会话',
-  'actions.workspace.aria': '工作区“{name}”的操作',
-  'actions.session.aria': '会话“{name}”的操作',
-  'actions.newSession.aria': '在“{name}”中新建会话',
-  'status.running': '进行中',
-  'status.subagentsRunning.one': '{n} 个子代理运行中',
-  'status.subagentsRunning.other': '{n} 个子代理运行中',
-  'status.idle': '空闲',
-  'status.waitingApproval': '等待审批',
-  'status.planReview': '计划待审',
-  'status.waitingAnswer': '等待回答',
-  'status.completed': '已完成',
-  'hover.created': '创建于 {time}',
   'hover.copied': '已复制',
-  'date.ymd': '{y}年{m}月{d}日',
   'time.now': '刚刚',
   'time.minutes': '{n}分钟',
   'time.hours': '{n}小时',
   'time.days': '{n}天',
   'time.months': '{n}个月',
   'time.years': '{n}年',
-  'time.ago': '{t}前',
   copy: '复制',
   close: '关闭',
   cancel: '取消',

@@ -100,6 +100,19 @@
   white-space: nowrap;
 }
 
+/* Where the group's rows physically live (project layout vs the legacy
+ * central root): a quiet tag after the name, so a repo appearing under both
+ * locations reads as two deliberate halves rather than a duplication bug. */
+.groupSource {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
 .groupCount {
   margin-left: auto;
   flex-shrink: 0;
