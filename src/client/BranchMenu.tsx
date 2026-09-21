@@ -115,6 +115,7 @@ import {
   buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows,
   type BranchRow, type TreeNode,
 } from './branch-tree.ts'
+import { dispatchBranchMenuKeyDown } from './branch-keyboard.ts'
 import css from './BranchChip.module.css'
 
 // The row type travels with the component for every caller (BranchChip
@@ -549,9 +550,20 @@ export function BranchMenu({
    * still needs the fresh value, hence the ref. */
   const currentBranchRef = useRef(currentBranch)
   currentBranchRef.current = currentBranch
+  const canWorktreeRef = useRef(canWorktree)
+  canWorktreeRef.current = canWorktree
+  const onWorktreeRef = useRef(onWorktree)
+  onWorktreeRef.current = onWorktree
+  const onCutWorktreeRef = useRef(onCutWorktree)
+  onCutWorktreeRef.current = onCutWorktree
   /** Always-fresh pick for the stale-safe document keydown listener. */
   const pickRef = useRef<(el: HTMLElement | null, name: string) => void>(() => {})
   const confirmOpen = confirm !== null
+
+  /** The rendered button for a branch name (flyout anchor on click-select
+   * paths, where the handler only has the name at hand). */
+  const buttonOf = (name: string): HTMLButtonElement | null =>
+    cardRef.current?.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(name)}"]`) ?? null
 
   /**
    * Layout-shift guard: toggling a folder shifts the layout — a rapid
@@ -607,6 +619,15 @@ export function BranchMenu({
     const inverse = new Map([...grouped.remoteNameMap].map(([display, action]) => [action, display]))
     return (action: string): string => inverse.get(action) ?? action
   }, [grouped.remoteNameMap])
+
+  /** Look up the row object for a branch name (local, remote display row, or worktree). */
+  const findRow = (name: string): BranchRow | null => {
+    const direct = latestRows.current.find(r => r.name === name)
+    if (direct !== undefined) return direct
+    const remote = grouped.remoteDisplayRows.find(r => r.name === name)
+    if (remote !== undefined) return remote
+    return null
+  }
 
   /** Every folder key that renders a header — the expand/collapse-all
    * button's scope (group-prefixed, see groupKey). */
@@ -899,7 +920,15 @@ export function BranchMenu({
       if (key === 'Escape') {
         // The row menu is the topmost transient: it unwinds before the
         // confirm flyout, and one press takes only it.
-        if (ctxStateRef.current !== null) { setCtx(null); return }
+        if (ctxStateRef.current !== null) {
+          setCtx(null)
+          if (selectedRef.current !== null) {
+            requestAnimationFrame(() => {
+              buttonOf(selectedRef.current ?? '')?.focus()
+            })
+          }
+          return
+        }
         if (confirmRef.current !== null) { confirmRef.current.onCancel(); return }
         if (creatingRef.current) { setCreating(false); setDraft(''); return }
         if (renamingRef.current !== null) { setRenaming(null); return }
@@ -911,33 +940,68 @@ export function BranchMenu({
       const card = cardRef.current
       const active = document.activeElement
       if (card === null || active === null || !card.contains(active)) return
-      const inputs = card.querySelectorAll('input')
-      if (inputs.length > 0 && [...inputs].includes(active as HTMLInputElement)) return
+      if (ctxStateRef.current !== null) return
+
       const leaves = [...card.querySelectorAll<HTMLButtonElement>('button[role="menuitem"][data-branch]')]
-      if (key === 'ArrowDown' || key === 'ArrowUp') {
-        event.preventDefault()
-        if (leaves.length === 0) return
-        const idx = leaves.findIndex(b => (b.dataset.branch ?? '') === selectedRef.current)
-        let next = idx
-        if (key === 'ArrowDown') next = idx < 0 ? 0 : Math.min(leaves.length - 1, idx + 1)
-        else next = idx <= 0 ? leaves.length - 1 : idx - 1
-        const target = leaves[next]
-        if (target === undefined) return
-        const name = target.dataset.branch ?? null
-        if (name !== null) setSelected(name)
-        target.focus()
-        target.scrollIntoView({ block: 'nearest' })
-      } else if (key === 'Enter' && selectedRef.current !== null) {
-        event.preventDefault()
-        const el = leaves.find(b => (b.dataset.branch ?? '') === selectedRef.current) ?? null
-        pickRef.current(el, selectedRef.current)
-      }
+      const isSearchInput = inputRef.current !== null && active === inputRef.current
+      const leafNames = leaves.map(b => b.dataset.branch ?? '').filter(Boolean)
+
+      dispatchBranchMenuKeyDown(
+        {
+          event,
+          selected: selectedRef.current,
+          currentBranch: currentBranchRef.current,
+          canWorktree: canWorktreeRef.current,
+          isSearchInput,
+          leaves: leafNames,
+          getElementRect: (branch) => {
+            const el = leaves.find(b => (b.dataset.branch ?? '') === branch) ?? buttonOf(branch)
+            return el?.getBoundingClientRect() ?? null
+          },
+        },
+        {
+          onOpenContextMenu: ({ name, x, y }) => {
+            const row = findRow(name)
+            setCtx({ row, name, x, y })
+          },
+          onWorktree: (branch) => {
+            const el = buttonOf(branch)
+            confirmRef.current?.onCancel()
+            ctxPointRef.current = null
+            setCtx(null)
+            stagePending(el, branch)
+            onWorktreeRef.current(branch)
+          },
+          onCutWorktree: (branch) => {
+            const el = buttonOf(branch)
+            confirmRef.current?.onCancel()
+            ctxPointRef.current = null
+            setCtx(null)
+            stagePending(el, branch)
+            onCutWorktreeRef.current(branch)
+          },
+          onPick: (branch) => {
+            const el = leaves.find(b => (b.dataset.branch ?? '') === branch) ?? buttonOf(branch)
+            pickRef.current(el, branch)
+          },
+          onSelect: (branch) => {
+            setSelected(branch)
+          },
+          onFocusTarget: (index) => {
+            const target = leaves[index]
+            if (target !== undefined) {
+              target.focus()
+              target.scrollIntoView({ block: 'nearest' })
+            }
+          },
+        },
+      )
     }
     document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [open, onClose, anchorRef])
 
@@ -1326,11 +1390,6 @@ export function BranchMenu({
     }
     return out
   }
-
-  /** The rendered button for a branch name (flyout anchor on click-select
-   * paths, where the handler only has the name at hand). */
-  const buttonOf = (name: string): HTMLButtonElement | null =>
-    cardRef.current?.querySelector<HTMLButtonElement>(`button[data-branch="${CSS.escape(name)}"]`) ?? null
 
   /** The row menu's items — for a BRANCH row, the six-verb set (签出 /
    * 新建 / 新建并检出 / 重命名分支 / 删除分支 / 复制分支), each degenerating
@@ -1729,7 +1788,7 @@ export function BranchMenu({
                 spellCheck={false}
                 onChange={event => { setQuery(event.target.value) }}
                 onKeyDown={event => {
-                  if (event.key === 'Enter') {
+                  if (event.key === 'Enter' && !event.altKey) {
                     event.preventDefault()
                     commitFirst()
                   }
