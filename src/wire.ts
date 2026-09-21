@@ -137,6 +137,10 @@ export interface CreateWorktreeResult {
    * `.dsh/` directory — the client must toast this or the user's next
    * `git status` reads as a mystery. */
   excludeWarning?: string
+  /** Present only when copying declared configuration files into the new
+   * worktree failed for one or more files: the worktree was created anyway,
+   * this carries a summary of the failed copies for the client to toast. */
+  copyWarning?: string
 }
 
 /** POST switch request body. */

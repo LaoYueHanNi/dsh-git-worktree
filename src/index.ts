@@ -55,6 +55,9 @@ export interface Config {
   /** Global cap the lazy prune trims down to (valid git worktrees only);
    * absent = 30. */
   keepWorktrees?: number
+  /** Post-create configuration files to copy when .worktreeinclude is absent;
+   * absent = none. */
+  postCreateCopyFiles?: string[]
 }
 
 /**
@@ -72,12 +75,13 @@ export const Config: z<Config> = z.object({
   fetchBeforeCreate: z.boolean().default(false),
   autoPruneWorktrees: z.boolean().default(false),
   keepWorktrees: z.number(),
+  postCreateCopyFiles: z.array(z.string()),
 })
 
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: Config): void {
   const unknown = Object.keys(config).find(key =>
-    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees')
+    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees' && key !== 'postCreateCopyFiles')
   if (unknown !== undefined) {
     throw new Error(`GitWorktreeConfig: unknown key "${unknown}"`)
   }
@@ -92,6 +96,11 @@ export function validateConfig(config: Config): void {
   }
   if (config.autoPruneWorktrees !== undefined && typeof config.autoPruneWorktrees !== 'boolean') {
     throw new Error('GitWorktreeConfig: "autoPruneWorktrees" must be a boolean')
+  }
+  if (config.postCreateCopyFiles !== undefined) {
+    if (!Array.isArray(config.postCreateCopyFiles) || !config.postCreateCopyFiles.every(item => typeof item === 'string')) {
+      throw new Error('GitWorktreeConfig: "postCreateCopyFiles" must be an array of strings')
+    }
   }
   validateKeepWorktrees(config.keepWorktrees)
   validateRootDir(config.rootDir)
@@ -126,6 +135,8 @@ export interface SectionConfig {
   autoPruneWorktrees?: boolean
   /** Global cap the lazy prune trims down to; absent = 30. */
   keepWorktrees?: number
+  /** Post-create configuration files to copy when .worktreeinclude is absent. */
+  postCreateCopyFiles?: string[]
 }
 
 /** Schema resolving the `git-worktree` settings section. */
@@ -135,6 +146,7 @@ export const sectionSchema: z<SectionConfig> = z.object({
   fetchBeforeCreate: z.boolean(),
   autoPruneWorktrees: z.boolean(),
   keepWorktrees: z.number(),
+  postCreateCopyFiles: z.array(z.string()),
 })
 
 /** The shipped prune cap (whole storage root, valid git worktrees only). */
@@ -146,6 +158,7 @@ export const KEEP_WORKTREES_DEFAULT = 30
 export function sectionOf(config: Config): SectionConfig {
   return {
     ...(config.rootDir === undefined ? {} : { rootDir: config.rootDir }),
+    ...(config.postCreateCopyFiles === undefined ? {} : { postCreateCopyFiles: config.postCreateCopyFiles }),
     // The composition layer spells the shipped defaults so a user-layer
     // unset can always fall back to them.
     groupSidebar: config.groupSidebar ?? true,
@@ -173,6 +186,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     exec: childProcessExec,
     sectionRootDir: () => sectionSource().rootDir,
     sectionFetchBeforeCreate: () => sectionSource().fetchBeforeCreate,
+    sectionPostCreateCopyFiles: () => sectionSource().postCreateCopyFiles,
     home: () => homedir(),
     envHome: () => process.env.DSH_HOME,
   })
@@ -194,6 +208,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
         if (value.autoPruneWorktrees !== undefined && typeof value.autoPruneWorktrees !== 'boolean') {
           throw new Error('autoPruneWorktrees must be a boolean')
+        }
+        if (value.postCreateCopyFiles !== undefined) {
+          if (!Array.isArray(value.postCreateCopyFiles) || !value.postCreateCopyFiles.every(item => typeof item === 'string')) {
+            throw new Error('postCreateCopyFiles must be an array of strings')
+          }
         }
         validateKeepWorktrees(value.keepWorktrees)
       },

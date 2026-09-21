@@ -189,6 +189,19 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
         <span className={css.toggleHint}>{t('cardKeepWorktreesHint')}</span>
         {!state.keepWorktreesValid && <span className={css.keepBad} role="alert">{t('cardKeepWorktreesBad')}</span>}
       </label>
+      <label className={`${css.field} ${css.copyFilesRow}`} htmlFor="git-worktree-card-copy-files">
+        <span className={css.fieldLabel}>{t('cardPostCreateCopyFilesLabel')}</span>
+        <textarea
+          id="git-worktree-card-copy-files"
+          className={css.copyFilesInput}
+          rows={3}
+          disabled={lockInput}
+          placeholder={t('cardPostCreateCopyFilesPlaceholder')}
+          value={state.postCreateCopyFilesText}
+          onChange={event => { props.editPostCreateCopyFiles(event.target.value) }}
+        />
+        <span className={css.toggleHint}>{t('cardPostCreateCopyFilesHint')}</span>
+      </label>
       {/* The auto-prune's audit trail (browser-local, newest first):
         * which run removed whose worktrees, so a misjudged activity
         * is discoverable after the toast has faded. Read once per page

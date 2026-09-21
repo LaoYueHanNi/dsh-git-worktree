@@ -72,6 +72,9 @@ export type GitWorktreeKey =
   | 'cardKeepWorktreesLabel'
   | 'cardKeepWorktreesHint'
   | 'cardKeepWorktreesBad'
+  | 'cardPostCreateCopyFilesLabel'
+  | 'cardPostCreateCopyFilesPlaceholder'
+  | 'cardPostCreateCopyFilesHint'
   | 'cardPruneHistoryLabel'
   | 'cardPruneHistoryEmpty'
   | 'cardPruneHistoryRun'
@@ -195,6 +198,9 @@ export const en: Record<GitWorktreeKey, string> = {
   cardKeepWorktreesLabel: 'Worktrees to keep',
   cardKeepWorktreesHint: 'Global cap across all repositories, minimum 1.',
   cardKeepWorktreesBad: 'Enter an integer of at least 1',
+  cardPostCreateCopyFilesLabel: 'Inherit configuration files (global fallback)',
+  cardPostCreateCopyFilesPlaceholder: 'e.g.:\n.env\nconfig/secrets.json',
+  cardPostCreateCopyFilesHint: 'One relative path per line. Only used when .worktreeinclude is absent from repository root; if present, .worktreeinclude takes precedence.',
   cardPruneHistoryLabel: 'Prune history',
   cardPruneHistoryEmpty: 'No prune runs yet',
   cardPruneHistoryRun: 'Removed {n}:',
@@ -319,6 +325,9 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardKeepWorktreesLabel: '保留工作树数量',
   cardKeepWorktreesHint: '所有仓库合计的全局上限，最小为 1。',
   cardKeepWorktreesBad: '请输入不小于 1 的整数',
+  cardPostCreateCopyFilesLabel: '新建工作树配置文件继承（全局后备）',
+  cardPostCreateCopyFilesPlaceholder: '例如：\n.env\nconfig/secrets.json',
+  cardPostCreateCopyFilesHint: '每行一个相对路径。仅在仓库根目录不存在 .worktreeinclude 时生效；若仓库存在 .worktreeinclude，则优先使用该文件。',
   cardPruneHistoryLabel: '清理记录',
   cardPruneHistoryEmpty: '暂无清理记录',
   cardPruneHistoryRun: '清理了 {n} 个：',

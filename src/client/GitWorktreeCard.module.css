@@ -264,6 +264,39 @@
   color: var(--dsw-alias-label-danger, #d64545);
 }
 
+.copyFilesRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.copyFilesInput {
+  width: 100%;
+  box-sizing: border-box;
+  appearance: none;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  font: inherit;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+  padding: 6px 10px;
+  resize: vertical;
+  min-height: 64px;
+}
+
+.copyFilesInput:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.copyFilesInput:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Write-through switches flip optimistically, so a rejected write shows up
  * as the control snapping back. This note sits in the switch's own text
  * column and says which one did not take. */

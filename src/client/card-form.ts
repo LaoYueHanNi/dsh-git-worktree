@@ -22,6 +22,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 /** The fields this card edits. */
 export const ROOT_FIELD = 'rootDir'
 export const KEEP_FIELD = 'keepWorktrees'
+export const COPY_FILES_FIELD = 'postCreateCopyFiles'
 
 /** The resolved user-facing section this card edits. */
 export interface SectionValue {
@@ -33,6 +34,8 @@ export interface SectionValue {
   autoPruneWorktrees?: boolean
   /** Global cap the lazy prune trims down to; absent = 30. */
   keepWorktrees?: number
+  /** Post-create configuration files to copy when .worktreeinclude is absent. */
+  postCreateCopyFiles?: string[]
 }
 
 /**
@@ -84,13 +87,15 @@ export interface CardState {
   /** The write-through switch whose last flip did not persist; null once a
    * later flip succeeds. The card renders a retry note beside it. */
   switchFailed: SwitchField | null
+  /** The post-create copy files field as MULTI-LINE TEXT (one relative path per line). */
+  postCreateCopyFilesText: string
 }
 
 /** The form actions the card's slot entry injects. */
 export interface CardActions {
-  /** Write the staged keep-cap edit, then re-seed from what the Host accepted. */
+  /** Write the staged keep-cap and copy-files edit, then re-seed from what the Host accepted. */
   save: () => void
-  /** Drop the staged edit. */
+  /** Drop the staged edits. */
   discard: () => void
   /** Persist the fetch-before-create switch (takes effect immediately). */
   setFetchBeforeCreate: (value: boolean) => void
@@ -98,6 +103,8 @@ export interface CardActions {
   setAutoPruneWorktrees: (value: boolean) => void
   /** Stage draft text for the keep-cap field (validated on save). */
   editKeepWorktrees: (text: string) => void
+  /** Stage draft text for the post-create copy files field. */
+  editPostCreateCopyFiles: (text: string) => void
 }
 
 /**
@@ -111,6 +118,7 @@ export class CardForm {
   private snapshotValue: CardState
   private readonly listeners = new Set<() => void>()
   private keepDraft: string | undefined
+  private copyFilesDraft: string | undefined
   private saving = false
   private failed = false
   private switchFailed: SwitchField | null = null
@@ -142,8 +150,9 @@ export class CardForm {
       // callers that care — tests — can await settlement.
       save: () => this.save(),
       discard: () => {
-        if (this.keepDraft === undefined && !this.failed) return
+        if (this.keepDraft === undefined && this.copyFilesDraft === undefined && !this.failed) return
         this.keepDraft = undefined
+        this.copyFilesDraft = undefined
         this.failed = false
         this.publish()
       },
@@ -151,6 +160,11 @@ export class CardForm {
       setAutoPruneWorktrees: (value) => this.setSimpleFlag('autoPruneWorktrees', value),
       editKeepWorktrees: (text) => {
         this.keepDraft = text
+        this.failed = false
+        this.publish()
+      },
+      editPostCreateCopyFiles: (text) => {
+        this.copyFilesDraft = text
         this.failed = false
         this.publish()
       },
@@ -168,6 +182,25 @@ export class CardForm {
   private effectiveKeepText(): string {
     const value = this.scope.getSnapshot().value?.[KEEP_FIELD]
     return this.keepDraft ?? String(value ?? 30)
+  }
+
+  /** Parse multi-line text into array of clean relative paths. */
+  private parseCopyFiles(text: string): string[] {
+    return text
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line !== '')
+  }
+
+  /** Serialized stored copy files list (newline-joined). */
+  private storedCopyFilesText(): string {
+    const list = this.scope.getSnapshot().value?.[COPY_FILES_FIELD]
+    return Array.isArray(list) ? list.join('\n') : ''
+  }
+
+  /** The copy files text as user sees it: live draft, else stored value. */
+  private effectiveCopyFilesText(): string {
+    return this.copyFilesDraft ?? this.storedCopyFilesText()
   }
 
   /**
@@ -192,7 +225,7 @@ export class CardForm {
   }
 
   /**
-   * Write the staged keep-cap edit, then re-seed from what the Host
+   * Write the staged keep-cap and copy-files edits, then re-seed from what the Host
    * accepted.
    *
    * The Host is the only authority on acceptance — the keep draft must
@@ -200,26 +233,34 @@ export class CardForm {
    * land keeps its draft so the user can correct it instead of retyping.
    */
   private async save(): Promise<void> {
-    if (this.keepDraft === undefined || this.saving) return
-    // Snapshot the intended write: a keystroke mid-await must not change what
-    // this save commits.
-    const intendedKeep = this.parseKeep(this.keepDraft)
-    if (intendedKeep === undefined || intendedKeep < 1) return
+    if ((this.keepDraft === undefined && this.copyFilesDraft === undefined) || this.saving) return
+    let intendedKeep: number | undefined
+    if (this.keepDraft !== undefined) {
+      intendedKeep = this.parseKeep(this.keepDraft)
+      if (intendedKeep === undefined || intendedKeep < 1) return
+    }
     this.saving = true
     this.failed = false
     this.publish()
     let landed = true
     try {
-      await this.scope.set(KEEP_FIELD, intendedKeep)
-      // Read back: the Host's validator owns the constraints no schema
-      // expresses, so acceptance is judged from the stored layers.
-      if (this.userLayer()?.[KEEP_FIELD] !== intendedKeep) {
-        landed = false
+      if (intendedKeep !== undefined) {
+        await this.scope.set(KEEP_FIELD, intendedKeep)
+        if (this.userLayer()?.[KEEP_FIELD] !== intendedKeep) {
+          landed = false
+        }
+      }
+      if (this.copyFilesDraft !== undefined) {
+        const parsedList = this.parseCopyFiles(this.copyFilesDraft)
+        await this.scope.set(COPY_FILES_FIELD, parsedList)
       }
     } catch (_settingsWriteFailure) {
       landed = false
     }
-    if (landed) this.keepDraft = undefined
+    if (landed) {
+      this.keepDraft = undefined
+      this.copyFilesDraft = undefined
+    }
     this.saving = false
     this.failed = !landed
     this.publish()
@@ -247,12 +288,15 @@ export class CardForm {
     const snapshot = this.scope.getSnapshot()
     const keepText = this.effectiveKeepText()
     const keepParsed = this.parseKeep(keepText)
+    const copyFilesText = this.effectiveCopyFilesText()
+    const keepDirty = this.keepDraft !== undefined && this.keepDraft !== String(this.scope.getSnapshot().value?.[KEEP_FIELD] ?? 30)
+    const copyFilesDirty = this.copyFilesDraft !== undefined && this.copyFilesDraft !== this.storedCopyFilesText()
     return {
       available: snapshot.status === 'ready',
       writable: snapshot.writable,
       rootDir: this.effectiveRoot(),
       overridden: this.storedRoot(),
-      dirty: this.keepDraft !== undefined && this.keepDraft !== String(this.scope.getSnapshot().value?.[KEEP_FIELD] ?? 30),
+      dirty: keepDirty || copyFilesDirty,
       saving: this.saving,
       failed: this.failed,
       fetchBeforeCreate: this.scope.getSnapshot().value?.fetchBeforeCreate ?? false,
@@ -260,6 +304,7 @@ export class CardForm {
       keepWorktreesText: keepText,
       keepWorktreesValid: keepParsed !== undefined && keepParsed >= 1,
       switchFailed: this.switchFailed,
+      postCreateCopyFilesText: copyFilesText,
     }
   }
 

@@ -323,6 +323,124 @@ describe('handleCreateWorktree', () => {
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain('boolean')
   })
+
+  it('copies declared files when .worktreeinclude exists and created is true', async () => {
+    const calls = { ...REPO_CALLS, 'worktree add': {} } as Record<string, Partial<ExecResult>>
+    const copied: [string, string][] = []
+    const outcome = await handleCreateWorktree(
+      deps({
+        exec: scripted(calls),
+        copyFilesSeams: {
+          readFile: async (path) => path.replace(/\\/g, '/').endsWith('/.worktreeinclude') ? '.env\nconfig/secrets.json\n' : null,
+          exists: async (path) => !path.replace(/\\/g, '/').includes('/.dsh/'),
+          mkdir: async () => {},
+          copyFile: async (src, dest) => { copied.push([src, dest]) },
+        },
+      }),
+      { repoPath: '/repo', branch: 'origin/dev' },
+    )
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected creation body')
+    expect(outcome.body.created).toBe(true)
+    expect(copied).toHaveLength(2)
+    expect(copied[0][0]).toBe(join(resolve('/repo'), '.env'))
+    expect(copied[0][1]).toBe(join(outcome.body.path, '.env'))
+    expect(copied[1][0]).toBe(join(resolve('/repo'), 'config', 'secrets.json'))
+    expect(copied[1][1]).toBe(join(outcome.body.path, 'config', 'secrets.json'))
+    expect('copyWarning' in outcome.body).toBe(false)
+  })
+
+  it('copies files from fallback config when .worktreeinclude is absent', async () => {
+    const calls = { ...REPO_CALLS, 'worktree add': {} } as Record<string, Partial<ExecResult>>
+    const copied: [string, string][] = []
+    const outcome = await handleCreateWorktree(
+      deps({
+        exec: scripted(calls),
+        sectionPostCreateCopyFiles: () => ['.env.local'],
+        copyFilesSeams: {
+          readFile: async () => null,
+          exists: async (path) => !path.replace(/\\/g, '/').includes('/.dsh/'),
+          mkdir: async () => {},
+          copyFile: async (src, dest) => { copied.push([src, dest]) },
+        },
+      }),
+      { repoPath: '/repo', branch: 'origin/dev' },
+    )
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected creation body')
+    expect(outcome.body.created).toBe(true)
+    expect(copied).toHaveLength(1)
+    expect(copied[0][0]).toBe(join(resolve('/repo'), '.env.local'))
+    expect(copied[0][1]).toBe(join(outcome.body.path, '.env.local'))
+    expect('copyWarning' in outcome.body).toBe(false)
+  })
+
+  it('does not copy files when reusing an existing worktree (created: false)', async () => {
+    const copySpy = vi.fn()
+    const outcome = await handleCreateWorktree(
+      deps({
+        sectionPostCreateCopyFiles: () => ['.env'],
+        copyFilesSeams: {
+          readFile: async () => '.env\n',
+          exists: async () => true,
+          mkdir: async () => {},
+          copyFile: copySpy,
+        },
+      }),
+      { repoPath: '/repo', branch: 'feat/x' },
+    )
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected body')
+    expect(outcome.body.created).toBe(false)
+    expect(copySpy).not.toHaveBeenCalled()
+  })
+
+  it('copies files during cutout worktree creation', async () => {
+    const calls = { ...REPO_CALLS, 'worktree add': {} } as Record<string, Partial<ExecResult>>
+    const copied: [string, string][] = []
+    const outcome = await handleCreateWorktree(
+      deps({
+        exec: scripted(calls),
+        dirExists: () => false,
+        sectionPostCreateCopyFiles: () => ['.env'],
+        copyFilesSeams: {
+          readFile: async () => null,
+          exists: async (path) => !path.replace(/\\/g, '/').includes('/.dsh/'),
+          mkdir: async () => {},
+          copyFile: async (src, dest) => { copied.push([src, dest]) },
+        },
+      }),
+      { repoPath: '/repo', branch: 'main', cutout: true },
+    )
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected body')
+    expect(outcome.body.created).toBe(true)
+    expect(copied).toHaveLength(1)
+    expect(copied[0][0]).toBe(join(resolve('/repo'), '.env'))
+    expect(copied[0][1]).toBe(join(outcome.body.path, '.env'))
+  })
+
+  it('attaches copyWarning to response when file copy fails', async () => {
+    const calls = { ...REPO_CALLS, 'worktree add': {} } as Record<string, Partial<ExecResult>>
+    const outcome = await handleCreateWorktree(
+      deps({
+        exec: scripted(calls),
+        copyFilesSeams: {
+          readFile: async () => '.env\n',
+          exists: async (path) => !path.replace(/\\/g, '/').includes('/.dsh/'),
+          mkdir: async () => {},
+          copyFile: async () => { throw new Error('EACCES: permission denied') },
+        },
+      }),
+      { repoPath: '/repo', branch: 'origin/dev' },
+    )
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('path' in outcome.body)) throw new Error('expected body')
+    expect(outcome.body.created).toBe(true)
+    if (!('copyWarning' in outcome.body) || outcome.body.copyWarning === undefined) throw new Error('expected copyWarning')
+    expect(outcome.body.copyWarning).toContain('.env')
+    expect(outcome.body.copyWarning).toContain('EACCES')
+  })
 })
 
 describe('handleSwitch', () => {

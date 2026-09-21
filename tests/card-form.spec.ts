@@ -238,4 +238,40 @@ describe('CardForm keep-cap staging', () => {
     await form.actions().save()
     expect(store.getSnapshot()).toMatchObject({ keepWorktreesText: '12', dirty: true, failed: true })
   })
+
+  it('stages postCreateCopyFiles draft, cleans whitespace and empty lines on save', async () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    const store = form.bind()
+    expect(store.getSnapshot().postCreateCopyFilesText).toBe('')
+
+    form.actions().editPostCreateCopyFiles('  .env  \n\nconfig/secrets.json\n  \n')
+    expect(store.getSnapshot()).toMatchObject({
+      postCreateCopyFilesText: '  .env  \n\nconfig/secrets.json\n  \n',
+      dirty: true,
+    })
+
+    await form.actions().save()
+    expect(scope.writes).toEqual([
+      { op: 'set', field: 'postCreateCopyFiles', value: ['.env', 'config/secrets.json'] },
+    ])
+    expect(store.getSnapshot().dirty).toBe(false)
+    expect(store.getSnapshot().postCreateCopyFilesText).toBe('.env\nconfig/secrets.json')
+  })
+
+  it('drops postCreateCopyFiles draft on discard', () => {
+    const scope = new FakeScope({ postCreateCopyFiles: ['.env'] })
+    const form = new CardForm(scope)
+    const store = form.bind()
+    expect(store.getSnapshot().postCreateCopyFilesText).toBe('.env')
+
+    form.actions().editPostCreateCopyFiles('.env\n.env.local')
+    expect(store.getSnapshot().dirty).toBe(true)
+
+    form.actions().discard()
+    expect(store.getSnapshot()).toMatchObject({
+      postCreateCopyFilesText: '.env',
+      dirty: false,
+    })
+  })
 })

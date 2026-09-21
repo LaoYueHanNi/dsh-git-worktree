@@ -115,14 +115,23 @@ describe('config section shapes', () => {
       autoPruneWorktrees: false,
       keepWorktrees: 30,
     })
+    expect(sectionOf({ postCreateCopyFiles: ['.env'] })).toEqual({
+      postCreateCopyFiles: ['.env'],
+      groupSidebar: true,
+      fetchBeforeCreate: false,
+      autoPruneWorktrees: false,
+      keepWorktrees: 30,
+    })
   })
 
   it('validates the switch keys and rejects unknown keys', () => {
     expect(() => validateConfig({})).not.toThrow()
-    expect(() => validateConfig({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 1 })).not.toThrow()
+    expect(() => validateConfig({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 1, postCreateCopyFiles: ['.env'] })).not.toThrow()
     expect(() => validateConfig({ groupSidebar: 'yes' })).toThrow('"groupSidebar" must be a boolean')
     expect(() => validateConfig({ fetchBeforeCreate: 'yes' })).toThrow('"fetchBeforeCreate" must be a boolean')
     expect(() => validateConfig({ autoPruneWorktrees: 'yes' })).toThrow('"autoPruneWorktrees" must be a boolean')
+    expect(() => validateConfig({ postCreateCopyFiles: 'not-array' as unknown as string[] })).toThrow('"postCreateCopyFiles" must be an array of strings')
+    expect(() => validateConfig({ postCreateCopyFiles: [123 as unknown as string] })).toThrow('"postCreateCopyFiles" must be an array of strings')
     expect(() => validateConfig({ groupSidebar: true, nope: 1 })).toThrow('unknown key "nope"')
   })
 

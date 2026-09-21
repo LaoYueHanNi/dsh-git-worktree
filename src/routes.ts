@@ -5,6 +5,7 @@
 
 import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
 import { appendWorktreeExclude, fsExcludeSeams, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec } from './git.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
@@ -19,6 +20,8 @@ export interface RouteDeps {
   sectionRootDir: () => string | undefined
   /** Whether a worktree creation syncs the remotes first (absent = off). */
   sectionFetchBeforeCreate: () => boolean | undefined
+  /** Post-create configuration files to copy when .worktreeinclude is absent. */
+  sectionPostCreateCopyFiles?: () => string[] | undefined
   /** User home directory seam. */
   home: () => string
   /** `$DSH_HOME` environment value seam. */
@@ -27,6 +30,8 @@ export interface RouteDeps {
   dirExists?: DirExists
   /** Local-ignore write seams (tests substitute). */
   excludeSeams?: ExcludeSeams
+  /** Post-create file copy seams (tests substitute). */
+  copyFilesSeams?: CopyFilesSeams
   /** Directory probe seam over fs.stat (true = exists AND is a directory);
    * tests substitute. */
   statDirectory?: (path: string) => Promise<boolean>
@@ -457,7 +462,9 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
         const target = join(layoutRoot, sanitizeBranchDir(custom))
         await mkdirSlot(deps, layoutRoot)
         await addWorktreeCutout(deps.exec, facts.repoRoot, branch, custom, target)
-        return { status: 200, body: { path: target, created: true, ...warnings } }
+        const copyWarning = await runPostCreateCopy(deps, facts.repoRoot, target)
+        const copyWarnObj = copyWarning !== undefined ? { copyWarning } : {}
+        return { status: 200, body: { path: target, created: true, ...warnings, ...copyWarnObj } }
       }
       // The new branch name must be known before the folder name can be
       // computed: the folder carries the NEW branch's directory name. The
@@ -472,13 +479,20 @@ export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Prom
       const target = join(layoutRoot, sanitizeBranchDir(newBranch))
       await mkdirSlot(deps, layoutRoot)
       await addWorktreeCutout(deps.exec, facts.repoRoot, branch, newBranch, target)
-      return { status: 200, body: { path: target, created: true, ...warnings } }
+      const copyWarning = await runPostCreateCopy(deps, facts.repoRoot, target)
+      const copyWarnObj = copyWarning !== undefined ? { copyWarning } : {}
+      return { status: 200, body: { path: target, created: true, ...warnings, ...copyWarnObj } }
     }
     // The folder name carries the branch: `<repo>/.dsh/gitworktree/<branch>`.
     const target = join(layoutRoot, sanitizeBranchDir(branch))
     await mkdirSlot(deps, layoutRoot)
     const result = await addWorktree(deps.exec, facts.repoRoot, branch, target, deps.dirExists)
-    return { status: 200, body: { ...result, ...warnings } }
+    let copyWarning: string | undefined
+    if (result.created) {
+      copyWarning = await runPostCreateCopy(deps, facts.repoRoot, result.path)
+    }
+    const copyWarnObj = copyWarning !== undefined ? { copyWarning } : {}
+    return { status: 200, body: { ...result, ...warnings, ...copyWarnObj } }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)
     return fail(500, error instanceof Error ? error.message : String(error))
