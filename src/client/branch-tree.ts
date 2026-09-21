@@ -16,8 +16,8 @@
 
 /** One selectable branch row. `name` is the ACTION name sent to the owner —
  * for a remote row the full `origin/feat-x`; the group model derives the
- * DISPLAY name (see groupRows). `ahead`/`behind` are local-row-only
- * upstream divergence counts (absent without an upstream or in sync).
+ * DISPLAY name (see groupRows). `ahead`/`behind` are upstream divergence counts
+ * for local and worktree rows (absent without an upstream or in sync).
  * `path` is worktree-row-only: the directory a pick hops the session into.
  * `mainWorktree` is worktree-row-only and true for the MAIN checkout listed
  * as a hop target (a linked-worktree session's way back home): git refuses

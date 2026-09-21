@@ -3,6 +3,8 @@ import {
   buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows,
   type BranchRow, type TreeNode,
 } from '../src/client/branch-tree.ts'
+import { buildBranchRows, buildLinkedWorktreeRows } from '../src/client/BranchChip.tsx'
+import type { BranchEntry, WorktreeEntry } from '../src/wire.ts'
 
 const local = (name: string): BranchRow => ({ name, kind: 'local' })
 const remote = (name: string): BranchRow => ({ name, kind: 'remote' })
@@ -63,6 +65,14 @@ describe('groupRows', () => {
     const rows = [remote('origin/dev')]
     groupRows(rows)
     expect(rows[0]?.name).toBe('origin/dev')
+  })
+
+  it('preserves ahead and behind counts on worktree rows', () => {
+    const wtRow: BranchRow = { name: 'feat/wt', kind: 'worktree', path: '/wt/path', ahead: 3, behind: 1 }
+    const groups = groupRows([wtRow])
+    expect(groups.worktreeRows).toEqual([
+      { name: 'feat/wt', kind: 'worktree', path: '/wt/path', ahead: 3, behind: 1 },
+    ])
   })
 })
 
@@ -149,5 +159,135 @@ describe('chainExpanded', () => {
 describe('groupKey', () => {
   it('keeps same-named local and remote folders in separate toggle states', () => {
     expect(groupKey('local', 'feat/x')).not.toBe(groupKey('remote', 'feat/x'))
+  })
+})
+
+describe('buildBranchRows', () => {
+  it('inherits ahead and behind from the matching local branch into worktree rows', () => {
+    const branches: BranchEntry[] = [
+      { name: 'main', kind: 'local', ahead: 0, behind: 0 },
+      { name: 'feat/wt-1', kind: 'local', ahead: 2, behind: 1 },
+      { name: 'feat/wt-sync', kind: 'local' },
+      { name: 'feat/normal', kind: 'local', ahead: 5 },
+      { name: 'origin/feat/remote', kind: 'remote' },
+    ]
+    const worktrees: WorktreeEntry[] = [
+      { path: '/repo', branch: 'main', main: true },
+      { path: '/repo-wt-1', branch: 'feat/wt-1', main: false },
+      { path: '/repo-wt-sync', branch: 'feat/wt-sync', main: false },
+      { path: '/repo-detached', branch: undefined, main: false },
+    ]
+
+    const rows = buildBranchRows(branches, worktrees)
+
+    // Local branches not held by linked worktrees remain in local group:
+    expect(rows.find(r => r.name === 'main')).toEqual({
+      name: 'main',
+      kind: 'local',
+      ahead: 0,
+      behind: 0,
+    })
+    expect(rows.find(r => r.name === 'feat/normal')).toEqual({
+      name: 'feat/normal',
+      kind: 'local',
+      ahead: 5,
+    })
+    // Branches held by linked worktrees leave the local group:
+    expect(rows.find(r => r.kind === 'local' && r.name === 'feat/wt-1')).toBeUndefined()
+    expect(rows.find(r => r.kind === 'local' && r.name === 'feat/wt-sync')).toBeUndefined()
+
+    // Remote branches:
+    expect(rows.find(r => r.name === 'origin/feat/remote')).toEqual({
+      name: 'origin/feat/remote',
+      kind: 'remote',
+    })
+
+    // Worktree rows:
+    const wt1 = rows.find(r => r.kind === 'worktree' && r.name === 'feat/wt-1')
+    expect(wt1).toEqual({
+      name: 'feat/wt-1',
+      kind: 'worktree',
+      path: '/repo-wt-1',
+      ahead: 2,
+      behind: 1,
+    })
+
+    const wtSync = rows.find(r => r.kind === 'worktree' && r.name === 'feat/wt-sync')
+    expect(wtSync).toEqual({
+      name: 'feat/wt-sync',
+      kind: 'worktree',
+      path: '/repo-wt-sync',
+    })
+    expect(wtSync?.ahead).toBeUndefined()
+    expect(wtSync?.behind).toBeUndefined()
+  })
+
+  it('safely handles worktree whose local branch is missing from branches list', () => {
+    const branches: BranchEntry[] = [
+      { name: 'main', kind: 'local' },
+    ]
+    const worktrees: WorktreeEntry[] = [
+      { path: '/repo', branch: 'main', main: true },
+      { path: '/repo-wt-orphan', branch: 'feat/orphan', main: false },
+    ]
+    const rows = buildBranchRows(branches, worktrees)
+    const orphan = rows.find(r => r.name === 'feat/orphan')
+    expect(orphan).toEqual({
+      name: 'feat/orphan',
+      kind: 'worktree',
+      path: '/repo-wt-orphan',
+    })
+  })
+})
+
+describe('buildLinkedWorktreeRows', () => {
+  it('inherits ahead and behind for linked worktrees and main checkout', () => {
+    const branches: BranchEntry[] = [
+      { name: 'main', kind: 'local', ahead: 1, behind: 0 },
+      { name: 'feat/current', kind: 'local', ahead: 3, behind: 2 },
+      { name: 'feat/other-wt', kind: 'local', ahead: 0, behind: 4 },
+      { name: 'feat/unheld', kind: 'local' },
+    ]
+    const worktrees: WorktreeEntry[] = [
+      { path: '/repo', branch: 'main', main: true },
+      { path: '/repo-current', branch: 'feat/current', main: false },
+      { path: '/repo-other-wt', branch: 'feat/other-wt', main: false },
+    ]
+
+    const rows = buildLinkedWorktreeRows(branches, worktrees, 'feat/current')
+
+    // Current branch is the first local row, with ahead/behind:
+    expect(rows[0]).toEqual({
+      name: 'feat/current',
+      kind: 'local',
+      ahead: 3,
+      behind: 2,
+    })
+
+    // Main checkout worktree row reflects main branch's ahead/behind and has mainWorktree flag:
+    const mainWt = rows.find(r => r.kind === 'worktree' && r.name === 'main')
+    expect(mainWt).toEqual({
+      name: 'main',
+      kind: 'worktree',
+      path: '/repo',
+      mainWorktree: true,
+      ahead: 1,
+      behind: 0,
+    })
+
+    // Other linked worktree row inherits ahead/behind:
+    const otherWt = rows.find(r => r.kind === 'worktree' && r.name === 'feat/other-wt')
+    expect(otherWt).toEqual({
+      name: 'feat/other-wt',
+      kind: 'worktree',
+      path: '/repo-other-wt',
+      ahead: 0,
+      behind: 4,
+    })
+
+    // Other branches not held by worktrees are omitted:
+    expect(rows.find(r => r.name === 'feat/unheld')).toBeUndefined()
+    // Current branch worktree row is not duplicated in worktree group:
+    expect(rows.filter(r => r.name === 'feat/current')).toHaveLength(1)
   })
 })

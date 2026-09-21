@@ -1298,6 +1298,7 @@ export function BranchMenu({
       {...rowEvents(row, row.name)}
     >
       <span className={css.menuRowLabel}>{row.name}</span>
+      {renderArrows(row)}
       {row.name === currentBranch && <IconCheckOutline16 size={14} />}
     </button>
   )
