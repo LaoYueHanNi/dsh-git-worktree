@@ -76,14 +76,14 @@ dsh plugin --profile web remove @laoyuehanni/dsh-git-worktree
 构建一次、装符号链接、迭代：
 
 ```sh
-npm install
-npm run build && npm run build:client
-npm test                # vitest
+pnpm install
+pnpm build:all
+pnpm test                # vitest
 node scripts/smoke.mjs  # 基于构建产物的真实 git 冒烟
 dsh plugin --profile web add link:D:/Code/dsh-worktree
 ```
 
-重新构建并重启 `dsh web` 即可生效（插件目录里跑 `npx tsdown --watch` 可热重载客户端）。刻意不设 `prepare` 脚本——`lib/` 不入库，`npm publish` 现场构建打进 tarball。
+重新构建并重启 `dsh web` 即可生效（插件目录里跑 `pnpm watch:client` 可热重载客户端）。刻意不设 `prepare` 脚本——`lib/` 不入库，`pnpm publish` 现场构建打进 tarball。
 
 临时只挂 host 半边（仅当次启动生效，不动 profile）：在仓库旁建 `cordis.yml` 指向构建出的 host 半边（Windows 需要 `file:///` 形式），随补丁启动：
 
