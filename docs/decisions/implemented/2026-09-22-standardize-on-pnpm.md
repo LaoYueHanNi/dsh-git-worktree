@@ -1,4 +1,4 @@
-﻿# DR: 全面统一采用 pnpm 工具链
+# DR: 全面统一采用 pnpm 工具链
 
 Status: implemented
 

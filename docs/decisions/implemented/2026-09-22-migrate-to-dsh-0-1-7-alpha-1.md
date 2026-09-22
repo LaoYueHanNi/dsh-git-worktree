@@ -6,7 +6,7 @@ Status: implemented
 
 ### 1. 上游 0.1.7-alpha.1 的破坏性断代
 
-插件此前编译并运行在宿主 dsh `0.1.6-alpha.2`（见 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0.1.6-alpha.2.md)）。宿主升级至 `0.1.7-alpha.1`（git tag `dsh-v0.1.7-alpha.1`）后，带来以下破坏性变更，导致插件在宿主环境下无法启动、编译失败或功能缺失：
+插件此前编译并运行在宿主 dsh `0.1.6-alpha.2`（见 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0-1-6-alpha-2.md)）。宿主升级至 `0.1.7-alpha.1`（git tag `dsh-v0.1.7-alpha.1`）后，带来以下破坏性变更，导致插件在宿主环境下无法启动、编译失败或功能缺失：
 
 1. **`SettingsProvider.installSection` 被物理删除（运行时必崩）**：上游重构设置子系统（PR #4587），彻底移除 `installSection` 机制。宿主设置服务变更为 `SettingsForms`，底层基于 Cordis Loader profile entries，通过 `@deepseek-ai/schemastery` 的 `.volatile()` 声明自动将活跃 entry 的配置投射为设置表单。旧代码调用 `installSection` 会直接抛出 `TypeError` 崩溃。
 2. **缺失 `.volatile()` 声明导致配置卡片静默消失**：在 0.1.7 下，`SettingsForms` 仅识别被 `.volatile()` 修饰的 Config 字段。若 schema 缺少该声明，`SettingsForms.describe()` 将直接跳过该 entry。前端 `src/client/index.ts` 中的 `syncCardSeat()` 依赖 `describeFace.getSnapshot()` 中是否存在 `ns === 'git-worktree'` 来挂载卡片；命名空间缺失时，Plugins 详情页的配置卡片将静默不显示。

@@ -3,7 +3,7 @@
 Status: implemented
 
 > [!NOTE]
-> 未分组区的**渲染**随侧栏遮蔽一并移除，见 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0.1.6-alpha.2.md)。其 host 侧自愈机制保留并扩展：`/exists` 的 `rebuildable` 判定与 `/ensure-directory` 的存放位门控现同时覆盖 legacy 根与各仓库的 `.dsh/gitworktree` 布局。
+> 未分组区的**渲染**随侧栏遮蔽一并移除，见 [DR: 适配宿主 dsh 0.1.6-alpha.2](./2026-09-19-migrate-to-dsh-0-1-6-alpha-2.md)。其 host 侧自愈机制保留并扩展：`/exists` 的 `rebuildable` 判定与 `/ensure-directory` 的存放位门控现同时覆盖 legacy 根与各仓库的 `.dsh/gitworktree` 布局。
 
 ## Problem
 

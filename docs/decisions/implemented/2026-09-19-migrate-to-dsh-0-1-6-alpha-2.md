@@ -6,7 +6,7 @@ Status: implemented
 
 ### 1. 上游 0.1.6-alpha.2 的四处断代
 
-插件此前编译/运行在宿主 dsh `0.1.2-rc.1`（peer/dev 依赖均为 `^0.1.2-rc.1`，见 [DR: 迁移宿主 dsh 0.1.2-rc.1](./2026-09-04-migrate-to-dsh-0.1.2-rc.1.md)）。宿主 `0.1.6-alpha.2`（git tag `dsh-v0.1.6-alpha.2`）其中两处是**静默失效**——不抛错、不阻止启动，只是功能整块消失。
+插件此前编译/运行在宿主 dsh `0.1.2-rc.1`（peer/dev 依赖均为 `^0.1.2-rc.1`，见 [DR: 迁移宿主 dsh 0.1.2-rc.1](./2026-09-04-migrate-to-dsh-0-1-2-rc-1.md)）。宿主 `0.1.6-alpha.2`（git tag `dsh-v0.1.6-alpha.2`）其中两处是**静默失效**——不抛错、不阻止启动，只是功能整块消失。
 
 **① 设置卡片整条链路被替换。** `settings.plugin.item`（keyed，按设置命名空间派发卡片）在 0.1.6-alpha.2 已不存在，全仓库只剩 `packages/client/ui-settings-models/src/client/slot-contract.ts` 的一句注释提到它；声明者 `ui-settings-plugins` 不再声明该 slot。取而代之的是新包 `@deepseek-ai/dsh-client-ui-plugin-manager` 在 `main` 槽下声明的三个 slot：`plugins.item`（list，Official 分组专用）、`plugins.bundle.config`（keyed，键=组合包名）、`plugins.row.config`（keyed，键=`<包名>#<行 id>`），owner props 统一为 `PluginConfigViewProps = { view: 'summary' | 'page' }`，标题/图标/面包屑收归页面。插件在 `src/client/index.ts` 的 `ctx.slots.inject('settings.plugin.item', …)` 因此**永不触发**——存储根、清理记录、工作树管理弹窗全部消失且无任何错误提示。
 
