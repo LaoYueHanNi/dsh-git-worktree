@@ -85,12 +85,12 @@ class FakeCtx {
   /** Namespaces the describe face currently reports as served. */
   servedNamespaces: string[] = ['git-worktree']
   private readonly describeListeners = new Set<() => void>()
-  readonly settingsScope = {
-    bind: <T, >(_spec: { namespace: string }) => this.scope as unknown as {
+  readonly configForms = {
+    get: <T, >(_entryId: string) => this.scope as unknown as {
       getSnapshot(): { status: string; value: T | undefined; user: unknown; writable: boolean }
       subscribe(listener: () => void): () => void
-      set(field: string, value: unknown): Promise<void>
-      unset(field: string): Promise<void>
+      set(field: string, value: unknown): Promise<boolean>
+      unset(field: string): Promise<boolean>
     },
     describe: () => this.describeFace,
   }

@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { CardForm, type SectionValue } from '../src/client/card-form.ts'
 
 /**
- * Scripted settings scope: snapshots the form reads, plus the writes it
+ * Scripted config form: snapshots the form reads, plus the writes it
  * should land. `applyWrites` (default true) makes a write update the user
  * layer exactly as the Host would; turning it off scripts a refusal (the
  * write crossed the wire but nothing stored).
  */
-class FakeScope implements SettingsScope<SectionValue> {
-  private snapshot: SettingsScopeSnapshot<SectionValue>
+class FakeScope implements ConfigForm<SectionValue> {
+  private snapshot: ConfigFormSnapshot<SectionValue>
   private readonly listeners = new Set<() => void>()
   readonly writes: Array<{ op: 'set' | 'unset'; field: string; value: unknown }> = []
   applyWrites = true
 
-  constructor(section: SectionValue = {}, over: Partial<SettingsScopeSnapshot<SectionValue>> = {}) {
+  constructor(section: SectionValue = {}, over: Partial<ConfigFormSnapshot<SectionValue>> = {}) {
     this.snapshot = {
       status: 'ready',
       value: section,
@@ -27,7 +27,7 @@ class FakeScope implements SettingsScope<SectionValue> {
     }
   }
 
-  getSnapshot(): SettingsScopeSnapshot<SectionValue> {
+  getSnapshot(): ConfigFormSnapshot<SectionValue> {
     return this.snapshot
   }
 
@@ -36,18 +36,24 @@ class FakeScope implements SettingsScope<SectionValue> {
     return () => { this.listeners.delete(listener) }
   }
 
-  async set(field: string, value: unknown): Promise<void> {
-    this.writes.push({ op: 'set', field, value })
-    if (this.applyWrites) this.replaceUser({ ...this.userRecord(), [field]: value }, field, value)
+  async mutate(): Promise<boolean> {
+    return true
   }
 
-  async unset(field: string): Promise<void> {
+  async set(field: string, value: unknown): Promise<boolean> {
+    this.writes.push({ op: 'set', field, value })
+    if (this.applyWrites) this.replaceUser({ ...this.userRecord(), [field]: value }, field, value)
+    return true
+  }
+
+  async unset(field: string): Promise<boolean> {
     this.writes.push({ op: 'unset', field, value: undefined })
     if (this.applyWrites) {
       const next = this.userRecord()
       delete next[field]
       this.replaceUser(next, field, undefined, true)
     }
+    return true
   }
 
   private userRecord(): Record<string, unknown> {

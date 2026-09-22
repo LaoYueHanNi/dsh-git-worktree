@@ -24,7 +24,7 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the ui-conversation SlotMap merge (input region entries).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the ui-settings SlotMap merge ('settings.section') and the
-// settingsScope service declaration into this program.
+// configForms service declaration into this program.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the ui-plugin-manager keyed-slot declarations
 // ('plugins.bundle.config' and siblings) into this program. The value face
@@ -79,12 +79,14 @@ const GIT_WORKTREE_NS = 'git-worktree'
 const PLUGIN_PACKAGE = '@laoyuehanni/dsh-git-worktree'
 
 /** Required services: the slot ledger, session/workspace runtimes, the
- * workspace navigation/directory face, copy, and the settings scope backing
+ * workspace navigation/directory face, copy, and the config forms backing
  * the plugin configuration card. */
-export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'locale', 'connection', 'remote', 'settingsScope']
+export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'locale', 'connection', 'remote', 'configForms']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'git-worktree: dictionaries')
+
+  const groupingForm = ctx.configForms.get<SectionValue>(GIT_WORKTREE_NS)
 
   /** The DSH half of one worktree removal, read from the live snapshots: the
    * workspace registration sitting on the directory, whether any of its
@@ -151,7 +153,7 @@ export function apply(ctx: ClientContext): void {
     // updatedAt — running-session directories, the fresh creation, and the
     // current session's directory are excluded from selection outright.
     pruneWorktrees: async (createdPath) => {
-      const section = groupingScope.getSnapshot()
+      const section = groupingForm.getSnapshot()
       if (section.status !== 'ready') return undefined
       if ((section.value?.autoPruneWorktrees ?? false) !== true) return undefined
       const keep = section.value?.keepWorktrees ?? 30
@@ -251,8 +253,6 @@ export function apply(ctx: ClientContext): void {
     inject: chipInjected,
   }, BranchChipDock))
 
-  const groupingScope = ctx.settingsScope.bind<SectionValue>({ namespace: GIT_WORKTREE_NS })
-
   // The Plugins configuration tab dispatches keyed cards for the namespaces
   // the Host serves; the git-worktree host half registers this key, so the
   // storage-root card pairs with it without any upstream change. One bind
@@ -316,7 +316,7 @@ export function apply(ctx: ClientContext): void {
     deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
   })
 
-  const form = new CardForm(groupingScope)
+  const form = new CardForm(groupingForm)
   const store = form.bind()
   // The Plugins page dispatches a bundle's own configuration by the bundle's
   // PACKAGE NAME (this package — see cordis.patch.yml), rendered on the
@@ -325,7 +325,7 @@ export function apply(ctx: ClientContext): void {
   // describe face: a deployment whose Host half is not composed (the
   // `git-worktree` namespace unserved) shows no trace of the card, and a
   // late-arriving Host registration still picks it up.
-  const describeFace = ctx.settingsScope.describe()
+  const describeFace = ctx.configForms.describe()
   let configDisposer: (() => void) | undefined
   const syncCardSeat = (): void => {
     const snapshot = describeFace.getSnapshot()

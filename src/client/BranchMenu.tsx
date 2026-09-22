@@ -94,18 +94,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  IconBranchOutline16,
-  IconCheckOutline16,
-  IconChevronDownOutline14,
-  IconChevronRightOutline14,
-  IconChevronUpOutline14,
-  IconCopyOutline16,
-  IconEditOutline16,
-  IconGoalOutline16,
-  IconPlusOutline16,
-  IconProjectAddOutline16,
-  IconRightUpOutline16,
-  IconTrashOutline16,
+  IconBranchOutlineRegular,
+  IconCheckOutlineRegular,
+  IconChevronDownOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconChevronUpOutlineRegular,
+  IconCopyOutlineRegular,
+  IconEditOutlineRegular,
+  IconGoalOutlineRegular,
+  IconPlusOutlineRegular,
+  IconProjectAddOutlineRegular,
+  IconRightUpOutlineRegular,
+  IconTrashOutlineRegular,
   Toast,
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -1191,7 +1191,7 @@ export function BranchMenu({
       onToggle === undefined
         ? (
           <div className={cls} role="presentation" style={{ paddingLeft: 8 }}>
-            <IconChevronDownOutline14 size={12} className={css.menuGroupChevron} />
+            <IconChevronDownOutlineRegular size={12} className={css.menuGroupChevron} />
             <span className={css.menuGroupLabel}>{label}</span>
             <span className={css.menuGroupCount}>({count})</span>
           </div>
@@ -1207,7 +1207,7 @@ export function BranchMenu({
               armShiftGuard()
             }}
           >
-            <IconChevronRightOutline14
+            <IconChevronRightOutlineRegular
               size={12}
               className={open ? `${css.menuGroupChevron} ${css.menuGroupChevronOpen}` : css.menuGroupChevron}
             />
@@ -1242,7 +1242,7 @@ export function BranchMenu({
           armShiftGuard()
         }}
       >
-        <IconChevronRightOutline14
+        <IconChevronRightOutlineRegular
           size={12}
           className={isOpen ? `${css.menuGroupChevron} ${css.menuGroupChevronOpen}` : css.menuGroupChevron}
         />
@@ -1273,7 +1273,7 @@ export function BranchMenu({
     >
       <span className={css.menuRowLabel}>{label}</span>
       {renderArrows(node.leaf)}
-      {node.path === currentBranch && <IconCheckOutline16 size={14} />}
+      {node.path === currentBranch && <IconCheckOutlineRegular size={14} />}
     </button>
   )
 
@@ -1299,7 +1299,7 @@ export function BranchMenu({
     >
       <span className={css.menuRowLabel}>{row.name}</span>
       {renderArrows(row)}
-      {row.name === currentBranch && <IconCheckOutline16 size={14} />}
+      {row.name === currentBranch && <IconCheckOutlineRegular size={14} />}
     </button>
   )
 
@@ -1368,7 +1368,7 @@ export function BranchMenu({
           >
             <span className={css.menuRowLabel}>{renderLabel(node.segment)}</span>
             {renderArrows(node.leaf)}
-            {node.path === currentBranch && <IconCheckOutline16 size={14} />}
+            {node.path === currentBranch && <IconCheckOutlineRegular size={14} />}
           </button>,
         )
       }
@@ -1381,7 +1381,7 @@ export function BranchMenu({
             data-group={node.path}
             style={{ paddingLeft: 8 + depth * 12 }}
           >
-            <IconChevronDownOutline14 size={12} className={css.menuGroupChevron} />
+            <IconChevronDownOutlineRegular size={12} className={css.menuGroupChevron} />
             <span className={css.menuGroupLabel}>{renderLabel(node.segment)}</span>
             <span className={css.menuGroupCount}>({node.total})</span>
           </div>,
@@ -1451,7 +1451,7 @@ export function BranchMenu({
         ctxItems.push({
           id: 'hop',
           label: t('ctxHop'),
-          icon: <IconRightUpOutline16 size={14} />,
+          icon: <IconRightUpOutlineRegular size={14} />,
           run: () => {
             markPoint()
             setCtx(null)
@@ -1463,7 +1463,7 @@ export function BranchMenu({
       ctxItems.push({
         id: 'copy',
         label: t('ctxCopyPath'),
-        icon: <IconCopyOutline16 size={14} />,
+        icon: <IconCopyOutlineRegular size={14} />,
         run: () => {
           setCtx(null)
           const text = row?.path !== undefined ? row.path : name
@@ -1482,7 +1482,7 @@ export function BranchMenu({
         ctxItems.push({
           id: 'remove-worktree',
           label: t('worktreeRemove.menu'),
-          icon: <IconTrashOutline16 size={14} />,
+          icon: <IconTrashOutlineRegular size={14} />,
           ...blocked ? { disabled: true, title: t('manager.running') } : {},
           run: () => {
             confirmRef.current?.onCancel()
@@ -1498,7 +1498,7 @@ export function BranchMenu({
         ctxItems.push({
           id: 'checkout',
           label: t('ctxCheckout'),
-          icon: <IconBranchOutline16 size={14} />,
+          icon: <IconBranchOutlineRegular size={14} />,
           run: () => {
             markPoint()
             setCtx(null)
@@ -1511,13 +1511,13 @@ export function BranchMenu({
         ctxItems.push({
           id: 'create',
           label: t('ctxCreate'),
-          icon: <IconPlusOutline16 size={14} />,
+          icon: <IconPlusOutlineRegular size={14} />,
           run: () => { openCreate(false) },
         })
         ctxItems.push({
           id: 'create-checkout',
           label: t('ctxCreateCheckout'),
-          icon: <IconBranchOutline16 size={14} />,
+          icon: <IconBranchOutlineRegular size={14} />,
           run: () => { openCreate(true) },
         })
       }
@@ -1536,7 +1536,7 @@ export function BranchMenu({
           ctxItems.push({
             id: 'worktree',
             label: t('ctxWorktree'),
-            icon: <IconProjectAddOutline16 size={14} />,
+            icon: <IconProjectAddOutlineRegular size={14} />,
             run: () => {
               markPoint()
               setCtx(null)
@@ -1549,7 +1549,7 @@ export function BranchMenu({
         ctxItems.push({
           id: 'worktree-cut',
           label: t('ctxWorktreeCut'),
-          icon: <IconBranchOutline16 size={14} />,
+          icon: <IconBranchOutlineRegular size={14} />,
           run: () => {
             markPoint()
             setCtx(null)
@@ -1563,7 +1563,7 @@ export function BranchMenu({
           ctxItems.push({
             id: 'rename',
             label: t('ctxRename'),
-            icon: <IconEditOutline16 size={14} />,
+            icon: <IconEditOutlineRegular size={14} />,
             run: () => {
               confirmRef.current?.onCancel()
               markPoint()
@@ -1585,7 +1585,7 @@ export function BranchMenu({
             ctxItems.push({
               id: 'delete',
               label: t('ctxDelete'),
-              icon: <IconTrashOutline16 size={14} />,
+              icon: <IconTrashOutlineRegular size={14} />,
               run: () => {
                 confirmRef.current?.onCancel()
                 markPoint()
@@ -1600,7 +1600,7 @@ export function BranchMenu({
       ctxItems.push({
         id: 'copy',
         label: t('ctxCopyName'),
-        icon: <IconCopyOutline16 size={14} />,
+        icon: <IconCopyOutlineRegular size={14} />,
         run: () => {
           setCtx(null)
           void writeClipboard(name).then(ok => { if (ok) setCopiedSeq(Date.now()) })
@@ -1672,7 +1672,7 @@ export function BranchMenu({
               aria-label={t('menuLocate')}
               onClick={locateCurrent}
             >
-              <IconGoalOutline16 size={16} />
+              <IconGoalOutlineRegular size={16} />
             </button>
             <button
               type="button"
@@ -1720,7 +1720,7 @@ export function BranchMenu({
               disabled={rows.length === 0 || needle !== ''}
               onClick={toggleAll}
             >
-              {allExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
+              {allExpanded ? <IconChevronUpOutlineRegular size={14} /> : <IconChevronDownOutlineRegular size={14} />}
             </button>
           </div>
           <div className={css.menuMain}>

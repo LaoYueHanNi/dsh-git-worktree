@@ -63,7 +63,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Button, IconBranchOutline16, Toast,
+  Button, IconBranchOutlineRegular, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: merges SessionStandardProps / GlobalStandardProps (`sessionId`,
@@ -866,7 +866,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
             if (opening && !busyRef.current) void refresh()
           }}
         >
-          <IconBranchOutline16 size={12} />
+          <IconBranchOutlineRegular size={12} />
           <span className={css.branch}>{displayBranch(facts.currentBranch)}</span>
         </button>
       </span>

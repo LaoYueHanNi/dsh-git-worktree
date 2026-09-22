@@ -1,38 +1,25 @@
 /**
- * dsh-git-worktree host half. Owns the worktree storage-root settings section
- * (the `git-worktree` namespace in the dsh settings document, registered
- * through SettingsProvider.installSection with the composition entry as its
- * base layer) and — while a webServer service exists — the HTTP routes the browser
- * half fetches. A stored root edit takes effect live: the routes read the
- * section source per request, so no restart and no route re-registration.
- *
- * The legacy ~/.dsh/git-worktree/settings.json value migrates into the
- * namespace once, when a settings service first attaches and the user layer
- * has recorded no choice of its own; the renamed file stays behind as a
- * backup. Headless profiles lose only the routes: nothing else in the plugin
- * has a browser dependency.
+ * dsh-git-worktree host half. Exposes volatile configuration fields projected
+ * through the settings service (the `git-worktree` profile entry in the active
+ * dsh profile) and — while a webServer service exists — the HTTP routes the
+ * browser half fetches. Config edits persist into the profile patch and take
+ * effect live via the loader.
  */
 
 import { homedir } from 'node:os'
-import { rename } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 // Type-only: pulls the webServer Context declaration merge into this program.
 import type {} from '@deepseek-ai/dsh-host-webserver'
-// Type-only: pulls the settings Context declaration merge (`ctx.settings`) —
-// host 0.1.2 moved section installation onto the provider itself
-// (`SettingsProvider.installSection`); the free `installSettingsSection` /
-// `settingsNamespace` helpers of 0.1.1 are gone.
+// Type-only: pulls the settings Context declaration merge (`ctx.settings`).
 import type {} from '@deepseek-ai/dsh-settings'
 import { childProcessExec } from './git.js'
 import {
   handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
   type RouteDeps, type RouteOutcome,
 } from './routes.js'
-import {
-  loadLegacySettings, migratedFileOf, planLegacyMigration, settingsFileOf, validateRootDir,
-} from './settings.js'
+import { validateRootDir } from './settings.js'
 import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
 export const name = 'dsh-git-worktree'
@@ -42,40 +29,47 @@ export const inject = []
 /** Largest accepted request body (bytes) — these payloads are a few strings. */
 const BODY_LIMIT = 64 * 1024
 
+function readVolatile<T>(value: Volatile<T> | T | undefined): T | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'object' && value !== null && 'get' in value && typeof (value as { get: unknown }).get === 'function') {
+    return (value as Volatile<T>).get() as T
+  }
+  return value as T
+}
+
 export interface Config {
   /** Worktree storage root; defaults to `$DSH_HOME/gitworktree` (`~/.dsh/gitworktree`). */
-  rootDir?: string
+  rootDir?: Volatile<string | undefined> | string
   /** Sidebar git grouping on/off; absent = on (the composition-entry layer's default). */
-  groupSidebar?: boolean
+  groupSidebar?: Volatile<boolean> | boolean
   /** Fetch every remote before creating a worktree; absent = off. A failed
    * fetch never blocks the creation (see the /worktree route). */
-  fetchBeforeCreate?: boolean
+  fetchBeforeCreate?: Volatile<boolean> | boolean
   /** Prune stale worktrees lazily after each creation; absent = off. */
-  autoPruneWorktrees?: boolean
+  autoPruneWorktrees?: Volatile<boolean> | boolean
   /** Global cap the lazy prune trims down to (valid git worktrees only);
    * absent = 30. */
-  keepWorktrees?: number
+  keepWorktrees?: Volatile<number> | number
   /** Post-create configuration files to copy when .worktreeinclude is absent;
    * absent = none. */
-  postCreateCopyFiles?: string[]
+  postCreateCopyFiles?: Volatile<string[]> | string[]
 }
+
+/** The shipped prune cap (whole storage root, valid git worktrees only). */
+export const KEEP_WORKTREES_DEFAULT = 30
 
 /**
  * Cordis resolves the composition entry's config through this schema before
- * `apply` runs (official plugin-config convention: export the `Config` type
- * and a same-named Schemastery schema). It fills the `groupSidebar` default;
- * `rootDir` passes through untouched — its absence stays observable so the
- * settings section keeps spelling the resolved default. Constraints the
- * schema cannot express still fail loudly in validateConfig below (absolute
- * path; unknown keys — schemastery keeps extras instead of rejecting them).
+ * `apply` runs. In dsh 0.1.7+, fields marked with `.volatile()` are projected
+ * by the settings service into live configuration forms.
  */
-export const Config: z<Config> = z.object({
-  rootDir: z.string(),
-  groupSidebar: z.boolean().default(true),
-  fetchBeforeCreate: z.boolean().default(false),
-  autoPruneWorktrees: z.boolean().default(false),
-  keepWorktrees: z.number(),
-  postCreateCopyFiles: z.array(z.string()),
+export const Config = z.object({
+  rootDir: z.string().volatile(),
+  groupSidebar: z.boolean().default(true).volatile(),
+  fetchBeforeCreate: z.boolean().default(false).volatile(),
+  autoPruneWorktrees: z.boolean().default(false).volatile(),
+  keepWorktrees: z.number().default(KEEP_WORKTREES_DEFAULT).volatile(),
+  postCreateCopyFiles: z.array(z.string()).default([]).volatile(),
 })
 
 /** Reject stale or misspelled config keys before defaults can hide them. */
@@ -85,25 +79,30 @@ export function validateConfig(config: Config): void {
   if (unknown !== undefined) {
     throw new Error(`GitWorktreeConfig: unknown key "${unknown}"`)
   }
-  if (config.rootDir !== undefined && (typeof config.rootDir !== 'string' || config.rootDir.length === 0)) {
+  const root = readVolatile(config.rootDir)
+  if (root !== undefined && (typeof root !== 'string' || root.length === 0)) {
     throw new Error('GitWorktreeConfig: "rootDir" must be a non-empty string')
   }
-  if (config.groupSidebar !== undefined && typeof config.groupSidebar !== 'boolean') {
+  const groupSidebar = readVolatile(config.groupSidebar)
+  if (groupSidebar !== undefined && typeof groupSidebar !== 'boolean') {
     throw new Error('GitWorktreeConfig: "groupSidebar" must be a boolean')
   }
-  if (config.fetchBeforeCreate !== undefined && typeof config.fetchBeforeCreate !== 'boolean') {
+  const fetchBeforeCreate = readVolatile(config.fetchBeforeCreate)
+  if (fetchBeforeCreate !== undefined && typeof fetchBeforeCreate !== 'boolean') {
     throw new Error('GitWorktreeConfig: "fetchBeforeCreate" must be a boolean')
   }
-  if (config.autoPruneWorktrees !== undefined && typeof config.autoPruneWorktrees !== 'boolean') {
+  const autoPruneWorktrees = readVolatile(config.autoPruneWorktrees)
+  if (autoPruneWorktrees !== undefined && typeof autoPruneWorktrees !== 'boolean') {
     throw new Error('GitWorktreeConfig: "autoPruneWorktrees" must be a boolean')
   }
-  if (config.postCreateCopyFiles !== undefined) {
-    if (!Array.isArray(config.postCreateCopyFiles) || !config.postCreateCopyFiles.every(item => typeof item === 'string')) {
+  const postCreateCopyFiles = readVolatile(config.postCreateCopyFiles)
+  if (postCreateCopyFiles !== undefined) {
+    if (!Array.isArray(postCreateCopyFiles) || !postCreateCopyFiles.every(item => typeof item === 'string')) {
       throw new Error('GitWorktreeConfig: "postCreateCopyFiles" must be an array of strings')
     }
   }
-  validateKeepWorktrees(config.keepWorktrees)
-  validateRootDir(config.rootDir)
+  validateKeepWorktrees(readVolatile(config.keepWorktrees))
+  validateRootDir(root)
 }
 
 /**
@@ -139,114 +138,54 @@ export interface SectionConfig {
   postCreateCopyFiles?: string[]
 }
 
-/** Schema resolving the `git-worktree` settings section. */
-export const sectionSchema: z<SectionConfig> = z.object({
-  rootDir: z.string(),
-  groupSidebar: z.boolean(),
-  fetchBeforeCreate: z.boolean(),
-  autoPruneWorktrees: z.boolean(),
-  keepWorktrees: z.number(),
-  postCreateCopyFiles: z.array(z.string()),
-})
-
-/** The shipped prune cap (whole storage root, valid git worktrees only). */
-export const KEEP_WORKTREES_DEFAULT = 30
 
 /** The section-shaped view of a config: absent keys stay absent
  * (`exactOptionalPropertyTypes`) except the switches, which spell their
  * shipped defaults so a user-layer unset can always fall back to them. */
 export function sectionOf(config: Config): SectionConfig {
+  const rootDir = readVolatile(config.rootDir)
+  const postCreateCopyFiles = readVolatile(config.postCreateCopyFiles)
+  const groupSidebar = readVolatile(config.groupSidebar)
+  const fetchBeforeCreate = readVolatile(config.fetchBeforeCreate)
+  const autoPruneWorktrees = readVolatile(config.autoPruneWorktrees)
+  const keepWorktrees = readVolatile(config.keepWorktrees)
   return {
-    ...(config.rootDir === undefined ? {} : { rootDir: config.rootDir }),
-    ...(config.postCreateCopyFiles === undefined ? {} : { postCreateCopyFiles: config.postCreateCopyFiles }),
+    ...(rootDir === undefined ? {} : { rootDir }),
+    ...(postCreateCopyFiles === undefined ? {} : { postCreateCopyFiles }),
     // The composition layer spells the shipped defaults so a user-layer
     // unset can always fall back to them.
-    groupSidebar: config.groupSidebar ?? true,
-    fetchBeforeCreate: config.fetchBeforeCreate ?? false,
-    autoPruneWorktrees: config.autoPruneWorktrees ?? false,
-    keepWorktrees: config.keepWorktrees ?? KEEP_WORKTREES_DEFAULT,
+    groupSidebar: groupSidebar ?? true,
+    fetchBeforeCreate: fetchBeforeCreate ?? false,
+    autoPruneWorktrees: autoPruneWorktrees ?? false,
+    keepWorktrees: keepWorktrees ?? KEEP_WORKTREES_DEFAULT,
   }
 }
 
 /**
- * Plugin apply: install the settings section, migrate any legacy stored root
- * into it, then mount routes on any webServer that comes and goes.
+ * Plugin apply: mount the settings presentation policy and HTTP routes on any
+ * webServer that comes and goes.
  * @param ctx - host cordis context.
- * @param config - the composition entry config (the section's base layer).
+ * @param config - the composition entry config.
  */
 export function apply(ctx: Context, config: Config = {}): void {
   validateConfig(config)
-  // The section source: the composition entry until a settings service
-  // attaches, then `setSource` repoints it at the resolved settings scope.
-  // A thunk, not a snapshot — reads see the current resolution at call time,
-  // so the routes follow a stored edit without re-registering anything.
-  let sectionSource: () => SectionConfig = () => sectionOf(config)
+
+  const currentConfig = (): Config => (ctx.fiber?.config as Config | undefined) ?? config
 
   const deps = (): RouteDeps => ({
     exec: childProcessExec,
-    sectionRootDir: () => sectionSource().rootDir,
-    sectionFetchBeforeCreate: () => sectionSource().fetchBeforeCreate,
-    sectionPostCreateCopyFiles: () => sectionSource().postCreateCopyFiles,
+    sectionRootDir: () => readVolatile(currentConfig().rootDir),
+    sectionFetchBeforeCreate: () => readVolatile(currentConfig().fetchBeforeCreate),
+    sectionPostCreateCopyFiles: () => readVolatile(currentConfig().postCreateCopyFiles),
     home: () => homedir(),
     envHome: () => process.env.DSH_HOME,
   })
 
-  // Host 0.1.2 hosts section installation on the provider itself: the same
-  // composition-entry base, validate, setSource, and onChange hooks ride
-  // `SettingsProvider.installSection`, reached through a settings injection.
-  // The registration is an effect on this plugin's fiber either way, so a
-  // late-attaching settings service is handled by the injection itself.
+  // In dsh 0.1.7+, the settings service projects volatile Config fields into forms.
+  // We configure auto: false to inform the host that this plugin provides its own
+  // dedicated configuration card (via `plugins.bundle.config`).
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, GIT_WORKTREE_NS, sectionSchema, sectionOf(config), {
-      validate: value => {
-        validateRootDir(value.rootDir)
-        if (value.groupSidebar !== undefined && typeof value.groupSidebar !== 'boolean') {
-          throw new Error('groupSidebar must be a boolean')
-        }
-        if (value.fetchBeforeCreate !== undefined && typeof value.fetchBeforeCreate !== 'boolean') {
-          throw new Error('fetchBeforeCreate must be a boolean')
-        }
-        if (value.autoPruneWorktrees !== undefined && typeof value.autoPruneWorktrees !== 'boolean') {
-          throw new Error('autoPruneWorktrees must be a boolean')
-        }
-        if (value.postCreateCopyFiles !== undefined) {
-          if (!Array.isArray(value.postCreateCopyFiles) || !value.postCreateCopyFiles.every(item => typeof item === 'string')) {
-            throw new Error('postCreateCopyFiles must be an array of strings')
-          }
-        }
-        validateKeepWorktrees(value.keepWorktrees)
-      },
-      setSource: (source) => { sectionSource = source },
-      onChange: () => {
-        // The storage root takes effect live: the routes read the section
-        // source per request, so a committed edit needs no action here.
-      },
-    })
-  })
-
-  // One-shot legacy migration: the pre-0.3 plugin persisted its own
-  // ~/.dsh/git-work-tree/settings.json. Registered after installSection
-  // so the namespace is on the ledger by the time this fiber runs; a failure
-  // (or a user layer that already chose) leaves both documents exactly as
-  // they are, and the next startup retries.
-  ctx.inject(['settings'], (sctx) => {
-    const file = settingsFileOf(homedir())
-    void (async () => {
-      const legacy = await loadLegacySettings(file)
-      const descriptor = sctx.settings.describe().find(d => d.ns === GIT_WORKTREE_NS)
-      if (descriptor === undefined) return
-      const user = descriptor.user
-      const userLayer = typeof user === 'object' && user !== null ? user as Record<string, unknown> : undefined
-      const planned = planLegacyMigration(legacy, userLayer)
-      if (planned === undefined) return
-      try {
-        await sctx.settings.update(GIT_WORKTREE_NS, { rootDir: planned })
-        await rename(file, migratedFileOf(file))
-        console.log(`[git-worktree] legacy settings migrated to the settings document (${planned})`)
-      } catch (error) {
-        console.warn('[git-worktree] legacy settings migration failed:', error instanceof Error ? error.message : String(error))
-      }
-    })()
+    settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber), 'git-worktree: settings presentation policy')
   })
 
   ctx.inject(['webServer'], (webCtx) => {

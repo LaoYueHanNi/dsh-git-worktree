@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Button, IconFolderClose16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconFolderCloseRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './relative-time.ts'
@@ -270,7 +270,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
               {groupScanEntries(scan.entries).map(group => (
                 <div key={`${group.source}:${group.repoName ?? '<orphans>'}`} className={css.group}>
                   <div className={css.groupHead} role="presentation">
-                    <span className={css.groupIcon} aria-hidden="true"><IconFolderClose16 size={13} /></span>
+                    <span className={css.groupIcon} aria-hidden="true"><IconFolderCloseRegular size={13} /></span>
                     <span className={css.groupName}>{group.repoName ?? t('manager.orphans')}</span>
                     {group.repoName !== null && (
                       <span className={css.groupSource}>

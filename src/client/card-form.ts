@@ -17,7 +17,7 @@
  * @module git-worktree/client/card-form
  */
 
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 /** The fields this card edits. */
 export const ROOT_FIELD = 'rootDir'
@@ -124,9 +124,9 @@ export class CardForm {
   private switchFailed: SwitchField | null = null
 
   /**
-   * @param scope - the bound settings scope for the `git-worktree` namespace.
+   * @param scope - the bound configuration form for the `git-worktree` namespace.
    */
-  constructor(private readonly scope: SettingsScope<SectionValue>) {
+  constructor(private readonly scope: ConfigForm<SectionValue>) {
     this.snapshotValue = this.project()
     scope.subscribe(() => { this.publish() })
   }
