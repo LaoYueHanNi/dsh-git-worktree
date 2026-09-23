@@ -143,8 +143,20 @@ function isDirBusyGitError(error: GitError): boolean {
  * @param gitDir - the SHARED git dir (`--git-common-dir`) every worktree
  * resolves back to.
  */
+/**
+ * Whether two paths refer to the same directory on disk, accounting for
+ * trailing slashes, slash directions, and Windows case-insensitivity.
+ */
+function isSamePath(a: string, b: string): boolean {
+  const normA = normalize(resolve(a))
+  const normB = normalize(resolve(b))
+  return process.platform === 'win32'
+    ? normA.toLowerCase() === normB.toLowerCase()
+    : normA === normB
+}
+
 function isMainWorktree(toplevel: string, gitDir: string): boolean {
-  return normalize(resolve(toplevel, '.git')) === gitDir
+  return isSamePath(resolve(toplevel, '.git'), gitDir)
 }
 
 /**
@@ -659,6 +671,9 @@ export async function probeWorkspaceGit(exec: Exec, path: string): Promise<Works
   const branchName = lines[2] ?? ''
   if (top === '' || commonDir === '') return undefined
   const toplevel = normalize(top)
+  // A directory whose git toplevel is an ancestor is an ordinary subdirectory,
+  // not an independent worktree or repository root.
+  if (!isSamePath(toplevel, path)) return undefined
   // Git outputs carry forward slashes on Windows — normalize every derived
   // path so consumers can compare against join()-built ones.
   const gitDir = normalize(resolve(path, commonDir))

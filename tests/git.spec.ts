@@ -453,6 +453,13 @@ describe('probeWorkspaceGit', () => {
     ])
     expect(await probeWorkspaceGit(exec, REPO)).toBeUndefined()
   })
+
+  it('answers undefined when git traversed up to an ancestor repository', async () => {
+    const exec = scripted([
+      { args: COMBINED, out: { stdout: `${slashes(REPO)}\n.git\nmain\n` } },
+    ])
+    expect(await probeWorkspaceGit(exec, resolve(REPO, 'subfolder'))).toBeUndefined()
+  })
 })
 
 describe('inspectWorktree', () => {
