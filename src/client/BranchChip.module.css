@@ -57,8 +57,8 @@
 
 /* Confirm flyout: the second-level panel opening right of the branch
  * card (the base Menu's submenu posture: r20, elevation-prominent
- * hairline, --dsw-specific-menu — host 0.1.2 Menu card; hosts without
- * the token fall back to the old r12-era shadow-lv3). Width is content-driven — it follows
+ * hairline, --dsw-specific-menu with --dsw-menu-backdrop-filter — host 0.1.2 Menu card;
+ * hosts without the token fall back to the old r12-era shadow-lv3). Width is content-driven — it follows
  * the longest line (for remote picks that is the subject line's branch
  * name) — floored at 168px (the Cancel/Confirm pair plus padding: short
  * branch names must not squeeze the buttons into wrapping "切换中…"
@@ -76,6 +76,8 @@
   border: 0;
   border-radius: 20px;
   background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   /* Elevation-prominent carries the hairline stroke; the lv3 fallback
    * keeps a shadow where the token does not exist. */
   box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
@@ -166,8 +168,9 @@
 
 /* ── Branch picker popup (BranchMenu) ──────────────────────────────
  * Upward-opening card pinned above the chip, in the Menu's card chrome
- * (r12, inverted hairline, shadow-lv3, --dsw-specific-menu — same family
- * as .popCard). Three owner requirements shape the geometry:
+ * (r20, elevation-prominent hairline, --dsw-specific-menu with
+ * --dsw-menu-backdrop-filter — host Menu/PermissionSelect card;
+ * hosts without the token fall back to shadow-lv3). Three owner requirements shape the geometry:
  *
  *   1. height cap: min(420px, 60vh) on the card, only the rows area
  *      scrolls (.menuRows) — heading and search stay pinned;
@@ -201,9 +204,13 @@
   border: 0;
   border-radius: 20px;
   background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   /* Same elevation card as .popCard (host 0.1.2 Menu); lv3 fallback
    * for hosts without the token. */
   box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 /* Left tool strip (IDEA branch-panel posture at popup scale): a narrow
@@ -532,8 +539,8 @@
 }
 
 /* ── Row context menu (BranchMenu right-click) ─────────────────────
- * Cursor-anchored transient over the branch card: the same card chrome
- * family as .popCard (--dsw-specific-menu, elevation-prominent hairline,
+ * Cursor-anchored transient over the branch card: translucent menu chrome
+ * (--dsw-specific-menu with --dsw-menu-backdrop-filter, elevation-prominent hairline,
  * lv3 fallback) at a smaller radius — r20 would round a launcher this
  * short into a pill, r12 keeps the corners proportionate to a handful of
  * rows (two on a worktree row, up to six plus a header on a branch row).
@@ -553,6 +560,8 @@
   border: 0;
   border-radius: 12px;
   background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
   display: flex;
   flex-direction: column;
