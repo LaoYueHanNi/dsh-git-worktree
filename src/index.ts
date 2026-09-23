@@ -63,7 +63,7 @@ export const KEEP_WORKTREES_DEFAULT = 30
  * `apply` runs. In dsh 0.1.7+, fields marked with `.volatile()` are projected
  * by the settings service into live configuration forms.
  */
-export const Config = z.object({
+export const Config: z = z.object({
   rootDir: z.string().volatile(),
   groupSidebar: z.boolean().default(true).volatile(),
   fetchBeforeCreate: z.boolean().default(false).volatile(),
