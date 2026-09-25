@@ -2,7 +2,7 @@
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-![dsh-git-worktree in the Web UI](gitworktree.png)
+![dsh-git-worktree in the Web UI](docs/images/gitworktree.png)
 
 [简体中文](./README.zh.md) | English
 
