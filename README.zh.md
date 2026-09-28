@@ -47,7 +47,7 @@
 dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 ```
 
-> 包声明了 `dsh.bundle`，`add` 会自动把插件挂进 profile 的层栈，无需手动改配置。需要 `web` profile（`dsh web`）以及 dsh **0.1.6-alpha.2**（或更新）宿主。
+> 包声明了 `dsh.bundle`，`add` 会自动把插件挂进 profile 的层栈，无需手动改配置。需要 `web` profile（`dsh web`）以及 dsh **0.1.7-rc.1**（或更新）宿主。
 
 运行 dsh **0.1.2 alpha** 宿主？请改装专用兼容版本：
 
@@ -55,7 +55,7 @@ dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 dsh plugin --profile web add @laoyuehanni/dsh-git-worktree@dsh-alpha
 ```
 
-> `@dsh-alpha` 是 dist-tag，解析为最新的 alpha 宿主兼容构建（当前 `0.4.3-dsh-0.1.2-alpha.5`），peer 锁定 alpha 线——普通 `update` 不会把两条通道混装。已在 0.1.2-rc.1 或更新宿主上，请用上面的默认线。
+> `@dsh-alpha` 是 dist-tag，解析为最新的 alpha 宿主兼容构建（当前 `0.4.3-dsh-0.1.2-alpha.5`），peer 锁定 alpha 线——普通 `update` 不会把两条通道混装。已在 0.1.7-rc.1 或更新宿主上，请用上面的默认线。
 
 ## 更新
 
