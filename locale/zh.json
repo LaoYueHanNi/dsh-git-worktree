@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "dsh git 工作树",
+    "description": "支持分支操作与工作树功能的dsh插件"
+  }
+}
