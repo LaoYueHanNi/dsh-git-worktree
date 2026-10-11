@@ -93,6 +93,7 @@ export type GitWorktreeKey =
   | 'manager.orphans'
   | 'manager.sourceProject'
   | 'manager.sourceLegacy'
+  | 'manager.sourceAgent'
   | 'manager.activityNever'
   | 'manager.dirty.one'
   | 'manager.dirty.other'
@@ -219,6 +220,7 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.orphans': 'Unrecognized directories',
   'manager.sourceProject': 'in project',
   'manager.sourceLegacy': 'legacy location',
+  'manager.sourceAgent': 'agent',
   'manager.activityNever': 'no sessions',
   'manager.dirty.one': '{n} uncommitted file',
   'manager.dirty.other': '{n} uncommitted files',
@@ -346,6 +348,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.orphans': '无法识别的目录',
   'manager.sourceProject': '项目内',
   'manager.sourceLegacy': '历史位置',
+  'manager.sourceAgent': 'Agent',
   'manager.activityNever': '无会话',
   'manager.dirty.one': '{n} 个未提交文件',
   'manager.dirty.other': '{n} 个未提交文件',

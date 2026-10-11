@@ -362,8 +362,9 @@ export interface WorktreeScanEntry {
   branch: string | null
   /** Where the directory lives: `project` = inside `<repo>/.dsh/gitworktree`
    * (the current layout, auto-nested under its repository by the workspace
-   * tree), `legacy` = inside the historical central storage root. */
-  source: 'legacy' | 'project'
+   * tree), `agent` = inside `<repo>/.agents/worktrees` (created by the host's
+   * experimental agent tool), `legacy` = inside the historical central storage root. */
+  source: 'legacy' | 'project' | 'agent'
 }
 
 /** POST worktrees-all response body — one entry per DIRECT child of each

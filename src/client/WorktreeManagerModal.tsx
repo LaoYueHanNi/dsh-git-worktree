@@ -274,7 +274,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
                     <span className={css.groupName}>{group.repoName ?? t('manager.orphans')}</span>
                     {group.repoName !== null && (
                       <span className={css.groupSource}>
-                        {t(group.source === 'legacy' ? 'manager.sourceLegacy' : 'manager.sourceProject')}
+                        {t(group.source === 'legacy' ? 'manager.sourceLegacy' : group.source === 'agent' ? 'manager.sourceAgent' : 'manager.sourceProject')}
                       </span>
                     )}
                     {group.repoName !== null && (

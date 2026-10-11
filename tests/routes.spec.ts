@@ -1176,6 +1176,8 @@ describe('handleWorktreesAll', () => {
     const repoB = resolve('/code/repo-b')
     const layoutA = join(repoA, '.dsh', 'gitworktree')
     const layoutB = join(repoB, '.dsh', 'gitworktree')
+    const agentLayoutA = join(repoA, '.agents', 'worktrees')
+    const agentLayoutB = join(repoB, '.agents', 'worktrees')
     const wtA = join(layoutA, 'feat-x')
     const legacyWt = join(ROOT, 'repo-a-main')
     // One probe executor for both halves: registered workspaces answer the
@@ -1199,6 +1201,8 @@ describe('handleWorktreesAll', () => {
         if (path === ROOT) return ['repo-a-main']
         if (path === layoutA) return ['feat-x']
         if (path === layoutB) return []
+        if (path === agentLayoutA) return []
+        if (path === agentLayoutB) return []
         throw new Error(`unexpected listDir: ${path}`)
       },
     }), { workspaces: ['/code/repo-a', '/code/repo-a/src', '/code/repo-b', '/docs/plain'] })
@@ -1209,6 +1213,34 @@ describe('handleWorktreesAll', () => {
       { path: wtA, repoName: 'feat-x', branch: 'feat/x', source: 'project' },
     ])
     expect(outcome.body.legacyRoot).toBe(ROOT)
+  })
+
+  it('scans agent worktrees under .agents/worktrees and tags source as agent', async () => {
+    const repoA = resolve('/code/repo-a')
+    const layoutA = join(repoA, '.dsh', 'gitworktree')
+    const agentLayoutA = join(repoA, '.agents', 'worktrees')
+    const wtAgent = join(agentLayoutA, 'agent-task-1')
+    const childProbe = perDir({ [wtAgent]: { branch: 'agent/task-1' } })
+    const exec: Exec = async (file, args, options) => {
+      if (options.cwd === '/code/repo-a') {
+        return { code: 0, stdout: `/code/repo-a\n${join(repoA, '.git')}\nmain\n`, stderr: '' }
+      }
+      return childProbe(file, args, options)
+    }
+    const outcome = await handleWorktreesAll(deps({
+      exec,
+      listDir: async (path: string) => {
+        if (path === ROOT) return []
+        if (path === layoutA) return []
+        if (path === agentLayoutA) return ['agent-task-1']
+        throw new Error(`unexpected listDir: ${path}`)
+      },
+    }), { workspaces: ['/code/repo-a'] })
+    expect(outcome.status).toBe(200)
+    if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
+    expect(outcome.body.worktrees).toEqual([
+      { path: wtAgent, repoName: 'agent-task-1', branch: 'agent/task-1', source: 'agent' },
+    ])
   })
 
   it('keeps one throwing child from sinking its batch (degrades to null facts)', async () => {
@@ -1297,6 +1329,28 @@ describe('handlePurgeDirectory', () => {
     const outcome = await handlePurgeDirectory(
       deps({ statDirectory: async () => true, rmRecursive, dirExists: () => false }),
       { path: join(resolve('/code/rogue'), '.dsh', 'gitworktree', 'x') },
+    )
+    expect(outcome.status).toBe(400)
+    expect(rmRecursive).not.toHaveBeenCalled()
+  })
+
+  it('deletes a non-git leftover in the agent layout (real fs)', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'dsh-gwt-agent-repo-'))
+    cleanup.push(repo)
+    const target = join(repo, '.agents', 'worktrees', 'leftover')
+    await mkdir(join(target, 'junk'), { recursive: true })
+    await writeFile(join(target, 'junk', 'x.txt'), 'x', 'utf8')
+    const probe = scripted({ 'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { code: 128, stderr: 'fatal: not a git repository' } })
+    const outcome = await handlePurgeDirectory(deps({ exec: probe }), { path: target })
+    expect(outcome).toEqual({ status: 200, body: { path: resolve(target), removed: true } })
+    await expect(stat(target)).rejects.toThrow()
+  })
+
+  it('refuses an agent-layout path whose repository does not exist on disk', async () => {
+    const rmRecursive = vi.fn(async () => {})
+    const outcome = await handlePurgeDirectory(
+      deps({ statDirectory: async () => true, rmRecursive, dirExists: () => false }),
+      { path: join(resolve('/code/rogue'), '.agents', 'worktrees', 'x') },
     )
     expect(outcome.status).toBe(400)
     expect(rmRecursive).not.toHaveBeenCalled()

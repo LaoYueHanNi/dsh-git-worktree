@@ -18,17 +18,16 @@ import type { WorktreeScanEntry } from '../wire.ts'
  * group, where rows may come from either location). */
 export interface ScanGroup {
   readonly repoName: string | null
-  readonly source: 'legacy' | 'project' | 'orphans'
+  readonly source: 'legacy' | 'project' | 'agent' | 'orphans'
   readonly entries: readonly WorktreeScanEntry[]
 }
 
-/** Group the scan for display: project groups before legacy groups (same
- * repo can appear under both), repositories alphabetical within a source,
- * rows within a group by branch name, all numeric-aware so `feat/v2` sorts
- * past `feat/v10`. Grouping is display-order only — the removal flows
- * address rows by path. */
+/** Group the scan for display: project groups before agent groups before legacy groups,
+ * repositories alphabetical within a source, rows within a group by branch name,
+ * all numeric-aware so `feat/v2` sorts past `feat/v10`. Grouping is display-order
+ * only — the removal flows address rows by path. */
 export function groupScanEntries(entries: readonly WorktreeScanEntry[]): ScanGroup[] {
-  const byKey = new Map<string, { source: 'legacy' | 'project'; repoName: string; list: WorktreeScanEntry[] }>()
+  const byKey = new Map<string, { source: 'legacy' | 'project' | 'agent'; repoName: string; list: WorktreeScanEntry[] }>()
   const orphans: WorktreeScanEntry[] = []
   for (const entry of entries) {
     if (entry.repoName === null) {
@@ -41,10 +40,11 @@ export function groupScanEntries(entries: readonly WorktreeScanEntry[]): ScanGro
     else bucket.list.push(entry)
   }
   const cmp = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true })
+  const rank = (s: 'legacy' | 'project' | 'agent'): number => s === 'project' ? 0 : s === 'agent' ? 1 : 2
   const groups = [...byKey.values()]
     .sort((a, b) => a.source === b.source
       ? cmp(a.repoName, b.repoName)
-      : a.source === 'project' ? -1 : 1)
+      : rank(a.source) - rank(b.source))
     .map(({ source, repoName, list }) => ({
       repoName,
       source,

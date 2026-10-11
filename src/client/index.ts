@@ -194,7 +194,7 @@ export function apply(ctx: ClientContext): void {
       )?.cwd
       if (currentCwd !== undefined) exclude.add(pathKey(currentCwd))
       const plan = planPrune({
-        paths: scan.worktrees.filter(entry => entry.repoName !== null).map(entry => entry.path),
+        paths: scan.worktrees.filter(entry => entry.repoName !== null && entry.source !== 'agent').map(entry => entry.path),
         activity,
         keep,
         exclude,

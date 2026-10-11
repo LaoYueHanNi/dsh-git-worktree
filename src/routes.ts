@@ -140,6 +140,9 @@ export async function handleGroupWorktrees(deps: RouteDeps, body: unknown): Prom
 /** The project-internal layout directory name every repository uses. */
 const PROJECT_LAYOUT_DIR = join('.dsh', 'gitworktree')
 
+/** The host Agent layout directory name inside repositories. */
+const AGENT_LAYOUT_DIR = join('.agents', 'worktrees')
+
 /**
  * Whether `canonical` sits DIRECTLY inside a `<repo>/.dsh/gitworktree`
  * layout root whose repository actually exists on disk. The layout names its
@@ -152,6 +155,18 @@ function insideProjectLayout(canonical: string, dirExists: DirExists): boolean {
   const dsh = dirname(layout)
   if (basename(dsh) !== '.dsh') return false
   return dirExists(join(dirname(dsh), '.git'))
+}
+
+/**
+ * Whether `canonical` sits DIRECTLY inside a `<repo>/.agents/worktrees`
+ * layout root whose repository actually exists on disk.
+ */
+function insideAgentLayout(canonical: string, dirExists: DirExists): boolean {
+  const layout = dirname(canonical)
+  if (basename(layout) !== 'worktrees') return false
+  const agents = dirname(layout)
+  if (basename(agents) !== '.agents') return false
+  return dirExists(join(dirname(agents), '.git'))
 }
 
 /**
@@ -193,7 +208,7 @@ export async function handleWorktreesAll(deps: RouteDeps, body: unknown): Promis
   const listDir = deps.listDir ?? fsListDir
   const facts: WorktreesAllResult['worktrees'] = []
   let truncated = false
-  const scanLocation = async (root: string, source: 'legacy' | 'project'): Promise<void> => {
+  const scanLocation = async (root: string, source: 'legacy' | 'project' | 'agent'): Promise<void> => {
     const listed = await listDir(root)
     if (listed.length > SCAN_CHILDREN_LIMIT) {
       truncated = true
@@ -239,6 +254,7 @@ export async function handleWorktreesAll(deps: RouteDeps, body: unknown): Promis
   }
   for (const repoRoot of repoRoots) {
     await scanLocation(join(repoRoot, PROJECT_LAYOUT_DIR), 'project')
+    await scanLocation(join(repoRoot, AGENT_LAYOUT_DIR), 'agent')
   }
 
   return { status: 200, body: { worktrees: facts, legacyRoot, legacyRootExists, ...truncated ? { truncated } : {} } }
@@ -279,7 +295,11 @@ export async function handlePurgeDirectory(deps: RouteDeps, body: unknown): Prom
   }
   const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
   const canonical = resolve(path)
-  if (dirname(canonical) !== resolve(rootDir) && !insideProjectLayout(canonical, deps.dirExists ?? fsDirExists)) {
+  if (
+    dirname(canonical) !== resolve(rootDir)
+    && !insideProjectLayout(canonical, deps.dirExists ?? fsDirExists)
+    && !insideAgentLayout(canonical, deps.dirExists ?? fsDirExists)
+  ) {
     return fail(400, `"${canonical}" is outside the plugin's worktree storage locations`)
   }
   const statDirectory = deps.statDirectory ?? fsStatDirectory
