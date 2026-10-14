@@ -5,9 +5,9 @@
  */
 
 import type {
-  CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult, WorktreesAllResult,
+  CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult, WorktreesAllResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -52,6 +52,23 @@ export async function fetchStatus(path: string): Promise<Call<RepoStatus>> {
     const response = await fetch(`${ROUTE_STATUS}?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
     if (!response.ok) return { ok: false, error: `HTTP ${String(response.status)}` }
     return { ...(await response.json() as RepoStatus), ok: true }
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/**
+ * Checked-out branch of one directory (the HEAD file, not a full status).
+ * @param path - absolute workspace directory.
+ */
+export async function fetchHead(path: string, signal?: AbortSignal): Promise<Call<HeadStatus>> {
+  try {
+    const response = await fetch(`${ROUTE_HEAD}?path=${encodeURIComponent(path)}`, {
+      cache: 'no-store',
+      ...(signal === undefined ? {} : { signal }),
+    })
+    if (!response.ok) return { ok: false, error: `HTTP ${String(response.status)}` }
+    return { ...(await response.json() as HeadStatus), ok: true }
   } catch (cause) {
     return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
   }

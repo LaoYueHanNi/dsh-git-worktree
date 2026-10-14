@@ -7,10 +7,11 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
 import { appendWorktreeExclude, fsExcludeSeams, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec } from './git.js'
+import { readCheckedOutBranch } from './head.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult, WorktreesAllResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult, WorktreesAllResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -74,7 +75,7 @@ export async function fsMkdirRecursive(path: string): Promise<void> {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
+  body: RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -361,6 +362,19 @@ export async function handleStatus(deps: RouteDeps, path: string | undefined): P
       rootDir,
     },
   }
+}
+
+/**
+ * GET /head — the checked-out branch of one directory, from the HEAD file.
+ * `pending` is a skipped tick: the caller keeps the label it already has.
+ * @param path - absolute directory the workspace reports.
+ */
+export async function handleHead(path: string | undefined): Promise<RouteOutcome> {
+  if (path === undefined || !isAbsoluteDir(path)) return fail(400, 'query parameter "path" must be an absolute directory')
+  const read = await readCheckedOutBranch(path)
+  if (read.kind === 'absent') return { status: 200, body: { repo: false } }
+  if (read.kind === 'unread') return { status: 200, body: { repo: true, pending: true } }
+  return { status: 200, body: { repo: true, currentBranch: read.name } }
 }
 
 /** Validate a JSON body object with exactly the expected keys. */

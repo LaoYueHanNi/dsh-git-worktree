@@ -16,11 +16,11 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
+  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
   type RouteDeps, type RouteOutcome,
 } from './routes.js'
 import { validateRootDir } from './settings.js'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -235,12 +235,18 @@ export function apply(ctx: Context, config: Config = {}): void {
       } }), `git-worktree: ${label} route`)
     }
 
-    // The one query-driven route; every mutation is a POST body.
+    // Query-driven reads. Every mutation is a POST body.
     webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_STATUS, handler: async (req: IncomingMessage, res: ServerResponse) => {
       /* v8 ignore next -- node:http always sets url on server requests. */
       const query = new URL(req.url ?? '/', 'http://x').searchParams
       send(res, await handleStatus(deps(), query.get('path') ?? undefined))
     } }), 'git-worktree: status route')
+
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_HEAD, handler: async (req: IncomingMessage, res: ServerResponse) => {
+      /* v8 ignore next -- node:http always sets url on server requests. */
+      const query = new URL(req.url ?? '/', 'http://x').searchParams
+      send(res, await handleHead(query.get('path') ?? undefined))
+    } }), 'git-worktree: head route')
 
     postRoute(ROUTE_WORKTREE, 'worktree', handleCreateWorktree)
     postRoute(ROUTE_SWITCH, 'switch', handleSwitch)

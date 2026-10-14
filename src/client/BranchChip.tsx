@@ -72,6 +72,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { branchNameIssue, localBranchName } from '../normalize.ts'
 import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
 import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestInspectWorktree, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { subscribeCheckedOutBranch } from './head-poll.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import type { BranchChipInjected } from './slots.ts'
 import css from './BranchChip.module.css'
@@ -120,20 +121,28 @@ type RemovalFacts = { dirty: number; ahead?: number } | null | undefined
  */
 function useRepoStatus(cwd: string | undefined): readonly [StatusState, () => Promise<void>] {
   const [state, setState] = useState<StatusState>({ facts: null })
+  // Mount, focus, and the HEAD poll can be in flight together. A slower
+  // older response must not paint over a newer one.
+  const gen = useRef(0)
   const load = useCallback(async (): Promise<void> => {
+    const ticket = ++gen.current
     if (cwd === undefined) {
       setState({ facts: null })
       return
     }
     const result = await fetchStatus(cwd)
-    setState({ facts: result.ok && result.repo ? result : null })
+    // A transient failure must not remove the label and its HEAD subscription.
+    // Keep the last successful facts so the next tick can retry the change.
+    if (ticket !== gen.current || !result.ok) return
+    setState({ facts: result.repo ? result : null })
   }, [cwd])
   useEffect(() => {
+    const ticket = ++gen.current
     let live = true
     setState({ facts: null })
     if (cwd !== undefined) {
       void fetchStatus(cwd).then(result => {
-        if (live) setState({ facts: result.ok && result.repo ? result : null })
+        if (live && ticket === gen.current) setState({ facts: result.ok && result.repo ? result : null })
       })
     }
     return () => { live = false }
@@ -455,6 +464,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   }, [])
   const chipRef = useRef<HTMLButtonElement | null>(null)
   const busyRef = useRef(false)
+  /** Branch the label is showing. The poll compares against this and does
+   * not refetch while it is still empty (the mount fetch owns that). */
+  const shownBranchRef = useRef<string | undefined>(undefined)
+  shownBranchRef.current = repo.facts?.currentBranch
+  /** One poll-triggered status fetch at a time. Focus and menu opens do not
+   * take this flag; the generation in useRepoStatus orders those bodies. */
+  const pollRefreshRef = useRef(false)
 
   useEffect(() => {
     // A moved session directory means a new repository context: any
@@ -474,15 +490,12 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     }
   }, [session.blank])
 
-  // External branch changes (terminal, other tools) never reach this chip
-  // on their own — the status fetch runs on mount, on cwd change, and after
-  // our own switches. Two cheap pull points cover the real workflow:
-  // regaining window focus (the user returns from the terminal where the
-  // branches moved; refreshes the chip label) and opening the menu (fresh
-  // rows exactly at decision time, see the chip's onClick). A push channel
-  // (host-side fs.watch on .git/refs + SSE) was considered and skipped:
-  // these pulls hide all but the menu-open-while-branches-change race, at
-  // none of that complexity.
+  // External checkouts never notify this label. Focus and visibility cover
+  // leaving the window and coming back; opening the menu refetches rows at
+  // decision time. While the label is already showing a branch and the page
+  // is visible, a shared poll re-reads HEAD and refetches the full status
+  // only when that name moved. A tick during our own action is dropped —
+  // the action refetches when it finishes.
   useEffect(() => {
     const refreshIfIdle = (): void => {
       if (busyRef.current) return
@@ -498,6 +511,18 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [refresh])
+
+  const watchingBranch = cwd !== undefined && repo.facts !== null
+  useEffect(() => {
+    if (!watchingBranch || cwd === undefined) return
+    return subscribeCheckedOutBranch(cwd, (branch) => {
+      if (busyRef.current || pollRefreshRef.current) return
+      const shown = shownBranchRef.current
+      if (shown === undefined || shown === branch) return
+      pollRefreshRef.current = true
+      void refresh().finally(() => { pollRefreshRef.current = false })
+    })
+  }, [cwd, refresh, watchingBranch])
 
   const showError = useCallback((message: string) => {
     pushToast(t('errorGeneric', { message }))
