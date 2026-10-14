@@ -11,6 +11,10 @@ export const ROUTE_PREFIX = '/plugin/git-worktree'
 /** GET ROUTE_PREFIX/status?path=<absolute dir> */
 export const ROUTE_STATUS = `${ROUTE_PREFIX}/status`
 
+/** GET ROUTE_PREFIX/head?path=<absolute dir> — checked-out branch only.
+ * A file read of HEAD, not a git process. */
+export const ROUTE_HEAD = `${ROUTE_PREFIX}/head`
+
 /** POST ROUTE_PREFIX/worktree — create-or-reuse a worktree for a branch. */
 export const ROUTE_WORKTREE = `${ROUTE_PREFIX}/worktree`
 
@@ -104,6 +108,18 @@ export type RepoStatus =
       /** Resolved worktree storage root (absolute) — what the settings say today. */
       rootDir: string
     }
+
+/**
+ * Response of GET head. `repo: false` — the directory is not inside a
+ * repository. `pending` — a repository was found but HEAD could not be read
+ * completely this tick (mid-checkout, partial write); callers skip the tick
+ * rather than guess a name. `currentBranch` is the branch, or `HEAD` when
+ * detached.
+ */
+export type HeadStatus =
+  | { repo: false }
+  | { repo: true; pending: true }
+  | { repo: true; currentBranch: string }
 
 /** POST worktree request body. */
 export interface CreateWorktreeBody {
