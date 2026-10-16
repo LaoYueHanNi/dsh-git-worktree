@@ -16,11 +16,12 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
-  type RouteDeps, type RouteOutcome,
+  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePush, handlePushPlan, handlePushPreview, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
+  type RouteDeps, type RouteLive, type RouteOutcome,
 } from './routes.js'
 import { validateRootDir } from './settings.js'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
+import { streamRoute } from './stream.js'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -235,6 +236,22 @@ export function apply(ctx: Context, config: Config = {}): void {
       } }), `git-worktree: ${label} route`)
     }
 
+    /** Like {@link postRoute}, but the response is an NDJSON stream of live
+     * progress events ended by a `done` frame (see ./stream.ts). A body-level
+     * failure is still a plain 400 — the stream has not started yet. */
+    const streamPostRoute = (path: string, label: string, handle: (deps: RouteDeps, body: unknown, live: RouteLive) => Promise<RouteOutcome>): void => {
+      webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path, handler: async (req: IncomingMessage, res: ServerResponse) => {
+        let body: unknown
+        try {
+          body = await readJson(req)
+        } catch (error) {
+          send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
+          return
+        }
+        await streamRoute(res, live => handle(deps(), body, live))
+      } }), `git-worktree: ${label} route`)
+    }
+
     // Query-driven reads. Every mutation is a POST body.
     webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_STATUS, handler: async (req: IncomingMessage, res: ServerResponse) => {
       /* v8 ignore next -- node:http always sets url on server requests. */
@@ -253,9 +270,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     postRoute(ROUTE_BRANCH, 'branch', handleCreateBranch)
     postRoute(ROUTE_BRANCH_RENAME, 'branch-rename', handleRenameBranch)
     postRoute(ROUTE_BRANCH_DELETE, 'branch-delete', handleDeleteBranch)
-    postRoute(ROUTE_FETCH, 'fetch', handleFetch)
+    streamPostRoute(ROUTE_FETCH, 'fetch', handleFetch)
     postRoute(ROUTE_GROUP, 'group', handleGroupWorktrees)
-    postRoute(ROUTE_UPDATE, 'update', handleUpdate)
+    streamPostRoute(ROUTE_UPDATE, 'update', handleUpdate)
+    postRoute(ROUTE_PUSH_PLAN, 'push-plan', handlePushPlan)
+    postRoute(ROUTE_PUSH_PREVIEW, 'push-preview', handlePushPreview)
+    streamPostRoute(ROUTE_PUSH, 'push', handlePush)
     postRoute(ROUTE_INSPECT, 'inspect', handleInspectWorktree)
     postRoute(ROUTE_REMOVE, 'remove', handleRemoveWorktree)
     postRoute(ROUTE_EXISTS, 'exists', handlePathExists)

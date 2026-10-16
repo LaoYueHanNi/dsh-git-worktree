@@ -112,7 +112,7 @@ import {
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { branchNameIssue } from '../normalize.ts'
 import {
-  buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows,
+  buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows, syncActions, syncMark,
   type BranchRow, type TreeNode,
 } from './branch-tree.ts'
 import { dispatchBranchMenuKeyDown } from './branch-keyboard.ts'
@@ -250,6 +250,11 @@ export interface BranchMenuProps {
   /** Update the CURRENT branch: fetch + fast-forward it to its upstream;
    * the owner refreshes the rows when it lands. */
   onUpdate: () => void
+  /** Push the selected LOCAL branch, including branches held by worktrees. */
+  onPush: (branch: string) => void
+  /** Whether the repository has any remote. Without one, "not pushed" is
+   * the permanent state of every branch and the mark is withheld. */
+  hasRemotes: boolean
   /** True while the update runs: the update tool spins and the fetch tool
    * disables (single-flight). */
   updateBusy: boolean
@@ -267,28 +272,33 @@ export interface BranchMenuProps {
  * fast-forward) — the pairing is IDEA's dashed/solid synchronize/update
  * language. The base library has no such glyph, so both are drawn here,
  * local to the menu; the sync spin animation targets `svg` descendants of
- * the tool button and applies to them unchanged.
+ * the tool button and applies to them unchanged. `weight` is the stroke
+ * width in viewBox units: the 12px row marks draw heavier than the 14–16px
+ * tool icons so a thin diagonal stays legible at that size.
  */
-function FetchGlyph({ size = 16, dashed = true }: { size?: number; dashed?: boolean }) {
+function FetchGlyph({ size = 16, dashed = true, weight = 1.3 }: { size?: number; dashed?: boolean; weight?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path
         d="M13 3 L5.9 10.1"
         stroke="currentColor"
-        strokeWidth="1.3"
+        strokeWidth={weight}
         strokeLinecap="round"
         strokeDasharray={dashed ? '2.4 1.6' : undefined}
       />
       <path
         d="M5 5.9 V11 H10.1"
         stroke="currentColor"
-        strokeWidth="1.3"
+        strokeWidth={weight}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
   )
 }
+
+/** Stroke weight of the 12px ahead/behind marks: same size as before, a heavier line. */
+const ROW_MARK_WEIGHT = 2.2
 
 /** Viewport edge clearance, mirroring the base Menu portal margin. */
 const MARGIN = 12
@@ -423,7 +433,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, updateBusy, onClose, t,
+  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, hasRemotes, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -1105,20 +1115,37 @@ export function BranchMenu({
     return cls
   }
 
-  /** The upstream divergence arrows of a local row (IDEA's ↑N/↓N) ahead of
-   * the trailing check: plain text marks in the secondary tone — no base
-   * icon pairs a direction with a count. Absent without an upstream or
-   * when in sync. */
+  /** IDEA colors and direction; what shows is decided by `syncMark` (an
+   * unpublished branch gets an unnumbered green arrow, but only in a
+   * repository that has a remote; a deleted upstream is a different,
+   * explicitly warned state). */
   const renderArrows = (row: BranchRow | null): React.ReactNode => {
-    if (row === null) return null
-    const marks: React.ReactNode[] = []
-    if ((row.ahead ?? 0) > 0) {
-      marks.push(<span key="ahead" className={css.menuRowArrow} title={t('aheadTitle', { n: row.ahead })}>↑{row.ahead}</span>)
+    const mark = row === null ? null : syncMark(row, hasRemotes)
+    if (mark === null) return null
+    if (mark.kind === 'gone') {
+      const title = t('upstreamGoneTitle', { upstream: mark.upstream })
+      return <span className={`${css.menuRowArrow} ${css.menuRowGone}`} role="img" aria-label={title} title={title}>!</span>
     }
-    if ((row.behind ?? 0) > 0) {
-      marks.push(<span key="behind" className={css.menuRowArrow} title={t('behindTitle', { n: row.behind })}>↓{row.behind}</span>)
-    }
-    return marks
+    const { outgoing, incoming } = mark
+    const outgoingTitle = outgoing === null ? '' : outgoing === 'unpublished'
+      ? t('unpublishedTitle') : t(outgoing === 1 ? 'aheadTitle.one' : 'aheadTitle.other', { n: outgoing })
+    const incomingTitle = incoming === null ? '' : t(incoming === 1 ? 'behindTitle.one' : 'behindTitle.other', { n: incoming })
+    return (
+      <>
+        {outgoing !== null && (
+          <span className={`${css.menuRowArrow} ${css.menuRowAhead}`} role="img" aria-label={outgoingTitle} title={outgoingTitle}>
+            <span className={css.menuRowOutgoing}><FetchGlyph size={12} dashed={false} weight={ROW_MARK_WEIGHT} /></span>
+            {outgoing !== 'unpublished' && outgoing}
+          </span>
+        )}
+        {incoming !== null && (
+          <span className={`${css.menuRowArrow} ${css.menuRowBehind}`} role="img" aria-label={incomingTitle} title={incomingTitle}>
+            <FetchGlyph size={12} dashed={false} weight={ROW_MARK_WEIGHT} />
+            {incoming}
+          </span>
+        )}
+      </>
+    )
   }
 
   /** A row's click behavior: with a dialog open (delete confirm or a
@@ -1420,8 +1447,12 @@ export function BranchMenu({
    * 新建分支并创建工作树 (the owner's cutout dialog, name typed by hand,
    * cut from THIS row); a started session drops them — its directory is
    * fixed. Copy is client-only (WYSIWYG display names; a successful write
-   * toasts the shared copied label). The menu opens NEITHER select NOR
-   * pick — it launches, never re-semantics. */
+   * toasts the shared copied label). 推送, with 更新 (current branch with a
+   * live upstream) directly above it, sits BETWEEN the verbs that check out
+   * / create (签出 … 新建分支并创建工作树) and the ones that rewrite or delete
+   * (重命名分支, 删除分支, 复制分支); on a worktree row the pair follows the
+   * hop. The menu opens NEITHER select NOR pick — it launches, never
+   * re-semantics. */
   const ctxItems: { id: string; label: string; icon: React.ReactNode; disabled?: boolean; title?: string; run: () => void }[] = []
   if (ctx !== null) {
     const { row, name, x, y } = ctx
@@ -1436,6 +1467,31 @@ export function BranchMenu({
     // menu stood FIRST (setCtx below clears the menu state): the flyout
     // then replaces it in place instead of anchoring to the card.
     const markPoint = (): void => { ctxPointRef.current = { x, y } }
+    const syncVerbs = row === null ? [] : syncActions(row, currentBranch)
+    // The remote-facing pair, 更新 above 推送, is placed by `addSync` below:
+    // after the verbs that create or check out, ahead of the ones that rewrite
+    // or delete.
+    const addSync = (): void => {
+      if (syncVerbs.includes('update')) {
+        ctxItems.push({ id: 'update', label: t('menuUpdate'), icon: <FetchGlyph size={14} dashed={false} />,
+          run: () => { setCtx(null); onUpdate() } })
+      }
+      if (!syncVerbs.includes('push')) return
+      ctxItems.push({
+        id: 'push',
+        label: t('ctxPush'),
+        icon: <IconRightUpOutlineRegular size={14} />,
+        // The push window replaces the whole menu: there is no flyout to
+        // anchor, so nothing is staged here.
+        run: () => {
+          confirmRef.current?.onCancel()
+          setCreating(false)
+          setRenaming(null)
+          setCtx(null)
+          onPush(name)
+        },
+      })
+    }
     const openCreate = (checkout: boolean): void => {
       confirmRef.current?.onCancel()
       setRenaming(null)
@@ -1460,6 +1516,7 @@ export function BranchMenu({
           },
         })
       }
+      addSync()
       ctxItems.push({
         id: 'copy',
         label: t('ctxCopyPath'),
@@ -1558,6 +1615,10 @@ export function BranchMenu({
           },
         })
       }
+      // Update and push need no checkout and rewrite nothing locally, so they
+      // close the "go there / branch from here" verbs and open the
+      // rename/delete block.
+      addSync()
       if (canCreate) {
         if (row?.kind !== 'remote') {
           ctxItems.push({
@@ -1965,7 +2026,7 @@ export function BranchMenu({
               type="button"
               role="menuitem"
               className={css.ctxItem}
-              disabled={item.disabled}
+              disabled={busy || item.disabled}
               title={item.title}
               onClick={item.run}
             >

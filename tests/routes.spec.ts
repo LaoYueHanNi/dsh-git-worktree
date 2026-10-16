@@ -6,8 +6,9 @@ import type { Exec, ExecResult } from '../src/git.ts'
 import { WORKTREE_EXCLUDE_RULE } from '../src/git.ts'
 import {
   handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleInspectWorktree, handlePathExists, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
-  type RouteDeps,
+  type RouteDeps, type RouteLive,
 } from '../src/routes.ts'
+import type { SyncEvent } from '../src/wire.ts'
 import { stat } from 'node:fs/promises'
 import { resolveRootDir } from '../src/settings.ts'
 
@@ -51,6 +52,14 @@ const REPO_CALLS = {
   'worktree list --porcelain': {
     stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n\nworktree /root/repo/feat-x\nHEAD 2\nbranch refs/heads/feat/x\n',
   },
+} satisfies Record<string, Partial<ExecResult>>
+
+/** What a live fetch asks before it transfers: the remotes, and which of them
+ * `fetch --all` would skip (none). It then fetches each by name. */
+const LIVE_REMOTES = {
+  remote: { stdout: 'origin\n' },
+  'config --bool --get-regexp': { code: 1 },
+  'fetch origin --prune --progress': {},
 } satisfies Record<string, Partial<ExecResult>>
 
 /** The same repository, but asked about from INSIDE the linked worktree: the
@@ -638,6 +647,53 @@ describe('handleFetch', () => {
     if (!('error' in outcome.body)) throw new Error('expected error body')
     expect(outcome.body.error).toContain("Repository 'gone' not found")
   })
+
+  it('streams git’s progress as structured events while it fetches', async () => {
+    const base = scripted({ ...REPO_CALLS, ...LIVE_REMOTES })
+    const exec: Exec = async (file, args, options) => {
+      if (args[0] === 'fetch') {
+        expect(args).toContain('--progress')
+        // A line can straddle two chunks.
+        options.onOutput?.('Receiving objects:  50% (1')
+        options.onOutput?.('/2)\r')
+      }
+      return base(file, args, options)
+    }
+    const events: SyncEvent[] = []
+    const live: RouteLive = { signal: new AbortController().signal, emit: event => events.push(event) }
+    const outcome = await handleFetch(deps({ exec }), { repoPath: '/repo' }, live)
+    expect(outcome).toEqual({ status: 200, body: { remote: 'all' } })
+    expect(events).toEqual([
+      { type: 'progress', text: 'Fetching origin', remote: 'origin' },
+      { type: 'progress', text: 'Receiving objects:  50% (1/2)', percent: 50, remote: 'origin' },
+    ])
+  })
+
+  it('answers 499 when the run was cancelled, not a git failure', async () => {
+    const base = scripted({ ...REPO_CALLS, ...LIVE_REMOTES })
+    const exec: Exec = async (file, args, options) => args[0] === 'fetch' ? { code: 1, stdout: '', stderr: '', cancelled: true } : base(file, args, options)
+    const controller = new AbortController()
+    controller.abort()
+    const outcome = await handleFetch(deps({ exec }), { repoPath: '/repo' }, { signal: controller.signal, emit: () => undefined })
+    expect(outcome).toEqual({ status: 499, body: { error: 'Cancelled' } })
+  })
+
+  it('flushes the last throttled progress line before it answers', async () => {
+    const base = scripted({ ...REPO_CALLS, ...LIVE_REMOTES })
+    const exec: Exec = async (file, args, options) => {
+      if (args[0] === 'fetch') {
+        // Two redraws of one phase inside the throttle window: the second is
+        // held back, and must still reach the caller before `done`.
+        options.onOutput?.('Receiving objects:   1% (1/100)\r')
+        options.onOutput?.('Receiving objects:  99% (99/100)\r')
+      }
+      return base(file, args, options)
+    }
+    const events: SyncEvent[] = []
+    await handleFetch(deps({ exec }), { repoPath: '/repo' }, { signal: new AbortController().signal, emit: event => events.push(event) })
+    // (the first event is the `Fetching origin` header, which has no percent)
+    expect(events.map(event => event.type === 'progress' ? event.percent : undefined)).toEqual([undefined, 1, 99])
+  })
 })
 
 describe('handleUpdate', () => {
@@ -711,6 +767,36 @@ describe('handleUpdate', () => {
   it('rejects unknown body keys and a non-absolute repoPath', async () => {
     expect((await handleUpdate(deps(), { repoPath: '/repo', branch: 'main' })).status).toBe(400)
     expect((await handleUpdate(deps(), { repoPath: 'repo' })).status).toBe(400)
+  })
+
+  it('streams the fetch progress, then marks the merge step before it fast-forwards', async () => {
+    const heads = ['aaa111\n', 'bbb222\n']
+    const base = scripted({ ...REPO_CALLS, ...LIVE_REMOTES, 'merge --ff-only @{u}': {}, 'branch --show-current': { stdout: 'main\n' } })
+    const exec: Exec = async (file, args, options) => {
+      if (args[0] === 'fetch') options.onOutput?.('Receiving objects:  40% (2/5)\r')
+      if (args.join(' ') === 'rev-parse HEAD') return { code: 0, stdout: heads.shift() ?? '', stderr: '' }
+      return base(file, args, options)
+    }
+    const events: SyncEvent[] = []
+    const outcome = await handleUpdate(deps({ exec }), { repoPath: '/repo' }, { signal: new AbortController().signal, emit: event => events.push(event) })
+    expect(outcome).toEqual({ status: 200, body: { branch: 'main', updated: true } })
+    expect(events).toEqual([
+      { type: 'progress', text: 'Fetching origin', remote: 'origin' },
+      { type: 'progress', text: 'Receiving objects:  40% (2/5)', percent: 40, remote: 'origin' },
+      { type: 'merge' },
+    ])
+  })
+
+  it('answers 499 and never fast-forwards when the fetch was cancelled', async () => {
+    const seen: string[] = []
+    const base = scripted({ ...REPO_CALLS, ...LIVE_REMOTES })
+    const exec: Exec = async (file, args, options) => {
+      seen.push(args.join(' '))
+      return args[0] === 'fetch' ? { code: 1, stdout: '', stderr: '', cancelled: true } : base(file, args, options)
+    }
+    const outcome = await handleUpdate(deps({ exec }), { repoPath: '/repo' }, { signal: new AbortController().signal, emit: () => undefined })
+    expect(outcome).toEqual({ status: 499, body: { error: 'Cancelled' } })
+    expect(seen.some(call => call.startsWith('merge'))).toBe(false)
   })
 })
 

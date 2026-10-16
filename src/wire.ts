@@ -33,11 +33,23 @@ export const ROUTE_BRANCH_RENAME = `${ROUTE_PREFIX}/branch-rename`
  * only; git refuses the rest). */
 export const ROUTE_BRANCH_DELETE = `${ROUTE_PREFIX}/branch-delete`
 
-/** POST ROUTE_PREFIX/fetch — sync remote-tracking refs (fetch every remote + prune). */
+/** POST ROUTE_PREFIX/fetch — sync remote-tracking refs (fetch every remote + prune).
+ * Streams {@link SyncFrame} lines (NDJSON) so a long transfer can show progress. */
 export const ROUTE_FETCH = `${ROUTE_PREFIX}/fetch`
 
-/** POST ROUTE_PREFIX/update — fast-forward the current branch to its upstream. */
+/** POST ROUTE_PREFIX/update — fast-forward the current branch to its upstream.
+ * Streams {@link SyncFrame} lines (NDJSON), like {@link ROUTE_FETCH}. */
 export const ROUTE_UPDATE = `${ROUTE_PREFIX}/update`
+
+/** POST push-plan — resolve the selected branch's push destination. */
+export const ROUTE_PUSH_PLAN = `${ROUTE_PREFIX}/push-plan`
+/** POST push-preview — inspect one explicit destination without pushing. */
+export const ROUTE_PUSH_PREVIEW = `${ROUTE_PREFIX}/push-preview`
+/** POST push — push one explicit local branch. Streams {@link SyncFrame}
+ * lines (NDJSON), like {@link ROUTE_FETCH}; the `done` body is a
+ * {@link PushResult}. A cancel (499) kills `git push`; the remote only moves
+ * a ref once the whole pack has arrived, so a stopped transfer changes nothing. */
+export const ROUTE_PUSH = `${ROUTE_PREFIX}/push`
 
 /** POST ROUTE_PREFIX/group — git belonging facts for a batch of workspace paths. */
 export const ROUTE_GROUP = `${ROUTE_PREFIX}/group`
@@ -72,6 +84,62 @@ export interface BranchEntry {
   ahead?: number
   /** Commits the local branch is BEHIND its upstream (same conditions). */
   behind?: number
+  /** Configured upstream; absent means unpublished, not synchronized. */
+  upstream?: string
+  /** The configured upstream no longer exists in the local tracking refs. */
+  upstreamGone?: true
+}
+
+export interface PushPlanBody {
+  repoPath: string
+  branch: string
+}
+
+export interface PushPlan {
+  branch: string
+  remotes: string[]
+  remote: string
+  target: string
+  /** Publishing or changing the tracking destination requires a target dialog. */
+  confirm: boolean
+  upstream?: string
+  /** `/push-plan` only: display-only snapshot of the default destination from
+   * local refs, so opening the push window needs one request, not two. Absent
+   * when it could not be built; never a substitute for the verified preview. */
+  local?: PushPreview
+}
+
+export interface PushBody extends PushPlanBody {
+  /** Both present only after the user confirms the publish destination. */
+  remote?: string
+  target?: string
+  tags?: 'none' | 'all' | 'follow'
+  /** Force only the destination branch, leased against the previewed OID. */
+  force?: boolean
+  /** Empty string means the remote branch did not exist in the preview. */
+  expectedTarget?: string
+  sourceOid?: string
+}
+
+export interface PushPreviewBody extends PushPlanBody {
+  remote: string
+  target: string
+  /** Approximate display-only preview from local tracking refs; never contacts the remote. */
+  localOnly?: boolean
+}
+
+export interface PushPreview {
+  sourceOid: string
+  targetOid: string | null
+  commits: { oid: string; subject: string }[]
+  total: number
+  truncated: boolean
+}
+
+export interface PushResult {
+  branch: string
+  remote: string
+  target: string
 }
 
 /** One existing worktree of the repository. */
@@ -258,6 +326,29 @@ export interface UpdateResult {
   /** False when the upstream already contained the branch (nothing moved). */
   updated: boolean
 }
+
+/** Content type of a streamed route: one JSON {@link SyncFrame} per line. */
+export const NDJSON_TYPE = 'application/x-ndjson'
+
+/**
+ * A live event of a long route while it still runs.
+ * - `progress` is git's own progress line (`Receiving objects:  3% (2147/58680),
+ *   708.01 KiB | 128.00 KiB/s`) with its percentage when it has one, and the
+ *   remote being fetched (the host fetches them one by one and names each
+ *   ahead of its counter lines);
+ * - `merge` marks the switch from fetching to the fast-forward, the one step
+ *   that can no longer be cancelled.
+ */
+export type SyncEvent =
+  | { type: 'progress'; text: string; percent?: number; remote?: string }
+  | { type: 'merge' }
+
+/**
+ * One line of a streamed route response. The last line is always `done`,
+ * carrying the status and body the same route would have answered in one piece
+ * (the result, or a {@link RouteError}); a stream that ends without it was cut.
+ */
+export type SyncFrame = SyncEvent | { type: 'done'; status: number; body: unknown }
 
 /** Error envelope every non-2xx response carries. */
 export interface RouteError {

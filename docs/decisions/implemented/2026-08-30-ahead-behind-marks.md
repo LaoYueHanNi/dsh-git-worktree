@@ -8,9 +8,12 @@ fetch 之后哪些本地分支落后于上游、哪些带着未推送的提交�
 
 ## Decision
 
-`listBranches` 的本地分支 `for-each-ref` 格式改为 `%(refname:short)%(upstream:track)`：track 段直接拼在 refname 后，渲染为 `[ahead N, behind M]`（或裸 `[gone]`）。`[` 在 refname 里非法，`indexOf('[')` 无需分隔符即可安全切分；正则提 `ahead N`/`behind M` 写入 `BranchEntry.ahead`/`behind`（可选数字，仅在非零时出现）；`[gone]`（上游已被服务端删除）没有数字可提，忽略不渲染。git 原生计算，status 采集无额外进程。
+> [!NOTE]
+> 本决策中的单色直箭头、隐藏 gone 状态与 upstream 契约已于 2026-10-15 由 [DR: 分支显式推送、首次发布确认与 IDEA 同步箭头](2026-10-15-branch-push-and-colored-tracking.md) 取代。以下保留原选择的理由；现行渲染使用绿色 ↗ / 蓝色 ↙，并区分未发布、同步和 gone。
 
-客户端在本地行尾（HEAD check 左侧）渲染 `↑N`/`↓N` 纯文本徽标：计数徽章的次级色调、11px、`tabular-nums`（↑10 的两位数不挤邻居），`title` 给出完整含义（"领先上游 N 个提交"）。树视图与搜索视图同渲染；远程行没有 upstream 概念，永不渲染。
+`listBranches` 的本地分支 `for-each-ref` 使用 `%(refname:short)%(upstream:track)%09%(upstream:short)`：track 段直接拼在 refname 后，渲染为 `[ahead N, behind M]`（或裸 `[gone]`）。`[` 在 refname 里非法，`indexOf('[')` 无需分隔符即可安全切分；正则提 `ahead N`/`behind M` 写入 `BranchEntry.ahead`/`behind`（可选数字，仅在非零时出现）。upstream 名称和 gone 状态按新记录透传。git 原生计算，status 采集无额外进程。
+
+客户端在本地行尾（HEAD check 左侧）渲染同步标记，现为绿色右上/蓝色左下 SVG 箭头：11px、`tabular-nums`，`title` 给出完整含义（"领先上游 N 个提交"）。树视图与搜索视图同渲染；远程行没有 upstream 概念，永不渲染。
 
 ## Alternatives considered
 
@@ -22,5 +25,5 @@ fetch 之后哪些本地分支落后于上游、哪些带着未推送的提交�
 ## Consequences
 
 - 得：fetch/更新之后每个本地分支与远程的关系一眼可读，"挑分支"场景里领先落后与远程组互为对照；数据来自 git 原生 track 计算，status 无额外进程、无额外往返。
-- 代价：`BranchRow` 增加两个可选字段的透传链（wire → BranchChip → BranchMenu）；徽标是纯文本箭头——基座图标库没有"方向 + 计数"的图标，朴素形态是刻意的。
+- 代价：`BranchRow` 承载可选字段的透传链（wire → BranchChip → BranchMenu）；现行箭头的颜色和未发布语义见新记录。
 - 边界：ahead/behind 反映本地 remote-tracking ref 的状态，fetch 才会更新——与菜单数据本身的拉取时机（打开/聚焦/操作后）口径一致，不存在更陈旧的通道。

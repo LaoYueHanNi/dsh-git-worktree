@@ -125,22 +125,21 @@ describe('probeRepo', () => {
     expect(facts?.worktrees[1]).toEqual({ path: p('/wt'), branch: undefined, main: false })
   })
 
-  it('drops gone and in-sync upstream tracks, keeps behind-only counts', async () => {
+  it('distinguishes unpublished, in-sync, gone and behind upstreams', async () => {
     const exec = scripted([
       { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
       { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
       { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
-      // `[gone]` (upstream deleted server-side) carries no counts and must
-      // not surface as NaN-ish garbage; an in-sync branch has no bracket.
-      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main[behind 3]\ndev[gone]\nsync\n' } },
+      { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main[behind 3]\torigin/main\ndev[gone]\torigin/dev\nsync\torigin/sync\nnew\t\n' } },
       { args: ['for-each-ref', 'refs/remotes'], out: { code: 0, stdout: '' } },
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
     ])
     const facts = await probeRepo(exec, '/repo', () => true)
     expect(facts?.branches).toEqual([
-      { name: 'main', kind: 'local', behind: 3 },
-      { name: 'dev', kind: 'local' },
-      { name: 'sync', kind: 'local' },
+      { name: 'main', kind: 'local', behind: 3, upstream: 'origin/main' },
+      { name: 'dev', kind: 'local', upstream: 'origin/dev', upstreamGone: true },
+      { name: 'sync', kind: 'local', upstream: 'origin/sync' },
+      { name: 'new', kind: 'local' },
     ])
   })
 

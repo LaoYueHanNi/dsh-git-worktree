@@ -33,6 +33,8 @@ export interface BranchRow {
   mainWorktree?: boolean
   ahead?: number
   behind?: number
+  upstream?: string
+  upstreamGone?: true
 }
 
 /** One node of the '/' prefix tree built from the row list: every segment
@@ -201,4 +203,64 @@ export function chainExpanded(branch: string): Set<string> {
     set.add(path)
   }
   return set
+}
+
+/**
+ * What a local or worktree row shows about its relation to a remote: the
+ * trailing marks of the branch menu, decided here so the rule is testable
+ * (the component renders nothing under vitest).
+ *
+ * - `gone`: the configured upstream vanished from the tracking refs;
+ * - `diverged`: green outgoing (`'unpublished'` = no upstream, no number;
+ *   a count = commits ahead) and/or blue incoming (commits behind).
+ * Null means in sync, a remote row, or nothing worth a mark.
+ */
+export type SyncMark =
+  | { kind: 'gone'; upstream: string }
+  | { kind: 'diverged'; outgoing: 'unpublished' | number | null; incoming: number | null }
+
+/**
+ * @param row - the row being rendered.
+ * @param hasRemotes - whether the repository has any remote at all; without
+ *   one every branch would read "unpublished", which is noise, not news.
+ * @returns the marks to show, or null for none.
+ */
+export function syncMark(row: BranchRow, hasRemotes: boolean): SyncMark | null {
+  if (row.kind === 'remote') return null
+  if (row.upstreamGone === true) return { kind: 'gone', upstream: row.upstream ?? '' }
+  const outgoing = row.upstream === undefined
+    ? (hasRemotes ? 'unpublished' as const : null)
+    : (row.ahead ?? 0) > 0 ? row.ahead ?? 0 : null
+  const incoming = (row.behind ?? 0) > 0 ? row.behind ?? 0 : null
+  return outgoing === null && incoming === null ? null : { kind: 'diverged', outgoing, incoming }
+}
+
+/**
+ * Whether the repository has any remote, judged from the branch list the
+ * status call already carries (a remote-tracking ref, or a local branch that
+ * names an upstream). No extra git process: `/status` stays as cheap as ever.
+ * A remote added but never fetched and not yet tracked by anything reads as
+ * "none" until its first fetch or push — the context-menu Push is unaffected.
+ * @param branches - every branch entry of the repository, local and remote.
+ * @returns true when at least one remote is evident.
+ */
+export function repoHasRemotes(branches: readonly { kind: 'local' | 'remote'; upstream?: string }[]): boolean {
+  return branches.some(branch => branch.kind === 'remote' || branch.upstream !== undefined)
+}
+
+/**
+ * The remote-facing verbs a branch row's context menu offers. Where each one
+ * sits in the menu is the menu's call (Update directly above Push, both ahead
+ * of the rename/delete block); this only says which are available.
+ * Push needs no checkout, so every local and worktree row has it; Update is
+ * fetch + fast-forward of the CURRENT checkout only, and only when there is
+ * a live upstream to fast-forward to.
+ * @param row - the right-clicked row.
+ * @param currentBranch - the branch this session's directory has checked out.
+ * @returns the verb ids, empty for a remote row.
+ */
+export function syncActions(row: BranchRow, currentBranch: string): ('push' | 'update')[] {
+  if (row.kind === 'remote') return []
+  const canUpdate = row.name === currentBranch && row.upstream !== undefined && row.upstreamGone !== true
+  return canUpdate ? ['push', 'update'] : ['push']
 }

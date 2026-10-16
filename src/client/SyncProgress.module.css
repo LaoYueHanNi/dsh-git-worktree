@@ -1,0 +1,130 @@
+/* The floating progress card of a running fetch/update.
+ *
+ * Fixed to the viewport and portalled out of the composer, so it can never
+ * push or clip the layout it floats over. Only the card itself takes the
+ * pointer; everything around it keeps working, which is the point — a
+ * transfer that takes a minute must not hold the app hostage.
+ *
+ * Chrome is the branch menu card's recipe (r16 here: it is a small notice,
+ * not a menu), so it reads as part of the same plugin in both themes. */
+.card {
+  box-sizing: border-box;
+  position: fixed;
+  right: 20px;
+  bottom: 84px;
+  z-index: 1000;
+  /* Wide enough for git's longest ordinary counter line on one row
+   * (`Receiving objects:  66% (1340/2030), 120.80 MiB | 10.24 MiB/s`), which a
+   * 300px card cut to `… | 1024.0…` from the tens of MiB on. */
+  width: 380px;
+  max-width: calc(100vw - 40px);
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  background: var(--dsw-specific-menu, var(--dsw-alias-surface-raised, #ffffff));
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
+  color: var(--dsw-alias-label-primary, inherit);
+  animation: syncCardIn 160ms ease-out;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cancel {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  cursor: pointer;
+}
+
+.cancel:hover {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.cancel:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4186f0);
+  outline-offset: 1px;
+}
+
+/* The bar: a determinate fill follows git's own percentage; with none to
+ * show (connecting, a phase git cannot size, the fast-forward) a short
+ * segment sweeps instead of a bar frozen at some stale number. */
+.track {
+  position: relative;
+  height: 4px;
+  margin: 8px 0 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 10%, transparent));
+}
+
+.fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary, #4186f0);
+  transition: width 150ms linear;
+}
+
+.indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary, #4186f0);
+  animation: syncSweep 1.1s ease-in-out infinite;
+}
+
+/* git's line, verbatim: stage, counts and transfer speed in one row, the
+ * way IDEA's task popup prints it. Tabular figures keep it from jittering. */
+.detail {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-secondary, #81858c);
+}
+
+@keyframes syncSweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+@keyframes syncCardIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card { animation: none; }
+  .fill { transition: none; }
+  .indeterminate { width: 100%; opacity: 0.35; animation: none; }
+}

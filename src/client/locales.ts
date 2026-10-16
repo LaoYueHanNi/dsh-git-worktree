@@ -42,8 +42,59 @@ export type GitWorktreeKey =
   | 'fetchDone'
   | 'updateDone'
   | 'updateUpToDate'
-  | 'aheadTitle'
-  | 'behindTitle'
+  | 'updateFailDiverged'
+  | 'updateFailDirty'
+  | 'updateFailNoUpstream'
+  | 'syncTitleFetch'
+  | 'syncTitleUpdate'
+  | 'syncTitlePush'
+  | 'syncConnecting'
+  | 'syncMerging'
+  | 'syncCancel'
+  | 'fetchCancelled'
+  | 'updateCancelled'
+  | 'pushCancelled'
+  | 'aheadTitle.one'
+  | 'aheadTitle.other'
+  | 'behindTitle.one'
+  | 'behindTitle.other'
+  | 'unpublishedTitle'
+  | 'upstreamGoneTitle'
+  | 'ctxPush'
+  | 'pushTitle'
+  | 'pushEditTarget'
+  | 'pushEditTargetClose'
+  | 'pushApplyEnter'
+  | 'pushNew'
+  | 'pushEmpty'
+  | 'pushNewEmpty'
+  | 'pushCommitCount.one'
+  | 'pushCommitCount.other'
+  | 'pushFailBehind'
+  | 'pushFailStale'
+  | 'pushFailHook'
+  | 'pushFailRefused'
+  | 'pushFailAuth'
+  | 'pushCommitList'
+  | 'pushTruncated'
+  | 'pushTags'
+  | 'pushTagsAll'
+  | 'pushTagsFollow'
+  | 'pushTagsAllHint'
+  | 'pushTagsFollowHint'
+  | 'pushForce'
+  | 'pushForceHint'
+  | 'pushOptions'
+  | 'pushRefresh'
+  | 'pushBranch'
+  | 'pushPlanning'
+  | 'pushCheckingRemote'
+  | 'pushLocalChecking'
+  | 'pushLocalUnverified'
+  | 'pushLocalEmpty'
+  | 'pushReadingCommits'
+  | 'pushBusy'
+  | 'pushDone'
   | 'worktreeAskNew'
   | 'worktreeAskRemote'
   | 'worktreeAskReuse'
@@ -146,7 +197,7 @@ export const en: Record<GitWorktreeKey, string> = {
   menuNewBranchBad: 'Git will not accept this name',
   menuNewBranchExists: 'A branch with this name already exists',
   menuFetch: 'Fetch',
-  menuUpdate: 'Update current branch from upstream',
+  menuUpdate: 'Update',
   ctxCheckout: 'Check out',
   ctxHop: 'Go to this worktree',
   ctxWorktree: 'Create worktree',
@@ -168,8 +219,59 @@ export const en: Record<GitWorktreeKey, string> = {
   fetchDone: 'Remote branches synced',
   updateDone: '{branch} fast-forwarded to its upstream',
   updateUpToDate: 'Already up to date',
-  aheadTitle: '{n} commits ahead of upstream',
-  behindTitle: '{n} commits behind upstream',
+  updateFailDiverged: 'The branch has diverged. Merge or rebase its upstream first.',
+  updateFailDirty: 'Uncommitted changes would be overwritten by the fast-forward. Commit or stash them, then update again.',
+  updateFailNoUpstream: 'This branch has no upstream to update from. Push it and set an upstream first.',
+  syncTitleFetch: 'Fetching remote branches',
+  syncTitleUpdate: 'Updating {branch}',
+  syncTitlePush: 'Pushing {branch}',
+  syncConnecting: 'Connecting to the remote…',
+  syncMerging: 'Fast-forwarding {branch}…',
+  syncCancel: 'Cancel',
+  fetchCancelled: 'Fetch cancelled',
+  updateCancelled: 'Update cancelled',
+  pushCancelled: 'Push cancelled',
+  'aheadTitle.one': '{n} commit ahead of upstream',
+  'aheadTitle.other': '{n} commits ahead of upstream',
+  'behindTitle.one': '{n} commit behind upstream',
+  'behindTitle.other': '{n} commits behind upstream',
+  unpublishedTitle: 'Not pushed — no upstream configured',
+  upstreamGoneTitle: 'Upstream {upstream} no longer exists; choose a push destination',
+  ctxPush: 'Push',
+  pushTitle: 'Push',
+  pushEditTarget: 'Edit target branch',
+  pushEditTargetClose: 'Close without applying',
+  pushApplyEnter: 'Press Enter to apply',
+  pushNew: 'New',
+  pushEmpty: 'No commits to push',
+  pushNewEmpty: 'This branch will be created on the remote',
+  'pushCommitCount.one': '{n} commit',
+  'pushCommitCount.other': '{n} commits',
+  pushFailBehind: 'The remote branch has commits you do not have locally. Update the branch first, or use Force push to overwrite them.',
+  pushFailStale: 'The remote branch changed after the preview. The preview was refreshed; review it and push again.',
+  pushFailHook: 'A local pre-push hook refused this push. See the details below.',
+  pushFailRefused: 'The remote refused the update (for example a protected branch or a server-side hook). See the details below.',
+  pushFailAuth: 'Authentication failed. Check your Git credentials or SSH key; the plugin cannot prompt for a password.',
+  pushCommitList: 'Commits to push',
+  pushTruncated: 'Showing the first {n} commits',
+  pushTags: 'Push tags',
+  pushTagsAll: 'All',
+  pushTagsFollow: 'Follow commits',
+  pushTagsAllHint: 'Push all local Git tags, including tags unrelated to this branch',
+  pushTagsFollowHint: 'Push missing annotated tags reachable from the pushed history; excludes lightweight tags',
+  pushForce: 'Force push',
+  pushForceHint: 'Uses force-with-lease; refuses to overwrite remote changes made after preview',
+  pushOptions: 'Push options',
+  pushRefresh: 'Refresh push preview',
+  pushBranch: 'Remote branch name',
+  pushPlanning: 'Reading local commits…',
+  pushCheckingRemote: 'Checking remote destination…',
+  pushLocalChecking: 'Local preview · checking remote…',
+  pushLocalUnverified: 'Local preview · remote unverified',
+  pushLocalEmpty: 'No commits found in the local preview',
+  pushReadingCommits: 'Reading commit messages…',
+  pushBusy: 'Pushing…',
+  pushDone: '{branch} pushed to {remote}/{target}',
   worktreeAskNew: 'Create a worktree from {branch}?',
   worktreeAskRemote: 'Create a worktree from this remote branch?',
   worktreeAskReuse: 'Switch to the {branch} worktree?',
@@ -273,7 +375,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuNewBranchBad: 'Git 不接受该名称',
   menuNewBranchExists: '同名分支已存在',
   menuFetch: '提取',
-  menuUpdate: '更新当前分支',
+  menuUpdate: '更新',
   ctxCheckout: '签出',
   ctxHop: '跳到此工作树',
   ctxWorktree: '创建工作树',
@@ -295,8 +397,59 @@ export const zh: Record<GitWorktreeKey, string> = {
   fetchDone: '远程分支已同步',
   updateDone: '{branch} 已快进到远程最新',
   updateUpToDate: '已是最新',
-  aheadTitle: '领先上游 {n} 个提交',
-  behindTitle: '落后上游 {n} 个提交',
+  updateFailDiverged: '分支已分叉，请先合并或变基上游。',
+  updateFailDirty: '工作区有未提交的改动，快进会覆盖它们。请先提交或暂存这些改动，再更新。',
+  updateFailNoUpstream: '当前分支没有可用的上游，无法更新。请先推送并设置上游。',
+  syncTitleFetch: '正在提取远程分支',
+  syncTitleUpdate: '正在更新 {branch}',
+  syncTitlePush: '正在推送 {branch}',
+  syncConnecting: '正在连接远程…',
+  syncMerging: '正在快进 {branch}…',
+  syncCancel: '取消',
+  fetchCancelled: '已取消提取',
+  updateCancelled: '已取消更新',
+  pushCancelled: '已取消推送',
+  'aheadTitle.one': '领先上游 {n} 个提交',
+  'aheadTitle.other': '领先上游 {n} 个提交',
+  'behindTitle.one': '落后上游 {n} 个提交',
+  'behindTitle.other': '落后上游 {n} 个提交',
+  unpublishedTitle: '尚未推送：未配置上游分支',
+  upstreamGoneTitle: '上游 {upstream} 已失效，请重新选择推送目标',
+  ctxPush: '推送',
+  pushTitle: '推送',
+  pushEditTarget: '修改目标分支',
+  pushEditTargetClose: '关闭且不应用',
+  pushApplyEnter: '按 Enter 应用',
+  pushNew: '新建',
+  pushEmpty: '没有待推送的提交',
+  pushNewEmpty: '将在远程新建此分支',
+  'pushCommitCount.one': '{n} 个提交',
+  'pushCommitCount.other': '{n} 个提交',
+  pushFailBehind: '远程分支有本地没有的提交。请先更新该分支，或使用“强制推送”覆盖它们。',
+  pushFailStale: '预览之后远程分支又有更新，预览已刷新。请确认后重新推送。',
+  pushFailHook: '本地的 pre-push 钩子拒绝了这次推送。详情见下方。',
+  pushFailRefused: '远程拒绝了本次更新（例如受保护分支或服务端钩子）。详情见下方。',
+  pushFailAuth: '认证失败。请检查 Git 凭据或 SSH 密钥；插件无法弹出密码输入。',
+  pushCommitList: '待推送提交列表',
+  pushTruncated: '仅显示前 {n} 条提交',
+  pushTags: '推送标记',
+  pushTagsAll: '所有',
+  pushTagsFollow: '跟随提交',
+  pushTagsAllHint: '推送所有本地 Git 标记，包括与当前分支无关的标记',
+  pushTagsFollowHint: '仅推送远程缺少、且指向本次推送提交历史的附注标记，不含轻量标记',
+  pushForce: '强制推送',
+  pushForceHint: '使用 force-with-lease；远程在预览后有更新时拒绝覆盖',
+  pushOptions: '推送选项',
+  pushRefresh: '刷新推送预览',
+  pushBranch: '远程分支名称',
+  pushPlanning: '正在读取本地提交…',
+  pushCheckingRemote: '正在校验远程目标…',
+  pushLocalChecking: '本地预览 · 正在校验远程…',
+  pushLocalUnverified: '本地预览 · 远程尚未校验',
+  pushLocalEmpty: '本地预览暂无待推送提交',
+  pushReadingCommits: '正在读取提交消息…',
+  pushBusy: '正在推送…',
+  pushDone: '已将 {branch} 推送到 {remote}/{target}',
   worktreeAskNew: '是否从 {branch} 新建工作树？',
   worktreeAskRemote: '从该远程分支新建工作树？',
   worktreeAskReuse: '是否切到 {branch} 工作树？',
