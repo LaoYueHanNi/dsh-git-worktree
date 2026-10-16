@@ -356,19 +356,24 @@
   white-space: nowrap;
 }
 
-/* Upstream divergence arrows (↑N/↓N) trailing a local branch row, before
- * the HEAD check: the count badge tone at a smaller size so a busy list
- * still reads the name first. Plain text arrows — no base-set icon pairs
- * a direction with a count. tabular-nums keeps ↑10 from nudging neighbors
- * as the digits tick. */
+/* IDEA-style outgoing green / incoming blue marks, including unpublished refs. */
 .menuRowArrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
   font-size: 11px;
   line-height: 20px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, currentColor 55%, transparent);
 }
+
+/* Host state tokens first (they follow the active theme and keep text
+ * contrast); IDEA's own hues remain the fallback where a token is absent. */
+.menuRowAhead { color: var(--dsw-alias-state-success-primary, #57965c); }
+.menuRowBehind { color: var(--dsw-alias-link, #589df6); }
+.menuRowGone { color: var(--dsw-alias-state-warn-primary, #b58900); }
+.menuRowOutgoing { display: inline-flex; transform: rotate(180deg); }
 
 /* Search hit highlight (IDEA): the matched substring gets a warm tint
  * behind it — theme-agnostic, legible in both light and dark cards. */

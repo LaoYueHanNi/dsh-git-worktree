@@ -1,0 +1,73 @@
+.dialog {
+  width: min(420px, 100%);
+  max-height: 100%;
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+  border-radius: var(--dsw-radius-xl, 20px);
+  font-size: 13px;
+  line-height: 20px;
+}
+.header { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 16px; }
+.header h2 { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 24px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header h2 span { color: var(--dsw-alias-label-secondary); font-weight: 400; }
+.close, .refresh { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.close:hover:not(:disabled), .refresh:hover:not(:disabled), .textButton:hover:not(:disabled), .scope:hover:not(:disabled), .editorClose:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.body { padding: 0 12px; min-height: 0; }
+.mapping { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 34px; padding: 3px 10px; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
+.mapping > svg { flex: none; color: var(--dsw-alias-label-secondary); }
+/* The branch being pushed may be long; give it up to half the row (the target keeps its own cap). */
+.source { min-width: 0; max-width: min(200px, 50%); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arrow { color: var(--dsw-alias-label-tertiary); }
+.destination { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; }
+.remote { color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.textButton, .scope { display: inline-flex; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: var(--dsw-radius-xs); padding: 2px 4px; background: transparent; color: var(--dsw-alias-link); font: inherit; cursor: pointer; max-width: 100%; }
+.chevron { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.targetWrap { position: relative; min-width: 0; max-width: 180px; }
+.targetName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 11px; line-height: 18px; padding: 0 5px; border-radius: var(--dsw-radius-xs); background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
+.editor { position: absolute; z-index: 5; top: calc(100% + 5px); left: 0; width: 200px; max-width: calc(100vw - 64px); padding: 10px; border: .5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-lg); background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-prominent); }
+/* Near the dialog's right edge the editor lines up with the name's right edge instead. */
+.editorEnd { left: auto; right: 0; }
+.editorHead { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; }
+.editor label { display: block; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.editorClose { display: grid; place-items: center; width: 20px; height: 20px; flex: none; margin: -3px -4px 0 0; padding: 0; border: 0; border-radius: var(--dsw-radius-xs); background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.editor input { box-sizing: border-box; width: 100%; padding: 5px 7px; font: inherit; border: .5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.editor input[aria-invalid='true'] { border-color: var(--dsw-alias-state-error-primary); }
+.commits { padding: 8px 10px 12px; min-height: 96px; }
+.count { font-size: 11px; color: var(--dsw-alias-label-tertiary); margin-bottom: 6px; }
+.previewStatus { margin-left: 8px; }
+.list { list-style: none; margin: 0; padding: 0 5px 0 0; max-height: min(168px, 28vh); overflow-y: auto; overscroll-behavior: contain; }
+.list li { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.list svg { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--dsw-alias-label-tertiary); stroke-width: 1.5; }
+.list li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { display: grid; place-items: center; min-height: 60px; margin: 0; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.hint { margin: 6px 0 0; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-tertiary); }
+.error { max-height: 120px; margin-bottom: 8px; overflow: auto; font-size: 12px; color: var(--dsw-alias-state-error-primary); overflow-wrap: anywhere; }
+/* A recognised cause leads in plain words; git's own text stays below it, quieter. */
+.errorSummary { margin: 0 0 4px; font-weight: 500; }
+.errorSummary:last-child { margin-bottom: 0; }
+.errorDetail { max-height: 64px; overflow: auto; font-size: 11px; line-height: 16px; white-space: pre-wrap; color: var(--dsw-alias-label-secondary); }
+.footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0 16px; padding: 12px 0 14px; border-top: .5px solid var(--dsw-alias-border-l2); }
+.tagOptions { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.checkbox { display: flex; align-items: center; gap: 7px; font-size: 12px; white-space: nowrap; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.checkbox input { appearance: none; margin: 0; width: 14px; height: 14px; border: 1px solid var(--dsw-alias-label-tertiary); border-radius: var(--dsw-radius-xs); display: grid; place-content: center; cursor: pointer; }
+.checkbox input:checked { background: var(--dsw-alias-button-primary-fill); border-color: var(--dsw-alias-button-primary-fill); }
+.checkbox input:checked::after { content: ''; width: 6px; height: 3px; border: solid var(--dsw-alias-label-primary-foreground); border-width: 0 0 1.5px 1.5px; transform: rotate(-45deg) translateY(-1px); }
+.scope { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.split { display: flex; border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
+.push, .splitArrow { height: 28px; padding: 0 10px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.push { min-width: 56px; border-radius: var(--dsw-radius-sm) 0 0 var(--dsw-radius-sm); }
+.splitArrow { position: relative; display: grid; place-items: center; width: 27px; padding: 0; border-radius: 0 var(--dsw-radius-sm) var(--dsw-radius-sm) 0; }
+.splitArrow::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; border-left: 1px solid currentColor; opacity: .18; }
+.push:hover:not(:disabled), .splitArrow:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-active); }
+.dialog button:disabled, .dialog input:disabled { opacity: .4; cursor: not-allowed; }
+/* Keyboard focus ring, spelled out like the plugin's other dialogs rather
+ * than left to the host's global reset. */
+.close:focus-visible, .refresh:focus-visible, .textButton:focus-visible, .scope:focus-visible, .editorClose:focus-visible,
+.push:focus-visible, .splitArrow:focus-visible, .checkbox input:focus-visible, .list:focus-visible, .editor input:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+@media (max-height: 450px) { .list { max-height: 70px; } .header { padding-top: 8px; padding-bottom: 6px; } .commits { min-height: 65px; } .footer { padding-block: 8px; } }

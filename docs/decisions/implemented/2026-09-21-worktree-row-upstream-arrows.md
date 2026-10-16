@@ -13,7 +13,7 @@ Status: implemented
 ## Decision
 
 1. **工作树行数据透传**：在 `BranchChip` 的 `buildBranchRows` 和 `buildLinkedWorktreeRows` 中组装 `kind === 'worktree'` 条目时，通过 `w.branch` 在 `branches` 列表中检索同名本地分支，将其 `ahead` 与 `behind` 属性透传至 `BranchRow` 模型中。在 linked worktree 会话中，主工作树（`w.main: true`）同样通过主分支继承对应的 `ahead`/`behind` 计数。
-2. **工作树扁平行渲染**：在 `BranchMenu` 的 `renderFlatLeaf` 中补齐调用 `{renderArrows(row)}`，复用既有的 `.menuRowArrow` 样式与 tooltip 文案，保持与普通本地分支一致的 `↑N` / `↓N` 视觉表现。
+2. **工作树扁平行渲染**：在 `BranchMenu` 的 `renderFlatLeaf` 中调用 `{renderArrows(row)}`，复用 `.menuRowArrow` 样式与 tooltip 文案，保持与普通本地分支一致的视觉表现；2026-10-15 起箭头和 upstream/gone 字段按[显式推送与 IDEA 同步箭头](2026-10-15-branch-push-and-colored-tracking.md)使用绿色 `↗N` / 蓝色 `↙N`，无 upstream 的绿色箭头不带数字。
 3. **零开销与轻量秒开**：下拉菜单完全依赖 `/status` 已带有的 upstream tracking 事实，不增加任何额外的 Git 探测进程；工作树目录的未提交变更（dirty）探测严格限制在删除确认弹窗与全量管理模态框中按需发起，不在高频菜单展开时做并发扫描。
 4. **试行评估机制**：本特性作为试行落地；若后续在实际编码与窄屏排版场景中发现工作树行空间拥挤或与点击跳转注意力冲突，通过后续决策评估调整或回退。
 

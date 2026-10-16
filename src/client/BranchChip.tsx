@@ -19,8 +19,10 @@
  * moving between worktrees is the point of having them. What also stays is
  * the two tools that never move a checkout: fetch, and update-current — the
  * update fast-forwards the session's OWN worktree, the fetch is
- * repository-wide metadata. Non-git directories and load failures render
- * nothing. The confirm dialogs and the error toast live here too.
+ * repository-wide metadata. Both run as jobs in ./sync-job.ts and show a
+ * floating, non-modal progress card with a cancel button (./SyncProgress.tsx).
+ * Non-git directories and load failures render nothing. The confirm dialogs
+ * and the error toast live here too.
  *
  * Checking the worktree toggle pops the cutout confirm dialog right away:
  * confirming it cuts a NEW branch (`<current>-wt`, suffixes past taken
@@ -70,12 +72,26 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 // `useSessions`) into the input-left runtime kit.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { branchNameIssue, localBranchName } from '../normalize.ts'
-import type { BranchEntry, RepoStatus, WorktreeEntry } from '../wire.ts'
-import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestInspectWorktree, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
+import type { BranchEntry, PushBody, RepoStatus, WorktreeEntry } from '../wire.ts'
+import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestInspectWorktree, requestPush, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { subscribeCheckedOutBranch } from './head-poll.ts'
+import { PushDialog } from './PushDialog.tsx'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
+import { repoHasRemotes } from './branch-tree.ts'
 import type { BranchChipInjected } from './slots.ts'
+import { cancelSyncJob, findSyncJob, recordPushFailure, runSyncJob, subscribeSyncJobs, takePushFailure, type PushFailure, type SyncJob } from './sync-job.ts'
+import { explainUpdateFailure, updateErrorText, type UpdateFailureKind } from './update-error.ts'
+import { SyncProgress } from './SyncProgress.tsx'
 import css from './BranchChip.module.css'
+import type { GitWorktreeKey } from './locales.ts'
+
+/** The toast for an update failure the plugin can name. Each one says what
+ * to do next; git's hint essay is not part of it. */
+const UPDATE_FAIL = {
+  diverged: 'updateFailDiverged',
+  dirty: 'updateFailDirty',
+  noUpstream: 'updateFailNoUpstream',
+} as const satisfies Record<UpdateFailureKind, GitWorktreeKey>
 
 /** Full props: owner share + standard kit + injected adopt verb + locale seat. */
 export type BranchChipDockProps =
@@ -150,6 +166,21 @@ function useRepoStatus(cwd: string | undefined): readonly [StatusState, () => Pr
   return [state, load]
 }
 
+/**
+ * The fetch/update running for a directory, live. The job store outlives
+ * this component (switching sessions unmounts the dock, a long transfer does
+ * not stop), so the hook reads the store at render time — a held copy could
+ * lag a render behind a directory change — and only subscribes to learn WHEN
+ * to re-render.
+ * @param cwd - absolute session directory.
+ * @returns the running job, or undefined.
+ */
+function useSyncJob(cwd: string | undefined): SyncJob | undefined {
+  const [, redraw] = useState(0)
+  useEffect(() => subscribeSyncJobs(() => { redraw(tick => tick + 1) }), [])
+  return findSyncJob(cwd)
+}
+
 /** Longest branch name shown on the chip before ellipsizing (chars, … included). */
 const BRANCH_DISPLAY_MAX = 25
 
@@ -202,6 +233,8 @@ export function buildBranchRows(
       kind: 'local' as const,
       ...b.ahead === undefined ? {} : { ahead: b.ahead },
       ...b.behind === undefined ? {} : { behind: b.behind },
+      ...b.upstream === undefined ? {} : { upstream: b.upstream },
+      ...b.upstreamGone === undefined ? {} : { upstreamGone: b.upstreamGone },
     })),
     ...branches.filter(b => b.kind === 'remote').map(b => ({
       name: b.name,
@@ -216,6 +249,8 @@ export function buildBranchRows(
         path: w.path,
         ...twin?.ahead === undefined ? {} : { ahead: twin.ahead },
         ...twin?.behind === undefined ? {} : { behind: twin.behind },
+        ...twin?.upstream === undefined ? {} : { upstream: twin.upstream },
+        ...twin?.upstreamGone === undefined ? {} : { upstreamGone: twin.upstreamGone },
       }]
     }),
   ]
@@ -260,6 +295,8 @@ export function buildLinkedWorktreeRows(
           kind: 'local' as const,
           ...current.ahead === undefined ? {} : { ahead: current.ahead },
           ...current.behind === undefined ? {} : { behind: current.behind },
+          ...current.upstream === undefined ? {} : { upstream: current.upstream },
+          ...current.upstreamGone === undefined ? {} : { upstreamGone: current.upstreamGone },
         }],
     // The main checkout is NOT filtered out here: it is another place to go.
     // Its row carries `mainWorktree` — the hop is legal, but git refuses
@@ -275,6 +312,8 @@ export function buildLinkedWorktreeRows(
         ...(w.main ? { mainWorktree: true } : {}),
         ...twin?.ahead === undefined ? {} : { ahead: twin.ahead },
         ...twin?.behind === undefined ? {} : { behind: twin.behind },
+        ...twin?.upstream === undefined ? {} : { upstream: twin.upstream },
+        ...twin?.upstreamGone === undefined ? {} : { upstreamGone: twin.upstreamGone },
       }]
     }),
   ]
@@ -437,19 +476,18 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   const session = useSession(s => s)
   const cwd = summary?.cwd
   const [repo, refresh] = useRepoStatus(cwd)
+  const syncJob = useSyncJob(cwd)
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  const [pushBranch, setPushBranch] = useState<string | null>(null)
+  /** Set when the push window is coming back after a failed push. */
+  const [pushResume, setPushResume] = useState<PushFailure | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   /** Inspect facts of the staged worktree removal, keyed to its directory:
    * a confirm staged for one path never shows another's facts, and a restage
    * while a probe is in flight keeps showing the new path's loading line. */
   const [removalPath, setRemovalPath] = useState<string | null>(null)
   const [removalFacts, setRemovalFacts] = useState<RemovalFacts>(undefined)
-  /** Which arrow is spinning: fetch and update are single-flight against
-   * the SAME busyRef (mutually exclusive), but the spinning state must be
-   * per-tool — one shared flag made both arrows rotate at once. */
-  const [fetchBusy, setFetchBusy] = useState(false)
-  const [updateBusy, setUpdateBusy] = useState(false)
   /** Toasts wait their turn instead of overwriting each other. One flow
    * can raise two in a row — a worktree creation whose fetch warned, then
    * the auto-prune's report — and a single-slot state made the second
@@ -464,6 +502,12 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   }, [])
   const chipRef = useRef<HTMLButtonElement | null>(null)
   const busyRef = useRef(false)
+  const currentCwdRef = useRef(cwd)
+  currentCwdRef.current = cwd
+  /** Is something already running that another git action must not overlap:
+   * one of this dock's own actions, or a fetch/update the job store holds for
+   * this directory (it outlives the dock, so a remounted dock still sees it). */
+  const blocked = useCallback((): boolean => busyRef.current || findSyncJob(currentCwdRef.current) !== undefined, [])
   /** Branch the label is showing. The poll compares against this and does
    * not refetch while it is still empty (the mount fetch owns that). */
   const shownBranchRef = useRef<string | undefined>(undefined)
@@ -476,7 +520,26 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     // A moved session directory means a new repository context: any
     // half-open dialog belongs to the old one.
     setConfirm(null)
+    setPushBranch(null)
+    setPushResume(undefined)
     setMenuOpen(false)
+  }, [cwd])
+
+  useEffect(() => {
+    // A push runs behind its card, with its window already closed. When it
+    // fails, the window comes back with git's reason — here, or when the user
+    // returns to a session whose dock was gone by then. (Declared after the
+    // reset above, so a failure waiting at mount survives it.)
+    const reopen = (): void => {
+      const failure = takePushFailure(cwd)
+      if (failure === undefined) return
+      setConfirm(null)
+      setMenuOpen(false)
+      setPushResume(failure)
+      setPushBranch(failure.branch)
+    }
+    reopen()
+    return subscribeSyncJobs(reopen)
   }, [cwd])
 
   useEffect(() => {
@@ -533,7 +596,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
    * menu's rule: 原地动作 leave the picker up), and `onSettled` — the
    * flyout's success-only close hook — fires after both. */
   const runGuarded = useCallback(async (action: () => Promise<string | undefined>, keepOpen = false, onSettled?: () => void): Promise<void> => {
-    if (busyRef.current) return
+    if (blocked()) return
     busyRef.current = true
     setBusy(true)
     const failure = await action()
@@ -546,7 +609,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     setConfirm(null)
     if (!keepOpen) setMenuOpen(false)
     onSettled?.()
-  }, [showError])
+  }, [blocked, showError])
 
   /** In-place switch flow: POST /switch, then refetch the status. */
   const doSwitch = useCallback((branch: string, keepOpen = false) => runGuarded(async () => {
@@ -630,47 +693,26 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   /** Remote-sync flow: POST /fetch (fetch every remote + prune), then
    * refetch the status. Deliberately NOT runGuarded: its success closes the
    * menu, while the whole point of a sync is watching the refreshed branch
-   * list in place. Single-flight shares busyRef with the other actions, so
-   * a sync and a confirm action can never interleave. A network fetch has
-   * NO visible side effect when the remote moved not — the spinning tool
-   * (menu side) and the done toast here ARE the feedback. */
+   * list in place. The run lives in the job store, not in this component:
+   * the floating card shows its progress and cancels it, a remounted dock
+   * still sees it, and while it runs the single-flight gate (`blocked`)
+   * keeps every other git action out. A fetch has NO visible side effect
+   * when the remote moved not — the card and the done toast ARE the
+   * feedback. */
   const doFetch = useCallback(async () => {
-    if (busyRef.current) return
-    busyRef.current = true
-    setBusy(true)
-    setFetchBusy(true)
-    const failure = await (async () => {
-      if (cwd === undefined) return 'no session directory'
-      const result = await requestFetch(cwd)
-      if (!result.ok) return result.error
-      return undefined
-    })()
-    busyRef.current = false
-    setBusy(false)
-    setFetchBusy(false)
-    if (failure !== undefined) {
-      showError(failure)
+    if (cwd === undefined) {
+      showError('no session directory')
       return
     }
-    await refresh()
-    pushToast(t('fetchDone'))
-  }, [cwd, pushToast, refresh, showError, t])
-
-  /** Update-current-branch flow: POST /update (fetch every remote, then
-   * fast-forward the checked-out branch to its upstream), then refetch the
-   * status in place — same keep-the-menu-open semantics as the fetch sync.
-   * The toast tells the two apart: fast-forwarded vs already up to date. */
-  const doUpdate = useCallback(async () => {
-    if (busyRef.current) return
-    busyRef.current = true
-    setBusy(true)
-    setUpdateBusy(true)
-    const result = cwd === undefined ? undefined : await requestUpdate(cwd)
-    busyRef.current = false
-    setBusy(false)
-    setUpdateBusy(false)
-    if (result === undefined) {
-      showError('no session directory')
+    if (blocked()) return
+    const outcome = await runSyncJob(cwd, 'fetch', live => requestFetch(cwd, live))
+    if (outcome === undefined || currentCwdRef.current !== cwd) return
+    const { result, cancelled } = outcome
+    // A cancel that lost the race with a finished fetch is just a finished fetch.
+    if (cancelled && !result.ok) {
+      // A remote fetched before the cancel already moved its tracking refs.
+      await refresh()
+      pushToast(t('fetchCancelled'))
       return
     }
     if (!result.ok) {
@@ -678,15 +720,82 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return
     }
     await refresh()
+    pushToast(t('fetchDone'))
+  }, [blocked, cwd, pushToast, refresh, showError, t])
+
+  /** Update-current-branch flow: POST /update (fetch every remote, then
+   * fast-forward the checked-out branch to its upstream), then refetch the
+   * status in place — same job-store and keep-the-menu-open semantics as the
+   * fetch sync. The toast tells the two apart: fast-forwarded vs already up
+   * to date. */
+  const doUpdate = useCallback(async () => {
+    if (cwd === undefined) {
+      showError('no session directory')
+      return
+    }
+    if (blocked()) return
+    const outcome = await runSyncJob(cwd, 'update', live => requestUpdate(cwd, live))
+    if (outcome === undefined || currentCwdRef.current !== cwd) return
+    const { result, cancelled } = outcome
+    if (cancelled && !result.ok) {
+      await refresh()
+      pushToast(t('updateCancelled'))
+      return
+    }
+    if (!result.ok) {
+      const kind = explainUpdateFailure(result.error)
+      if (kind !== null) pushToast(t(UPDATE_FAIL[kind]))
+      else showError(updateErrorText(result.error))
+      return
+    }
+    await refresh()
     pushToast(result.updated ? t('updateDone', { branch: result.branch }) : t('updateUpToDate'))
-  }, [cwd, pushToast, refresh, showError, t])
+  }, [blocked, cwd, pushToast, refresh, showError, t])
+
+  /**
+   * Push flow: the window hands the push over and closes; the push itself
+   * runs in the job store behind the floating card (progress from git,
+   * cancellable, the page stays usable) like a fetch or update. Success is a
+   * toast. A failure is NOT: the reason belongs next to the choices that
+   * produced it, so it is recorded and the window comes back (see the effect
+   * that reopens it) — here, or in whichever dock is on this directory later.
+   * @returns an error only when nothing could be started (the window then
+   * stays open with it); otherwise undefined at once.
+   */
+  const doPush = useCallback((body: Omit<PushBody, 'repoPath'>): Promise<string | undefined> => {
+    if (blocked() || cwd === undefined) return Promise.resolve(t('pushBusy'))
+    const remote = body.remote ?? ''
+    const target = body.target ?? body.branch
+    const failure = (error: string): PushFailure => ({ branch: body.branch, remote, target, tags: body.tags ?? 'none', error })
+    // The card takes over from the window, in the same tick: the job
+    // registers synchronously, so no other action can slip in between.
+    setPushBranch(null)
+    setPushResume(undefined)
+    void (async () => {
+      const outcome = await runSyncJob(cwd, 'push', live => requestPush({ repoPath: cwd, ...body }, live), { branch: body.branch, ...remote === '' ? {} : { remote } })
+      if (outcome === undefined) {
+        recordPushFailure(cwd, failure(t('pushBusy')))
+        return
+      }
+      const { result, cancelled } = outcome
+      // A cancel that lost the race with a finished push is just a finished push.
+      const stopped = cancelled && !result.ok
+      if (!result.ok && !stopped) recordPushFailure(cwd, failure(result.error))
+      if (currentCwdRef.current !== cwd) return
+      await refresh()
+      if (currentCwdRef.current !== cwd) return
+      if (stopped) pushToast(t('pushCancelled'))
+      else if (result.ok) pushToast(t('pushDone', { branch: body.branch, remote: result.remote, target: result.target }))
+    })()
+    return Promise.resolve(undefined)
+  }, [blocked, cwd, pushToast, refresh, t])
 
   /** Worktree-group flow: hop the session into the EXISTING worktree
    * directory. No git action, no confirm — the row menu's hop IS the jump
    * (a directory jump is reversible and touches nothing), and the owner's
    * adoptWorktree registers the folder and opens a blank session there. */
   const doAdoptWorktree = useCallback((path: string): void => {
-    if (busyRef.current) return
+    if (blocked()) return
     busyRef.current = true
     setBusy(true)
     adoptWorktree(path)
@@ -698,7 +807,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         busyRef.current = false
         setBusy(false)
       })
-  }, [adoptWorktree, showError])
+  }, [adoptWorktree, blocked, showError])
 
   /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
    * branch under an explicit name), register the directory, hop sessions.
@@ -872,6 +981,8 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     onCancel: () => { if (!busy) setConfirm(null) },
   }
 
+  const pushBranchInfo = facts.branches.find(entry => entry.kind === 'local' && entry.name === pushBranch)
+
   return (
     <>
       <span className={css.dock}>
@@ -930,7 +1041,11 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         // time (the injected face is synchronous) — a session that starts
         // while the menu is open disarms the verb without reopening.
         worktreeRemovalBlocked={(path) => describeWorktreeRemoval(path).running}
-        busy={busy}
+        // A running fetch/update holds the other git actions off, like any
+        // in-flight action — but only this flag: the confirm dialogs keep the
+        // plain `busy` (their labels turn into progress text, which would lie
+        // about an action nobody started there).
+        busy={busy || syncJob !== undefined}
         onCreate={(name, from, checkout, onSettled) => { void doCreateBranch(name, from, checkout, onSettled) }}
         onRename={(name, newName, onSettled) => { void doRenameBranch(name, newName, onSettled) }}
         onDelete={(branch) => {
@@ -939,9 +1054,17 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
           setConfirm({ kind: 'delete', branch })
         }}
         onFetch={() => { void doFetch() }}
-        fetchBusy={fetchBusy}
+        fetchBusy={syncJob?.kind === 'fetch'}
         onUpdate={() => { void doUpdate() }}
-        updateBusy={updateBusy}
+        hasRemotes={repoHasRemotes(facts.branches)}
+        onPush={(branch) => {
+          if (blocked()) return
+          setConfirm(null)
+          setMenuOpen(false)
+          setPushResume(undefined)
+          setPushBranch(branch)
+        }}
+        updateBusy={syncJob?.kind === 'update'}
         onSelect={(branch) => {
           // Re-selecting the CURRENT branch is a plain close (worktree
           // creation lives in the row menu now — no mode bit reroutes
@@ -978,6 +1101,19 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
           {...isCutout && !cutoutValid ? { draftInvalid: true } : {}}
           {...cutoutHint === undefined ? {} : { draftHint: cutoutHint }}
         />
+      )}
+      {pushBranch !== null && cwd !== undefined && <PushDialog key={`${cwd}:${pushBranch}`} repoPath={cwd} repoName={facts.repoName}
+        branch={pushBranch} busy={busy} t={t}
+        {...(pushBranchInfo === undefined ? {} : { branchInfo: pushBranchInfo })}
+        {...(pushResume === undefined ? {} : { resume: pushResume })}
+        onClose={() => {
+          if (busyRef.current) return
+          setPushBranch(null)
+          setPushResume(undefined)
+        }}
+        onPush={options => doPush({ branch: pushBranch, ...options })} />}
+      {syncJob !== undefined && (
+        <SyncProgress job={syncJob} branch={facts.currentBranch} t={t} onCancel={() => { cancelSyncJob(syncJob.cwd) }} />
       )}
       {toasts[0] !== undefined && (
         <Toast

@@ -6,12 +6,14 @@
 import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
-import { appendWorktreeExclude, fsExcludeSeams, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec } from './git.js'
+import { appendWorktreeExclude, fsExcludeSeams, CancelledError, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
 import { readCheckedOutBranch } from './head.js'
+import { openPush, previewPush, pushBranch } from './push.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
+import { createProgressReader } from './progress.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, UpdateBody, UpdateResult, WorktreesAllResult,
+  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, PushPlanBody, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, SyncEvent, UpdateBody, UpdateResult, WorktreesAllResult,
 } from './wire.js'
 
 /** Everything the handlers need from the host half. */
@@ -75,7 +77,7 @@ export async function fsMkdirRecursive(path: string): Promise<void> {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
+  body: PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -643,43 +645,151 @@ export async function handleDeleteBranch(deps: RouteDeps, body: unknown): Promis
 }
 
 /**
- * POST /fetch 鈥?sync remote-tracking refs for the repository: fetch every
+ * The live side of a long route: events out while it runs, and a signal in
+ * when the caller leaves. The HTTP shell owns both ends (stream and socket);
+ * the handlers only emit and pass the signal on to git.
+ */
+export interface RouteLive {
+  /** Aborted when the caller goes away — git is killed and the route answers
+   * 499 to nobody. */
+  signal: AbortSignal
+  /** Send one event to the caller. */
+  emit: (event: SyncEvent) => void
+}
+
+/**
+ * Translate a route's live channel into a git {@link LiveRun}: git's raw
+ * output goes through the progress reader, so the caller sees structured,
+ * throttled events instead of a thousand `\r` redraws.
+ * @param live - the route's channel; absent for a plain, non-streamed call.
+ * @returns the run to hand to git (undefined = no live behaviour) and `end`,
+ * which flushes the reader's last held observation.
+ */
+function startLive(live: RouteLive | undefined): { run: LiveRun | undefined; end: () => void } {
+  if (live === undefined) return { run: undefined, end: () => undefined }
+  const reader = createProgressReader(progress => { live.emit({ type: 'progress', ...progress }) })
+  return {
+    run: {
+      onOutput: (chunk) => { reader.feed(chunk) },
+      onRemote: (remote) => { reader.remote(remote) },
+      signal: live.signal,
+      // The merge event must come after the last progress line, not before.
+      onMerge: () => { reader.end(); live.emit({ type: 'merge' }) },
+    },
+    end: () => { reader.end() },
+  }
+}
+
+/**
+ * POST /fetch — sync remote-tracking refs for the repository: fetch every
  * remote and prune tracking branches the remotes no longer carry. Pure
  * metadata — the working tree and the current checkout are untouched; the
  * client refetches /status afterwards for the fresh branch list.
  * @param deps - host dependencies.
  * @param body - parsed request body.
+ * @param live - the streaming channel (absent = the plain request).
  */
-export async function handleFetch(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+export async function handleFetch(deps: RouteDeps, body: unknown, live?: RouteLive): Promise<RouteOutcome> {
   const parsed = readBody<FetchBody>(body, ['repoPath'])
   if (isOutcome(parsed)) return parsed
   const { repoPath } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  const { run, end } = startLive(live)
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    await fetchAll(deps.exec, facts.repoRoot)
+    await fetchAll(deps.exec, facts.repoRoot, run)
     const result: FetchResult = { remote: 'all' }
     return { status: 200, body: result }
   } catch (error) {
+    if (error instanceof CancelledError) return fail(499, error.message)
     if (error instanceof GitError) return gitFailure(error)
     return fail(500, error instanceof Error ? error.message : String(error))
+  } finally {
+    end()
   }
 }
 
 /**
- * POST /update 鈥?update the CURRENT checkout: fetch every remote, then
+ * POST /push-plan — read-only destination resolution for one local branch,
+ * bundled with a display-only local snapshot of what it would push (see
+ * `openPush`). Publishing is a separate explicit POST.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ repoPath, branch }`.
+ */
+export async function handlePushPlan(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  return handlePushAction(deps, body, false)
+}
+
+/**
+ * POST /push — push one explicit local branch to an explicit destination
+ * (or, without one, to the confirmation-free default of `planPush`).
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ * @param live - the streaming channel (absent = the plain request, which
+ * keeps its two-minute cap).
+ */
+export async function handlePush(deps: RouteDeps, body: unknown, live?: RouteLive): Promise<RouteOutcome> {
+  return handlePushAction(deps, body, true, live)
+}
+
+/**
+ * POST /push-preview — the commits one explicit remote/target would receive,
+ * read from the real push destination (or from local tracking refs with
+ * `localOnly`, which never touches the network). Pushes nothing.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handlePushPreview(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<PushPreviewBody>(body, ['repoPath', 'branch', 'remote', 'target'], ['localOnly'])
+  if (isOutcome(parsed)) return parsed
+  if (!isAbsoluteDir(parsed.repoPath) || !parsed.branch.trim() || !parsed.remote?.trim() || !parsed.target?.trim()) return fail(400, 'An absolute repoPath, branch, remote and target are required')
+  try {
+    return { status: 200, body: await previewPush(deps.exec, parsed.repoPath, { ...parsed, remote: parsed.remote, target: parsed.target }) }
+  } catch (error) {
+    return fail(400, error instanceof Error ? error.message : String(error))
+  }
+}
+
+async function handlePushAction(deps: RouteDeps, body: unknown, execute: boolean, live?: RouteLive): Promise<RouteOutcome> {
+  const parsed = readBody<PushBody & PushPlanBody>(body, ['repoPath', 'branch'], execute ? ['force'] : [], execute ? ['remote', 'target', 'tags', 'expectedTarget', 'sourceOid'] : [])
+  if (isOutcome(parsed)) return parsed
+  if (!isAbsoluteDir(parsed.repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  if (parsed.branch.trim() === '') return fail(400, '"branch" must be non-empty')
+  if (parsed.tags !== undefined && !['none', 'all', 'follow'].includes(parsed.tags)) return fail(400, '"tags" must be none, all or follow')
+  if (parsed.sourceOid !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(parsed.sourceOid)) return fail(400, '"sourceOid" must be a full object ID')
+  if ((parsed.remote === undefined) !== (parsed.target === undefined)) return fail(400, '"remote" and "target" must be provided together')
+  if (parsed.remote !== undefined && (typeof parsed.remote !== 'string' || parsed.remote.trim() === ''
+    || typeof parsed.target !== 'string' || parsed.target.trim() === '')) return fail(400, '"remote" and "target" must be non-empty strings')
+  const { run, end } = startLive(execute ? live : undefined)
+  try {
+    return { status: 200, body: execute
+      ? await pushBranch(deps.exec, parsed.repoPath, parsed, run)
+      : await openPush(deps.exec, parsed.repoPath, parsed.branch) }
+  } catch (error) {
+    // Stopped by the caller: not a failure, and nobody is left to read it.
+    if (error instanceof CancelledError) return fail(499, error.message)
+    return fail(400, error instanceof Error ? error.message : String(error))
+  } finally {
+    end()
+  }
+}
+
+/**
+ * POST /update — update the CURRENT checkout: fetch every remote, then
  * fast-forward the branch checked out by the queried directory to its
  * upstream. Divergence, a missing upstream, and conflicting working-tree
  * changes all surface as 400 envelopes carrying git's own explanation.
  * @param deps - host dependencies.
  * @param body - parsed request body.
+ * @param live - the streaming channel (absent = the plain request).
  */
-export async function handleUpdate(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+export async function handleUpdate(deps: RouteDeps, body: unknown, live?: RouteLive): Promise<RouteOutcome> {
   const parsed = readBody<UpdateBody>(body, ['repoPath'])
   if (isOutcome(parsed)) return parsed
   const { repoPath } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  const { run, end } = startLive(live)
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
@@ -687,12 +797,15 @@ export async function handleUpdate(deps: RouteDeps, body: unknown): Promise<Rout
     // session "update current branch" means the branch that worktree holds.
     // `repoRoot` would fast-forward the main checkout behind the user's back
     // (both are the same directory when the session IS the main checkout).
-    const outcome = await updateBranch(deps.exec, facts.toplevel)
+    const outcome = await updateBranch(deps.exec, facts.toplevel, run)
     const result: UpdateResult = { branch: outcome.branch, updated: outcome.updated }
     return { status: 200, body: result }
   } catch (error) {
+    if (error instanceof CancelledError) return fail(499, error.message)
     if (error instanceof GitError) return gitFailure(error)
     return fail(500, error instanceof Error ? error.message : String(error))
+  } finally {
+    end()
   }
 }
 

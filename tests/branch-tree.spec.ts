@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows,
+  buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows, repoHasRemotes, syncActions, syncMark,
   type BranchRow, type TreeNode,
 } from '../src/client/branch-tree.ts'
 import { buildBranchRows, buildLinkedWorktreeRows } from '../src/client/BranchChip.tsx'
@@ -163,6 +163,23 @@ describe('groupKey', () => {
 })
 
 describe('buildBranchRows', () => {
+  it('keeps tracking identity for local, worktree and linked-worktree rows', () => {
+    const branches: BranchEntry[] = [
+      { name: 'main', kind: 'local', upstream: 'origin/main' },
+      { name: 'topic', kind: 'local', upstream: 'origin/topic', upstreamGone: true },
+    ]
+    const worktrees: WorktreeEntry[] = [
+      { path: '/repo', branch: 'main', main: true },
+      { path: '/topic', branch: 'topic', main: false },
+    ]
+    const mainRows = buildBranchRows(branches, worktrees)
+    expect(mainRows.find(row => row.name === 'main')).toMatchObject({ upstream: 'origin/main' })
+    expect(mainRows.find(row => row.name === 'topic')).toMatchObject({ kind: 'worktree', upstream: 'origin/topic', upstreamGone: true })
+    const linkedRows = buildLinkedWorktreeRows(branches, worktrees, 'topic')
+    expect(linkedRows.find(row => row.name === 'topic')).toMatchObject({ kind: 'local', upstream: 'origin/topic', upstreamGone: true })
+    expect(linkedRows.find(row => row.name === 'main')).toMatchObject({ kind: 'worktree', upstream: 'origin/main' })
+  })
+
   it('inherits ahead and behind from the matching local branch into worktree rows', () => {
     const branches: BranchEntry[] = [
       { name: 'main', kind: 'local', ahead: 0, behind: 0 },
@@ -289,5 +306,62 @@ describe('buildLinkedWorktreeRows', () => {
     expect(rows.find(r => r.name === 'feat/unheld')).toBeUndefined()
     // Current branch worktree row is not duplicated in worktree group:
     expect(rows.filter(r => r.name === 'feat/current')).toHaveLength(1)
+  })
+})
+
+describe('syncMark', () => {
+  const row = (extra: Partial<BranchRow>): BranchRow => ({ name: 'feat/x', kind: 'local', ...extra })
+
+  it('marks a branch with no upstream "unpublished", but only where a remote exists', () => {
+    expect(syncMark(row({}), true)).toEqual({ kind: 'diverged', outgoing: 'unpublished', incoming: null })
+    // A purely local repository: every branch would read unpublished, which is noise.
+    expect(syncMark(row({}), false)).toBeNull()
+    expect(syncMark(row({ kind: 'worktree', path: '/wt' }), false)).toBeNull()
+  })
+
+  it('shows commits ahead as outgoing and commits behind as incoming', () => {
+    expect(syncMark(row({ upstream: 'origin/x', ahead: 2 }), true)).toEqual({ kind: 'diverged', outgoing: 2, incoming: null })
+    expect(syncMark(row({ upstream: 'origin/x', behind: 3 }), true)).toEqual({ kind: 'diverged', outgoing: null, incoming: 3 })
+    expect(syncMark(row({ upstream: 'origin/x', ahead: 1, behind: 4 }), true)).toEqual({ kind: 'diverged', outgoing: 1, incoming: 4 })
+  })
+
+  it('shows nothing for a branch in sync, and nothing for a remote row', () => {
+    expect(syncMark(row({ upstream: 'origin/x', ahead: 0, behind: 0 }), true)).toBeNull()
+    expect(syncMark(row({ upstream: 'origin/x' }), true)).toBeNull()
+    expect(syncMark({ name: 'origin/x', kind: 'remote' }, true)).toBeNull()
+  })
+
+  it('reports a vanished upstream by name, whatever the remote situation', () => {
+    expect(syncMark(row({ upstream: 'origin/x', upstreamGone: true, ahead: 5 }), true)).toEqual({ kind: 'gone', upstream: 'origin/x' })
+    expect(syncMark(row({ upstream: 'origin/x', upstreamGone: true }), false)).toEqual({ kind: 'gone', upstream: 'origin/x' })
+  })
+})
+
+describe('repoHasRemotes', () => {
+  it('sees a remote-tracking ref or any branch that names an upstream', () => {
+    expect(repoHasRemotes([{ kind: 'local' }, { kind: 'local' }])).toBe(false)
+    expect(repoHasRemotes([])).toBe(false)
+    expect(repoHasRemotes([{ kind: 'local' }, { kind: 'remote' }])).toBe(true)
+    expect(repoHasRemotes([{ kind: 'local', upstream: 'origin/main' }])).toBe(true)
+  })
+})
+
+describe('syncActions', () => {
+  const row = (extra: Partial<BranchRow>): BranchRow => ({ name: 'feat/x', kind: 'local', ...extra })
+
+  it('offers push on every local and worktree row, with or without a checkout', () => {
+    expect(syncActions(row({}), 'main')).toEqual(['push'])
+    expect(syncActions(row({ kind: 'worktree', path: '/wt' }), 'main')).toEqual(['push'])
+  })
+
+  it('adds update only for the checked-out branch and only with a live upstream', () => {
+    expect(syncActions(row({ upstream: 'origin/x' }), 'feat/x')).toEqual(['push', 'update'])
+    expect(syncActions(row({ upstream: 'origin/x' }), 'main')).toEqual(['push'])
+    expect(syncActions(row({}), 'feat/x')).toEqual(['push'])
+    expect(syncActions(row({ upstream: 'origin/x', upstreamGone: true }), 'feat/x')).toEqual(['push'])
+  })
+
+  it('offers nothing on a remote row', () => {
+    expect(syncActions({ name: 'origin/x', kind: 'remote' }, 'feat/x')).toEqual([])
   })
 })

@@ -4,11 +4,12 @@
  * argument assembly plus porcelain parsing, no ambient state.
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 import { localBranchName } from './normalize.js'
+import { stripProgress } from './progress.js'
 import type { BranchEntry, WorktreeEntry, WorkspaceGitFacts } from './wire.js'
 
 /** One process result as the seam reports it. */
@@ -16,13 +17,32 @@ export interface ExecResult {
   code: number
   stdout: string
   stderr: string
+  /** The run was stopped by its `signal` (set by a live run only). */
+  cancelled?: boolean
+}
+
+/** Options of one {@link Exec} call. */
+export interface ExecOptions {
+  cwd: string
+  /** Hard cap on the whole run. Absent = 20 s for a plain run, none for a
+   * live one (which is bounded by `idleTimeoutMs` and its `signal`). */
+  timeoutMs?: number
+  nonInteractive?: boolean
+  /** Live run: git's stdout and stderr text, chunk by chunk as it is written.
+   * Any of the three live options moves the run onto a streaming spawn. */
+  onOutput?: (chunk: string) => void
+  /** Live run: aborting kills git and its transport children and answers
+   * `cancelled`. */
+  signal?: AbortSignal
+  /** Live run: kill git after this long without a byte of output. */
+  idleTimeoutMs?: number
 }
 
 /**
  * Process executor seam. Runs `file args` with cwd set, captures output as
  * UTF-8 text, and never throws — a non-zero exit is a normal result.
  */
-export type Exec = (file: string, args: readonly string[], options: { cwd: string }) => Promise<ExecResult>
+export type Exec = (file: string, args: readonly string[], options: ExecOptions) => Promise<ExecResult>
 
 /** Failure of one git invocation: non-zero exit with the stderr text. */
 export class GitError extends Error {
@@ -61,15 +81,115 @@ export interface RepoFacts {
   worktrees: WorktreeEntry[]
 }
 
-/** Real executor over node:child_process with a hard timeout. */
-export function childProcessExec(file: string, args: readonly string[], options: { cwd: string }): Promise<ExecResult> {
+/** Appended to the stderr of a run that was killed for taking too long. */
+const TIMED_OUT = 'Git command timed out; check the remote before retrying.'
+
+/** Environment of one run: `nonInteractive` stops git (and its credential
+ * helper) from waiting on a prompt nobody can answer. */
+function execEnv(options: ExecOptions): { env: NodeJS.ProcessEnv } | Record<string, never> {
+  return options.nonInteractive ? { env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } } : {}
+}
+
+/** Real executor over node:child_process: a buffered run with a hard timeout,
+ * or — when the caller asks for live output / cancellation — a streaming one. */
+export function childProcessExec(file: string, args: readonly string[], options: ExecOptions): Promise<ExecResult> {
+  if (options.onOutput !== undefined || options.signal !== undefined || options.idleTimeoutMs !== undefined) {
+    return liveProcessExec(file, args, options)
+  }
   return new Promise((resolvePromise) => {
-    execFile(file, args, { cwd: options.cwd, encoding: 'utf8', timeout: 20_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(file, args, { cwd: options.cwd, encoding: 'utf8', timeout: options.timeoutMs ?? 20_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024,
+      ...execEnv(options),
+    }, (error, stdout, stderr) => {
       // execFile reports any failure (non-zero exit, spawn error, timeout) as
       // a truthy error; the specific exit code never carries signal here —
       // stderr does — so every failure collapses to 1.
-      resolvePromise({ code: error !== null ? 1 : 0, stdout: stdout ?? '', stderr: stderr ?? '' })
+      resolvePromise({ code: error !== null ? 1 : 0, stdout: stdout ?? '', stderr: error?.killed ? `${stderr ?? ''}\n${TIMED_OUT}` : stderr || error?.message || '' })
     })
+  })
+}
+
+/** What a live run keeps of each stream: git's progress redraws can run to
+ * megabytes, but only the head of stdout and the tail of stderr (where the
+ * failure is) are ever read back. */
+const STDOUT_KEEP = 1024 * 1024
+const STDERR_KEEP = 256 * 1024
+
+/**
+ * Stop git AND the transport processes it started. `child.kill()` alone
+ * leaves them running on Windows (it is TerminateProcess on one pid), so a
+ * cancelled fetch would keep downloading in the background; POSIX git cleans
+ * up its own children on SIGTERM.
+ */
+function killProcessTree(child: ChildProcess): void {
+  if (child.pid === undefined || child.exitCode !== null) return
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    killer.on('error', () => { child.kill() })
+    return
+  }
+  child.kill('SIGTERM')
+}
+
+/** Streaming executor: reports output as it arrives and honours a signal. */
+function liveProcessExec(file: string, args: readonly string[], options: ExecOptions): Promise<ExecResult> {
+  return new Promise((resolvePromise) => {
+    if (options.signal?.aborted) {
+      resolvePromise({ code: 1, stdout: '', stderr: '', cancelled: true })
+      return
+    }
+    const child = spawn(file, args, { cwd: options.cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...execEnv(options) })
+    let stdout = ''
+    let stderr = ''
+    let cancelled = false
+    let timedOut = false
+    let settled = false
+    let idleTimer: NodeJS.Timeout | undefined
+    let hardTimer: NodeJS.Timeout | undefined
+
+    const result = (code: number): ExecResult => ({
+      code: cancelled || timedOut ? 1 : code,
+      stdout,
+      stderr: timedOut ? `${stderr}\n${TIMED_OUT}` : stderr,
+      ...cancelled ? { cancelled: true } : {},
+    })
+    const settle = (outcome: ExecResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(idleTimer)
+      clearTimeout(hardTimer)
+      options.signal?.removeEventListener('abort', onAbort)
+      resolvePromise(outcome)
+    }
+    const stop = (): void => { killProcessTree(child) }
+    const onAbort = (): void => { cancelled = true; stop() }
+    const armIdle = (): void => {
+      if (options.idleTimeoutMs === undefined) return
+      clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => { timedOut = true; stop() }, options.idleTimeoutMs)
+    }
+
+    options.signal?.addEventListener('abort', onAbort, { once: true })
+    if (options.timeoutMs !== undefined) hardTimer = setTimeout(() => { timedOut = true; stop() }, options.timeoutMs)
+    armIdle()
+
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      if (stdout.length < STDOUT_KEEP) stdout += chunk
+      armIdle()
+      options.onOutput?.(chunk)
+    })
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk
+      if (stderr.length > STDERR_KEEP * 2) stderr = stderr.slice(-STDERR_KEEP)
+      armIdle()
+      options.onOutput?.(chunk)
+    })
+    child.on('error', (error) => { settle({ code: 1, stdout, stderr: stderr || error.message }) })
+    // A killed run settles on exit: a transport grandchild that outlived the
+    // kill could hold the pipes open and postpone `close` indefinitely.
+    child.on('exit', (code) => { if (cancelled || timedOut) settle(result(code ?? 1)) })
+    child.on('close', (code) => { settle(result(code ?? 1)) })
   })
 }
 
@@ -210,17 +330,16 @@ async function currentBranch(exec: Exec, cwd: string): Promise<string> {
  * exists) plus remote-only branches across EVERY remote (`<remote>/HEAD`
  * dropped).
  *
- * The upstream track comes from `%(upstream:track)`, which renders
- * `[ahead N, behind M]` (or a bare `[gone]`) directly after the refname —
- * `[` is illegal in refnames, so `indexOf('[')` splits name from track
- * without a separator. `[gone]` (upstream deleted server-side) carries no
- * counts and is dropped here; the UI renders no marker for it.
+ * Track follows the refname (`[` is forbidden in refs); a tab separates
+ * the configured upstream. Keeping the upstream and [gone] fact lets the
+ * UI distinguish unpublished branches from synchronized and deleted ones.
  */
 async function listBranches(exec: Exec, repoRoot: string): Promise<BranchEntry[]> {
-  const localOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)%(upstream:track)'])
+  const localOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)%(upstream:track)%09%(upstream:short)'])
   const entries: BranchEntry[] = []
   for (const line of localOut.split('\n')) {
-    const trimmed = line.trim()
+    const [label = '', upstream = ''] = line.split('\t')
+    const trimmed = label.trim()
     if (trimmed === '') continue
     const bracket = trimmed.indexOf('[')
     const name = (bracket === -1 ? trimmed : trimmed.slice(0, bracket)).trim()
@@ -229,6 +348,8 @@ async function listBranches(exec: Exec, repoRoot: string): Promise<BranchEntry[]
     const ahead = /\bahead (\d+)/.exec(track)
     const behind = /\bbehind (\d+)/.exec(track)
     const entry: BranchEntry = { name, kind: 'local' }
+    if (upstream !== '') entry.upstream = upstream.trim()
+    if (track === '[gone]') entry.upstreamGone = true
     if (ahead !== null) entry.ahead = Number(ahead[1])
     if (behind !== null) entry.behind = Number(behind[1])
     entries.push(entry)
@@ -502,13 +623,99 @@ export async function deleteBranch(exec: Exec, repoRoot: string, name: string): 
  * Sync remote-tracking refs: fetch every remote and prune tracking branches
  * the remotes no longer carry (the CLI equivalent of IDEA's "synchronize
  * remote branches"). Pure metadata — the working tree, local branches, and
- * the current checkout are untouched; a slow network surfaces through the
- * executor's hard timeout as a GitError.
+ * the current checkout are untouched. A plain call is bounded by the
+ * executor's hard timeout; a {@link LiveRun} lifts that for a transfer the
+ * user can watch and cancel.
  * @param exec - executor seam.
  * @param repoRoot - main worktree directory (fetch is repository-wide).
+ * @param live - optional live output / cancellation of this run.
  */
-export async function fetchAll(exec: Exec, repoRoot: string): Promise<void> {
-  await git(exec, repoRoot, ['fetch', '--all', '--prune'])
+export async function fetchAll(exec: Exec, repoRoot: string, live?: LiveRun): Promise<void> {
+  if (live === undefined) {
+    await git(exec, repoRoot, FETCH_ARGS)
+    return
+  }
+  // One fetch per remote instead of `--all --progress`: with several remotes
+  // git runs a child per remote and never hands it `--progress`, so the
+  // counters would silently vanish exactly in the fork setups that have them.
+  // Like `--all`, a failing remote does not stop the others.
+  let failure: { code: number; messages: string[] } | undefined
+  for (const remote of await fetchableRemotes(exec, repoRoot)) {
+    live.onRemote?.(remote)
+    // `--progress` because git only draws its counters on a terminal otherwise.
+    const result = await exec('git', ['fetch', remote, '--prune', '--progress'], { cwd: repoRoot, ...liveExecOptions(live) })
+    if (result.cancelled) throw new CancelledError()
+    if (result.code !== 0) {
+      failure ??= { code: result.code, messages: [] }
+      // git's words without the thousand progress redraws before them.
+      failure.messages.push(stripProgress(result.stderr))
+    }
+  }
+  // The error names the command the user knows, not the per-remote plumbing.
+  if (failure !== undefined) throw new GitError(FETCH_ARGS, failure.code, failure.messages.join('\n'))
+}
+
+/** The fetch every plain sync runs. */
+const FETCH_ARGS: readonly string[] = ['fetch', '--all', '--prune']
+
+/**
+ * The remotes `git fetch --all` would visit: all of them except those marked
+ * `remote.<name>.skipFetchAll` — a live run walks them itself.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @returns remote names, in git's order.
+ */
+async function fetchableRemotes(exec: Exec, repoRoot: string): Promise<string[]> {
+  const names = (await git(exec, repoRoot, ['remote'])).split('\n').map(line => line.trim()).filter(line => line !== '')
+  const flags = await gitMaybe(exec, repoRoot, ['config', '--bool', '--get-regexp', '^remote\\..+\\.skipfetchall$'])
+  const skipped = new Set<string>()
+  for (const line of (flags ?? '').split('\n')) {
+    const name = /^remote\.(.+)\.skipfetchall\s+true$/i.exec(line.trim())?.[1]
+    if (name !== undefined) skipped.add(name)
+  }
+  return names.filter(name => !skipped.has(name))
+}
+
+/** A live run's patience with a silent git: long enough for a remote that
+ * takes minutes to enumerate a huge repository (or a pre-push hook that runs
+ * the test suite), short enough that a stuck connection is not left spinning
+ * for good. */
+export const LIVE_IDLE_TIMEOUT_MS = 5 * 60_000
+
+/**
+ * The executor options that make one git run live: no whole-run cap, only
+ * {@link LIVE_IDLE_TIMEOUT_MS} of silence, plus the caller's output sink and
+ * cancellation signal.
+ * @param live - the run's live channel.
+ * @returns options to spread into an {@link Exec} call (next to `cwd`).
+ */
+export function liveExecOptions(live: LiveRun): Pick<ExecOptions, 'idleTimeoutMs' | 'onOutput' | 'signal'> {
+  return {
+    idleTimeoutMs: LIVE_IDLE_TIMEOUT_MS,
+    ...live.onOutput === undefined ? {} : { onOutput: live.onOutput },
+    ...live.signal === undefined ? {} : { signal: live.signal },
+  }
+}
+
+/** Watching and stopping one long git run (a fetch the UI shows progress for). */
+export interface LiveRun {
+  /** git's stdout and stderr text as it is written. */
+  onOutput?: (chunk: string) => void
+  /** The fetch moves on to this remote; its output follows. */
+  onRemote?: (remote: string) => void
+  /** Aborting kills git; the call then throws {@link CancelledError}. */
+  signal?: AbortSignal
+  /** The fetch is over and the fast-forward begins — the last step, which
+   * is quick and not worth interrupting half way. */
+  onMerge?: () => void
+}
+
+/** A live run its caller aborted — not a failure anyone needs to hear about. */
+export class CancelledError extends Error {
+  constructor() {
+    super('Cancelled')
+    this.name = 'CancelledError'
+  }
 }
 
 /** Outcome of {@link updateBranch}: the branch touched and whether it moved. */
@@ -528,11 +735,16 @@ export interface UpdateOutcome {
  * branch ITS worktree holds.
  * @param exec - executor seam.
  * @param cwd - directory whose checked-out branch is updated.
+ * @param live - optional live output / cancellation of the fetch step.
  * @returns the branch name and whether HEAD actually moved (false = the
  * upstream already contained it).
  */
-export async function updateBranch(exec: Exec, cwd: string): Promise<UpdateOutcome> {
-  await fetchAll(exec, cwd)
+export async function updateBranch(exec: Exec, cwd: string, live?: LiveRun): Promise<UpdateOutcome> {
+  await fetchAll(exec, cwd, live)
+  // Cancelled in the instant between the fetch ending and now: honour it,
+  // never move the user's branch after they said stop.
+  if (live?.signal?.aborted) throw new CancelledError()
+  live?.onMerge?.()
   const before = (await git(exec, cwd, ['rev-parse', 'HEAD'])).trim()
   await git(exec, cwd, ['merge', '--ff-only', '@{u}'])
   const after = (await git(exec, cwd, ['rev-parse', 'HEAD'])).trim()

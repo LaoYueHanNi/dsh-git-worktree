@@ -4,6 +4,8 @@
  * branch without try/catch.
  */
 
+import type { PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, SyncEvent, SyncFrame } from '../wire.ts'
+import { NDJSON_TYPE, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW } from '../wire.ts'
 import type {
   CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult, WorktreesAllResult,
 } from '../wire.ts'
@@ -25,19 +27,92 @@ async function send<T>(method: string, url: string, body: unknown): Promise<Call
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch {
-      // An empty or non-JSON body (e.g. a 404 from a host that has not
-      // loaded this build yet): the status code is the whole message.
-      return { ok: false, error: `HTTP ${String(response.status)}` }
+    return await readEnvelope<T>(response)
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/** Parse one whole-body JSON response into the uniform envelope. */
+async function readEnvelope<T>(response: Response): Promise<Call<T>> {
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    // An empty or non-JSON body (e.g. a 404 from a host that has not
+    // loaded this build yet): the status code is the whole message.
+    return { ok: false, error: `HTTP ${String(response.status)}` }
+  }
+  if (!response.ok) {
+    const error = payload as RouteError
+    return { ok: false, error: error.error ?? `HTTP ${String(response.status)}` }
+  }
+  return { ...(payload as T), ok: true }
+}
+
+/** Live side of a streamed call: progress events in, cancellation out. */
+export interface LiveCall {
+  /** Aborting closes the connection, which makes the host kill git. */
+  signal?: AbortSignal
+  /** Receives each progress event while the call runs. */
+  onEvent?: (event: SyncEvent) => void
+}
+
+/** The text a stream cut short (host restart, dropped connection) reports. */
+const STREAM_CUT = 'Connection closed before the operation finished'
+
+/**
+ * POST one JSON body to a streamed route (NDJSON of {@link SyncFrame}s) and
+ * resolve with what the route would have answered in one piece, taken from
+ * the closing `done` frame. A response that is not a stream — a body-level
+ * 400, or a host build that predates streaming and answers plain JSON — is
+ * read as the ordinary envelope, so both ends upgrade independently.
+ * @param url - the streamed route.
+ * @param body - JSON request body.
+ * @param live - progress listener and cancellation signal.
+ */
+async function postStream<T>(url: string, body: unknown, live: LiveCall = {}): Promise<Call<T>> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      ...(live.signal === undefined ? {} : { signal: live.signal }),
+    })
+    if (response.body === null || !(response.headers.get('content-type') ?? '').includes(NDJSON_TYPE)) {
+      return await readEnvelope<T>(response)
     }
-    if (!response.ok) {
-      const error = payload as RouteError
-      return { ok: false, error: error.error ?? `HTTP ${String(response.status)}` }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let pending = ''
+    const closing: { frame?: Extract<SyncFrame, { type: 'done' }> } = {}
+    const take = (line: string): void => {
+      if (line.trim() === '') return
+      let frame: SyncFrame
+      try {
+        frame = JSON.parse(line) as SyncFrame
+      } catch {
+        // A garbled line costs one progress tick, never the whole call.
+        return
+      }
+      if (frame.type === 'done') closing.frame = frame
+      else live.onEvent?.(frame)
     }
-    return { ...(payload as T), ok: true }
+    for (;;) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      pending += decoder.decode(chunk.value, { stream: true })
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+      lines.forEach(take)
+    }
+    take(pending + decoder.decode())
+    const done = closing.frame
+    if (done === undefined) return { ok: false, error: STREAM_CUT }
+    if (done.status < 200 || done.status >= 300) {
+      return { ok: false, error: (done.body as Partial<RouteError> | undefined)?.error ?? `HTTP ${String(done.status)}` }
+    }
+    return { ...(done.body as T), ok: true }
   } catch (cause) {
     return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
   }
@@ -144,18 +219,38 @@ export function requestDeleteBranch(repoPath: string, name: string): Promise<Cal
 /**
  * Sync remote-tracking refs (fetch every remote + prune) for the repository.
  * @param repoPath - absolute directory inside the repository.
+ * @param live - progress listener and cancellation signal.
  */
-export function requestFetch(repoPath: string): Promise<Call<FetchResult>> {
-  return post<FetchResult>(ROUTE_FETCH, { repoPath })
+export function requestFetch(repoPath: string, live?: LiveCall): Promise<Call<FetchResult>> {
+  return postStream<FetchResult>(ROUTE_FETCH, { repoPath }, live)
 }
 
 /**
  * Update the CURRENT checkout: fetch every remote, then fast-forward the
  * checked-out branch to its upstream.
  * @param repoPath - absolute directory whose checked-out branch is updated.
+ * @param live - progress listener and cancellation signal.
  */
-export function requestUpdate(repoPath: string): Promise<Call<UpdateResult>> {
-  return post<UpdateResult>(ROUTE_UPDATE, { repoPath })
+export function requestUpdate(repoPath: string, live?: LiveCall): Promise<Call<UpdateResult>> {
+  return postStream<UpdateResult>(ROUTE_UPDATE, { repoPath }, live)
+}
+
+export function requestPushPlan(repoPath: string, branch: string): Promise<Call<PushPlan>> {
+  return post<PushPlan>(ROUTE_PUSH_PLAN, { repoPath, branch })
+}
+
+export function requestPushPreview(body: PushPreviewBody): Promise<Call<PushPreview>> {
+  return post<PushPreview>(ROUTE_PUSH_PREVIEW, body)
+}
+
+/**
+ * Push one branch: streamed, so a long upload reports git's progress and can
+ * be cancelled by aborting.
+ * @param body - what to push and where.
+ * @param live - progress listener and cancellation signal.
+ */
+export function requestPush(body: PushBody, live?: LiveCall): Promise<Call<PushResult>> {
+  return postStream<PushResult>(ROUTE_PUSH, body, live)
 }
 
 /**
