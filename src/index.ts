@@ -20,6 +20,8 @@ import {
   type RouteDeps, type RouteLive, type RouteOutcome,
 } from './routes.js'
 import { validateRootDir } from './settings.js'
+import { handleHistory, handleCommit } from './routes.js'
+import { ROUTE_HISTORY, ROUTE_COMMIT } from './wire.js'
 import { streamRoute } from './stream.js'
 import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
@@ -266,6 +268,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     } }), 'git-worktree: head route')
 
     postRoute(ROUTE_WORKTREE, 'worktree', handleCreateWorktree)
+    postRoute(ROUTE_HISTORY, 'history', handleHistory)
+    postRoute(ROUTE_COMMIT, 'commit', handleCommit)
     postRoute(ROUTE_SWITCH, 'switch', handleSwitch)
     postRoute(ROUTE_BRANCH, 'branch', handleCreateBranch)
     postRoute(ROUTE_BRANCH_RENAME, 'branch-rename', handleRenameBranch)

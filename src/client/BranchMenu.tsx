@@ -116,6 +116,7 @@ import {
   type BranchRow, type TreeNode,
 } from './branch-tree.ts'
 import { dispatchBranchMenuKeyDown } from './branch-keyboard.ts'
+import { CommitGraph } from './CommitGraph.tsx'
 import css from './BranchChip.module.css'
 
 // The row type travels with the component for every caller (BranchChip
@@ -162,6 +163,7 @@ export interface BranchConfirmFly {
 
 /** Full props: anchor + data + confirm bundle + callbacks + locale seat. */
 export interface BranchMenuProps {
+  repoPath: string
   /** Whether the popup shows. */
   open: boolean
   /** The chip element — the popup's bottom edge pins just above its top. */
@@ -433,9 +435,24 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, hasRemotes, updateBusy, onClose, t,
+  open, repoPath, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, hasRemotes, updateBusy, onClose, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
+  const [graphOpen, setGraphOpen] = useState(false)
+  const graphOpenRef = useRef(graphOpen)
+  graphOpenRef.current = graphOpen
+  const graphEscapeRef = useRef<(() => boolean) | null>(null)
+  const graphAnimationRef = useRef<Animation | null>(null)
+  const graphStartRectRef = useRef<DOMRect | null>(null)
+  const changeGraphOpen = useCallback((value: boolean): void => {
+    if (value === graphOpenRef.current) return
+    // Capture the displayed size before cancelling, so a rapid reversal
+    // continues from the current frame rather than jumping to an endpoint.
+    graphStartRectRef.current = cardRef.current?.getBoundingClientRect() ?? null
+    graphAnimationRef.current?.cancel()
+    graphAnimationRef.current = null
+    setGraphOpen(value)
+  }, [])
   const inputRef = useRef<HTMLInputElement | null>(null)
   /**
    * Search-field ref callback: focus the field the moment it mounts. The
@@ -472,7 +489,7 @@ export function BranchMenu({
    * row while the flyout is open must re-anchor it (confirmOpen alone
    * stays true, so a ref mutation re-renders nothing). */
   const [pendingName, setPendingName] = useState<string | null>(null)
-  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
+  const [pos, setPos] = useState<{ left: number; bottom: number; width?: number; height?: number } | null>(null)
   const [query, setQuery] = useState('')
   /** Expanded folder set, keyed by group-prefixed node path (see groupKey).
    * Re-seeded on every open so the current branch's chain is visible
@@ -639,6 +656,13 @@ export function BranchMenu({
     return null
   }
 
+  const browsingRow = selected === null ? null : findRow(selected)
+  const browsingBranch = browsingRow?.kind === 'remote'
+    ? grouped.remoteNameMap.get(browsingRow.name) ?? browsingRow.name
+    : browsingRow?.name ?? currentBranch
+  const browsingRef = browsingRow?.kind === 'remote' ? `refs/remotes/${browsingBranch}`
+    : browsingBranch && browsingBranch !== 'HEAD' ? `refs/heads/${browsingBranch}` : 'HEAD'
+
   /** Every folder key that renders a header — the expand/collapse-all
    * button's scope (group-prefixed, see groupKey). */
   const folderPaths = useMemo(() => [
@@ -712,8 +736,8 @@ export function BranchMenu({
   // A selection that no longer exists in the rows (worktree toggle, refresh)
   // must not linger as a phantom Enter target.
   useEffect(() => {
-    if (selected !== null && !rows.some(r => r.name === selected)) setSelected(null)
-  }, [rows, selected])
+    if (selected !== null && !rows.some(r => r.name === selected) && !grouped.remoteNameMap.has(selected)) setSelected(null)
+  }, [rows, selected, grouped.remoteNameMap])
 
   /** Toggle one folder header. */
   const toggle = (path: string): void => {
@@ -725,33 +749,83 @@ export function BranchMenu({
     })
   }
 
-  // Pin above the chip on open and on viewport movement while open. CSS
-  // `bottom` pinning means the card grows upward from that edge without
-  // measuring its own height; the width is fixed by CSS, so the horizontal
-  // clamp is deterministic.
+  // Measure the host composer instead of duplicating its adjustable width
+  // preference. Keep every popup above that card, including while resizing.
   useLayoutEffect(() => {
     if (!open) {
       setPos(null)
       setCtx(null)
       return
     }
+    let previousBounds = ''
     const place = (): void => {
       const anchor = anchorRef.current
       if (anchor === null) return
       const rect = anchor.getBoundingClientRect()
       const vw = window.innerWidth
       const vh = window.innerHeight
-      const left = Math.min(Math.max(rect.left, MARGIN), Math.max(MARGIN, vw - CARD_WIDTH - MARGIN))
-      setPos({ left, bottom: vh - rect.top + GAP })
+      const composer = anchor.closest<HTMLElement>('[data-composer-card]')
+      const bounds = composer?.getBoundingClientRect() ?? rect
+      const lowerEdge = Math.min(vh - MARGIN, bounds.top - GAP)
+      // A resize during the expansion must immediately obey the new bounds,
+      // rather than letting the old animation temporarily cover the composer.
+      const nextBounds = [vw, vh, bounds.left, bounds.top, bounds.width].join(':')
+      if (nextBounds !== previousBounds) {
+        graphAnimationRef.current?.cancel()
+        graphAnimationRef.current = null
+        previousBounds = nextBounds
+      }
+      if (graphOpen) {
+        const width = Math.max(0, Math.min(1060, bounds.width, vw - 2 * MARGIN))
+        const height = Math.max(0, Math.min(700, lowerEdge - MARGIN))
+        const left = Math.min(Math.max(bounds.left + (bounds.width - width) / 2, MARGIN), Math.max(MARGIN, vw - width - MARGIN))
+        const bottomEdge = Math.min((vh + height) / 2, lowerEdge)
+        setPos({ left, width, height, bottom: vh - bottomEdge })
+        return
+      }
+      const width = CARD_WIDTH
+      const left = Math.min(Math.max(rect.left, MARGIN), Math.max(MARGIN, vw - width - MARGIN))
+      setPos({ left, bottom: vh - lowerEdge })
     }
     place()
+    const observer = new ResizeObserver(place)
+    const composer = anchorRef.current?.closest<HTMLElement>('[data-composer-card]')
+    const conversation = anchorRef.current?.closest<HTMLElement>('[data-conversation-content]')
+    if (composer) observer.observe(composer)
+    if (conversation) observer.observe(conversation)
     window.addEventListener('resize', place)
     window.addEventListener('scroll', place, true)
     return () => {
+      observer.disconnect()
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }
-  }, [open, anchorRef])
+  }, [open, anchorRef, graphOpen])
+
+  // Placement resolves in a second layout pass. Animate only after that
+  // pass, including both the move to the center and the return to the chip.
+  // Explicit measured heights allow the compact menu to retain auto height.
+  useLayoutEffect(() => {
+    const from = graphStartRectRef.current
+    graphStartRectRef.current = null
+    const card = cardRef.current
+    if (!open || !from || !card || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const to = card.getBoundingClientRect()
+    const frame = (rect: DOMRect): Keyframe => ({
+      left: `${rect.left}px`, width: `${rect.width}px`,
+      bottom: `${window.innerHeight - rect.bottom}px`,
+      height: `${rect.height}px`, maxHeight: `${rect.height}px`,
+    })
+    graphAnimationRef.current = card.animate([frame(from), frame(to)], {
+      id: 'dsh-branch-graph', duration: 220, easing: 'ease',
+    })
+  }, [pos, open])
+
+  useLayoutEffect(() => () => {
+    graphAnimationRef.current?.cancel()
+    graphAnimationRef.current = null
+    graphStartRectRef.current = null
+  }, [open])
 
   // Land the current-branch row mid-viewport when the list shows. With
   // dozens of branches the row otherwise drowns off-screen and "where am
@@ -942,6 +1016,7 @@ export function BranchMenu({
         if (confirmRef.current !== null) { confirmRef.current.onCancel(); return }
         if (creatingRef.current) { setCreating(false); setDraft(''); return }
         if (renamingRef.current !== null) { setRenaming(null); return }
+        if (graphOpenRef.current && graphEscapeRef.current?.()) { event.preventDefault(); event.stopPropagation(); return }
         if (queryRef.current.trim() !== '') { setQuery(''); return }
         if (selectedRef.current !== null) { setSelected(null); return }
         onClose()
@@ -950,6 +1025,7 @@ export function BranchMenu({
       const card = cardRef.current
       const active = document.activeElement
       if (card === null || active === null || !card.contains(active)) return
+      if (active.closest('[data-commit-history]') !== null || active.closest('[role="toolbar"]') !== null) return
       if (ctxStateRef.current !== null) return
 
       const leaves = [...card.querySelectorAll<HTMLButtonElement>('button[role="menuitem"][data-branch]')]
@@ -992,7 +1068,8 @@ export function BranchMenu({
           },
           onPick: (branch) => {
             const el = leaves.find(b => (b.dataset.branch ?? '') === branch) ?? buttonOf(branch)
-            pickRef.current(el, branch)
+            if (graphOpenRef.current) setSelected(branch)
+            else pickRef.current(el, branch)
           },
           onSelect: (branch) => {
             setSelected(branch)
@@ -1155,7 +1232,8 @@ export function BranchMenu({
    * `el` is nullable like {@link pick}'s anchor: a row whose button is
    * already unmounted still selects/picks, it just re-anchors nothing. */
   const rowClick = (el: HTMLButtonElement | null, name: string): void => {
-    if (confirmOpen) pick(el, name)
+    if (graphOpen) { confirmRef.current?.onCancel(); setSelected(name) }
+    else if (confirmOpen) pick(el, name)
     else setSelected(name)
   }
 
@@ -1715,12 +1793,22 @@ export function BranchMenu({
       {createPortal(
         <div
           ref={cardRef}
-          className={css.menuCard}
-          style={{ left: pos.left, bottom: pos.bottom }}
-          role="menu"
+          className={`${css.menuCard} ${graphOpen ? css.menuCardGraph : ''}`}
+          style={{ left: pos.left, bottom: pos.bottom, width: graphOpen ? pos.width : undefined, height: graphOpen ? pos.height : undefined, maxHeight: graphOpen ? pos.height : `max(0px, min(420px, 60vh, calc(100dvh - ${pos.bottom + MARGIN}px)))` }}
+          role={graphOpen ? 'dialog' : 'menu'}
           aria-label={t('menuBranches')}
         >
           <div className={css.menuToolbar} role="toolbar" aria-label={t('menuBranches')}>
+            <button type="button" className={`${css.menuToolButton} ${graphOpen ? css.menuToolActive : ''}`}
+              title={t(graphOpen ? 'graphToggleClose' : 'graphToggleOpen')} aria-label={t(graphOpen ? 'graphToggleClose' : 'graphToggleOpen')} aria-pressed={graphOpen}
+              onClick={() => {
+                confirmRef.current?.onCancel(); setCreating(false); setRenaming(null); setCtx(null)
+                changeGraphOpen(!graphOpen)
+              }}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                <path d="M4 4v8M12 4v2c0 3-8 1-8 5" /><circle cx="4" cy="3" r="1.8" /><circle cx="4" cy="13" r="1.8" /><circle cx="12" cy="3" r="1.8" />
+              </svg>
+            </button>
             {/* The toolbar's old plus (create from current) is GONE — branch
               * writing lives in the row context menu (新建 / 新建并检出 /
               * 重命名 / 删除), where the target branch is the row under the
@@ -1852,12 +1940,15 @@ export function BranchMenu({
                 onKeyDown={event => {
                   if (event.key === 'Enter' && !event.altKey) {
                     event.preventDefault()
-                    commitFirst()
+                    if (graphOpen) setSelected(visible[0]?.name ?? null)
+                    else commitFirst()
                   }
                 }}
               />
             </div>
           </div>
+          {graphOpen && <CommitGraph key={`${repoPath}:${browsingRef}`} repoPath={repoPath} branchRef={browsingRef}
+            branch={browsingBranch || 'HEAD'} escapeRef={graphEscapeRef} t={t} onClose={onClose} />}
         </div>,
         document.body,
       )}

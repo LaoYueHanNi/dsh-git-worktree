@@ -1008,6 +1008,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       </span>
       <BranchMenu
         open={menuOpen}
+        repoPath={cwd ?? facts.repoRoot}
         anchorRef={chipRef}
         rows={rows}
         currentBranch={facts.currentBranch}

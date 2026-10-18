@@ -25,7 +25,7 @@ const WATCHED = [
   // BranchMenu builds a lot of JSX during render (the row renderers, the
   // ctxItems array) and WorktreeManagerModal builds its rows the same way
   // — precisely the shape this gate exists for.
-  'BranchMenu.tsx', 'WorktreeManagerModal.tsx',
+  'BranchMenu.tsx', 'WorktreeManagerModal.tsx', 'CommitGraph.tsx',
 ] as const
 
 /** One violation: a later-declared const referenced by an earlier JSX const. */

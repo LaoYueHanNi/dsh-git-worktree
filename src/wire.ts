@@ -15,6 +15,45 @@ export const ROUTE_STATUS = `${ROUTE_PREFIX}/status`
  * A file read of HEAD, not a git process. */
 export const ROUTE_HEAD = `${ROUTE_PREFIX}/head`
 
+/** Read-only POSTs: bounded history and one commit's full message/summary. */
+export const ROUTE_HISTORY = `${ROUTE_PREFIX}/history`
+export const ROUTE_COMMIT = `${ROUTE_PREFIX}/commit`
+
+export interface HistoryBody {
+  repoPath: string
+  /** Explicit refs/heads/... or refs/remotes/...; HEAD for detached/unborn. */
+  ref: string
+  /** Subsequent pages stay pinned to the first response's tip. */
+  tip?: string
+  offset?: string
+}
+
+export interface HistoryCommit {
+  oid: string
+  parents: string[]
+  author: string
+  date: string
+  subject: string
+}
+
+export interface CommitHistory {
+  tip: string | null
+  commits: HistoryCommit[]
+  next: number | null
+}
+
+export interface CommitDetail extends HistoryCommit {
+  body: string
+  /** Summary relative to the first parent (empty tree for a root). */
+  files: number
+  firstFile: string | null
+  added: number
+  removed: number
+  binaryFiles: number
+}
+
+export interface CommitBody { repoPath: string; oid: string }
+
 /** POST ROUTE_PREFIX/worktree — create-or-reuse a worktree for a branch. */
 export const ROUTE_WORKTREE = `${ROUTE_PREFIX}/worktree`
 

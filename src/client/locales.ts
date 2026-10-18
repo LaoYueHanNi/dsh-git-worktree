@@ -6,6 +6,33 @@
 
 /** Every copy key the plugin surfaces (chip, dialogs, settings card). */
 export type GitWorktreeKey =
+  | 'graphTitle'
+  | 'graphDetail'
+  | 'graphNoBody'
+  | 'graphExpandBody'
+  | 'graphCollapseBody'
+  | 'graphNoFiles'
+  | 'graphFiles'
+  | 'graphBinary'
+  | 'graphRefresh'
+  | 'graphCloseWindow'
+  | 'graphToggleOpen'
+  | 'graphToggleClose'
+  | 'graphSearch'
+  | 'graphSearchPlaceholder'
+  | 'graphAuthorFilter'
+  | 'graphAllAuthors'
+  | 'graphColumn'
+  | 'graphCommit'
+  | 'graphAuthor'
+  | 'graphDate'
+  | 'graphCommits'
+  | 'graphNoMatches'
+  | 'graphEmpty'
+  | 'graphLoading'
+  | 'graphLoaded'
+  | 'graphRetry'
+  | 'graphMore'
   | 'menuBranches'
   | 'menuLocalBranches'
   | 'menuWorktrees'
@@ -183,6 +210,33 @@ export type GitWorktreeKey =
 
 /** English dictionary — complete by construction. */
 export const en: Record<GitWorktreeKey, string> = {
+  graphTitle: 'Commit graph',
+  graphDetail: 'Commit details',
+  graphNoBody: 'This commit has no body',
+  graphExpandBody: 'Expand body',
+  graphCollapseBody: 'Collapse body',
+  graphNoFiles: 'No file changes',
+  graphFiles: '{count} files',
+  graphBinary: '{count} binary files',
+  graphRefresh: 'Refresh history',
+  graphCloseWindow: 'Close popup',
+  graphToggleOpen: 'Open graph',
+  graphToggleClose: 'Close graph',
+  graphSearch: 'Search',
+  graphSearchPlaceholder: 'Text or hash',
+  graphAuthorFilter: 'Filter by author',
+  graphAllAuthors: 'All authors',
+  graphColumn: 'Graph',
+  graphCommit: 'Commit',
+  graphAuthor: 'Author',
+  graphDate: 'Date',
+  graphCommits: 'Commit history',
+  graphNoMatches: 'No matching commits',
+  graphEmpty: 'No commits on this branch',
+  graphLoading: 'Loading commits…',
+  graphLoaded: '{count} commits loaded',
+  graphRetry: 'Retry',
+  graphMore: 'Load more',
   menuBranches: 'Branches',
   menuLocalBranches: 'Local branches',
   menuWorktrees: 'Worktrees',
@@ -361,6 +415,33 @@ export const en: Record<GitWorktreeKey, string> = {
 
 /** 中文词典。 */
 export const zh: Record<GitWorktreeKey, string> = {
+  graphTitle: '提交图谱',
+  graphDetail: '提交详情',
+  graphNoBody: '此提交没有正文',
+  graphExpandBody: '展开正文',
+  graphCollapseBody: '收起正文',
+  graphNoFiles: '无文件变更',
+  graphFiles: '{count} 个文件',
+  graphBinary: '{count} 个二进制文件',
+  graphRefresh: '刷新提交历史',
+  graphCloseWindow: '关闭弹出的窗',
+  graphToggleOpen: '打开图谱',
+  graphToggleClose: '关闭图谱',
+  graphSearch: '搜索',
+  graphSearchPlaceholder: '文本或哈希',
+  graphAuthorFilter: '作者筛选',
+  graphAllAuthors: '全部作者',
+  graphColumn: '图谱',
+  graphCommit: '提交',
+  graphAuthor: '作者',
+  graphDate: '日期',
+  graphCommits: '提交历史',
+  graphNoMatches: '没有匹配的提交',
+  graphEmpty: '此分支暂无提交',
+  graphLoading: '正在读取提交…',
+  graphLoaded: '已加载 {count} 条提交',
+  graphRetry: '重试',
+  graphMore: '加载更多',
   menuBranches: '分支',
   menuLocalBranches: '本地分支',
   menuWorktrees: '工作树',

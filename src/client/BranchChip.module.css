@@ -645,3 +645,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.menuCard.menuCardGraph {
+  width: min(1060px, calc(100vw - 24px));
+  height: 700px;
+}
+.menuCardGraph .menuMain { flex: 0 0 236px; }
+.menuToolActive { color: var(--dsw-alias-label-primary-bluish, #4186f0); background: color-mix(in srgb, var(--dsw-alias-label-primary-bluish, #4186f0) 12%, transparent); }
+@media (max-width: 800px) { .menuCardGraph .menuMain { flex-basis: 180px; } }
+@media (max-width: 560px) { .menuCardGraph .menuMain { flex-basis: 128px; } }
