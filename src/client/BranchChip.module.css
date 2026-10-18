@@ -177,8 +177,8 @@
  *   2. the search field sits pinned at the card's bottom edge, directly
  *      above the chip, with the scrolling rows above it;
  *   3. the card is CSS-`bottom`-pinned ~6px above the chip's top and so
- *      grows entirely upward — it can never cover the composer or fill
- *      the viewport, whatever the branch count.
+ *      grows entirely upward, leaving the chip and bottom controls visible;
+ *      the text area above those controls may sit behind the popup.
  *
  * The inline `left`/`bottom` come from BranchMenu's placement pass; the
  * width is fixed here (design 360px — 320 tree + 40 tool strip — and

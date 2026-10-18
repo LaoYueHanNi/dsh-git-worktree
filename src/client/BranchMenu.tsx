@@ -749,8 +749,8 @@ export function BranchMenu({
     })
   }
 
-  // Measure the host composer instead of duplicating its adjustable width
-  // preference. Keep every popup above that card, including while resizing.
+  // Both modes grow upward from the chip. The composer only constrains
+  // graph width; anchoring to its top would leave a large gap above the chip.
   useLayoutEffect(() => {
     if (!open) {
       setPos(null)
@@ -766,10 +766,10 @@ export function BranchMenu({
       const vh = window.innerHeight
       const composer = anchor.closest<HTMLElement>('[data-composer-card]')
       const bounds = composer?.getBoundingClientRect() ?? rect
-      const lowerEdge = Math.min(vh - MARGIN, bounds.top - GAP)
+      const lowerEdge = Math.min(vh - MARGIN, rect.top - GAP)
       // A resize during the expansion must immediately obey the new bounds,
-      // rather than letting the old animation temporarily cover the composer.
-      const nextBounds = [vw, vh, bounds.left, bounds.top, bounds.width].join(':')
+      // rather than letting the old animation drift from the chip.
+      const nextBounds = [vw, vh, rect.left, rect.top, bounds.left, bounds.width].join(':')
       if (nextBounds !== previousBounds) {
         graphAnimationRef.current?.cancel()
         graphAnimationRef.current = null
@@ -779,8 +779,7 @@ export function BranchMenu({
         const width = Math.max(0, Math.min(1060, bounds.width, vw - 2 * MARGIN))
         const height = Math.max(0, Math.min(700, lowerEdge - MARGIN))
         const left = Math.min(Math.max(bounds.left + (bounds.width - width) / 2, MARGIN), Math.max(MARGIN, vw - width - MARGIN))
-        const bottomEdge = Math.min((vh + height) / 2, lowerEdge)
-        setPos({ left, width, height, bottom: vh - bottomEdge })
+        setPos({ left, width, height, bottom: vh - lowerEdge })
         return
       }
       const width = CARD_WIDTH
@@ -803,7 +802,7 @@ export function BranchMenu({
   }, [open, anchorRef, graphOpen])
 
   // Placement resolves in a second layout pass. Animate only after that
-  // pass, including both the move to the center and the return to the chip.
+  // pass, keeping the same bottom edge when growing upward from the chip.
   // Explicit measured heights allow the compact menu to retain auto height.
   useLayoutEffect(() => {
     const from = graphStartRectRef.current
