@@ -352,6 +352,28 @@ describe('fetchAll', () => {
     ])
     await expect(fetchAll(exec, '/repo')).rejects.toThrow('Could not resolve host')
   })
+
+  it('names the failing remote and its address when a live fetch fails', async () => {
+    const exec = scripted([
+      { args: ['remote'], out: { stdout: 'origin\nupstream\n' } },
+      { args: ['config', '--bool', '--get-regexp'] },
+      { args: ['fetch', 'origin', '--prune', '--progress'], out: { stdout: 'From origin\n' } },
+      { args: ['fetch', 'upstream', '--prune', '--progress'],
+        out: { code: 128, stderr: 'fatal: \'C:\\repo\' does not appear to be a git repository\n' } },
+      { args: ['remote', 'get-url', 'upstream'], out: { stdout: 'C:\\repo\n' } },
+    ])
+    await expect(fetchAll(exec, '/repo', {})).rejects.toThrow('remote "upstream" (url: C:\\repo)')
+  })
+
+  it('still names the remote when its address cannot be read', async () => {
+    const exec = scripted([
+      { args: ['remote'], out: { stdout: 'upstream\n' } },
+      { args: ['config', '--bool', '--get-regexp'] },
+      { args: ['fetch', 'upstream', '--prune', '--progress'], out: { code: 128, stderr: 'fatal: nope\n' } },
+      { args: ['remote', 'get-url', 'upstream'], out: { code: 1, stderr: 'error: No such remote\n' } },
+    ])
+    await expect(fetchAll(exec, '/repo', {})).rejects.toThrow('remote "upstream" (url: )')
+  })
 })
 
 describe('updateBranch', () => {

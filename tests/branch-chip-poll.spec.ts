@@ -104,6 +104,7 @@ const props = {
   sessionId: 's',
   useSessions: (select: (state: unknown) => unknown) => select({ byId: { s: { cwd } } }),
   useSession: (select: (state: unknown) => unknown) => select({ blank: true }),
+  openGraphByDefault: () => false,
   t: (key: string) => key,
 } as unknown as Parameters<typeof BranchChipDock>[0]
 const render = () => BranchChipDock(props)

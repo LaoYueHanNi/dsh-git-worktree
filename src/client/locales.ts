@@ -72,6 +72,12 @@ export type GitWorktreeKey =
   | 'updateFailDiverged'
   | 'updateFailDirty'
   | 'updateFailNoUpstream'
+  | 'fetchFailRemotePathMissing'
+  | 'fetchFailRemoteNotFound'
+  | 'fetchFailRemoteAuthFailed'
+  | 'fetchFailRemoteUnreachable'
+  | 'fetchFailRemoteUnknown'
+  | 'fetchFailRemoteUnnamed'
   | 'syncTitleFetch'
   | 'syncTitleUpdate'
   | 'syncTitlePush'
@@ -278,6 +284,12 @@ export const en: Record<GitWorktreeKey, string> = {
   updateFailDiverged: 'The branch has diverged. Merge or rebase its upstream first.',
   updateFailDirty: 'Uncommitted changes would be overwritten by the fast-forward. Commit or stash them, then update again.',
   updateFailNoUpstream: 'This branch has no upstream to update from. Push it and set an upstream first.',
+  fetchFailRemotePathMissing: 'Remote {remote} points at a folder that is gone or is not a Git repository: {path}. Point it at a valid address (git remote set-url {remote} <url>), or leave it out of bulk fetches (git config remote.{remote}.skipFetchAll true).',
+  fetchFailRemoteNotFound: 'Remote {remote} was not found at {url}. Check the address, or that you still have access.',
+  fetchFailRemoteAuthFailed: 'Remote {remote} refused the connection: authentication failed. Check your credentials or SSH key.',
+  fetchFailRemoteUnreachable: 'Remote {remote} could not be reached: {url}. Check the network and the address.',
+  fetchFailRemoteUnknown: 'Remote {remote} could not be fetched.',
+  fetchFailRemoteUnnamed: 'repository',
   syncTitleFetch: 'Fetching remote branches',
   syncTitleUpdate: 'Updating {branch}',
   syncTitlePush: 'Pushing {branch}',
@@ -485,6 +497,12 @@ export const zh: Record<GitWorktreeKey, string> = {
   updateFailDiverged: '分支已分叉，请先合并或变基上游。',
   updateFailDirty: '工作区有未提交的改动，快进会覆盖它们。请先提交或暂存这些改动，再更新。',
   updateFailNoUpstream: '当前分支没有可用的上游，无法更新。请先推送并设置上游。',
+  fetchFailRemotePathMissing: '远程仓库{remote}的地址指向的目录已不存在或不是 Git 仓库：{path}。请把它指向有效地址（git remote set-url {remote} <地址>），或让它不再参与批量抓取（git config remote.{remote}.skipFetchAll true）。',
+  fetchFailRemoteNotFound: '远程仓库{remote}在 {url} 上不存在。请检查地址，或确认你仍有访问权限。',
+  fetchFailRemoteAuthFailed: '远程仓库{remote}拒绝了连接：认证失败。请检查凭据或 SSH 私钥。',
+  fetchFailRemoteUnreachable: '远程仓库{remote}无法访问：{url}。请检查网络与地址。',
+  fetchFailRemoteUnknown: '远程仓库{remote}抓取失败。',
+  fetchFailRemoteUnnamed: '',
   syncTitleFetch: '正在提取远程分支',
   syncTitleUpdate: '正在更新 {branch}',
   syncTitlePush: '正在推送 {branch}',

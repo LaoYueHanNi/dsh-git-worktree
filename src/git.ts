@@ -654,8 +654,11 @@ export async function fetchAll(exec: Exec, repoRoot: string, live?: LiveRun): Pr
     if (result.cancelled) throw new CancelledError()
     if (result.code !== 0) {
       failure ??= { code: result.code, messages: [] }
-      // git's words without the thousand progress redraws before them.
-      failure.messages.push(stripProgress(result.stderr))
+      // git's words without the thousand progress redraws before them, and
+      // under a head that names the remote and its address: `git fetch --all`
+      // itself reports neither, and a remote whose address was moved out
+      // from under it is the failure the user must act on.
+      failure.messages.push(`remote "${remote}" (url: ${await remoteUrl(exec, repoRoot, remote)})\n${stripProgress(result.stderr)}`)
     }
   }
   // The error names the command the user knows, not the per-remote plumbing.
@@ -664,6 +667,20 @@ export async function fetchAll(exec: Exec, repoRoot: string, live?: LiveRun): Pr
 
 /** The fetch every plain sync runs. */
 const FETCH_ARGS: readonly string[] = ['fetch', '--all', '--prune']
+
+/**
+ * The address one remote points at. Read only after that remote's fetch
+ * failed: the address is the one fact the failure message needs, and a
+ * healthy fetch never pays for it.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param remote - remote name.
+ * @returns the remote's address, or an empty string when git cannot say.
+ */
+async function remoteUrl(exec: Exec, repoRoot: string, remote: string): Promise<string> {
+  const url = await gitMaybe(exec, repoRoot, ['remote', 'get-url', remote])
+  return url?.trim() ?? ''
+}
 
 /**
  * The remotes `git fetch --all` would visit: all of them except those marked

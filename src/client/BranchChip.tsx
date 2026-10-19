@@ -82,6 +82,7 @@ import { branchFactsStamp, repoHasRemotes } from './branch-tree.ts'
 import type { BranchChipInjected } from './slots.ts'
 import { cancelSyncJob, findSyncJob, recordPushFailure, runSyncJob, subscribeSyncJobs, takePushFailure, type PushFailure, type SyncJob } from './sync-job.ts'
 import { explainUpdateFailure, updateErrorText, type UpdateFailureKind } from './update-error.ts'
+import { explainFetchFailure, type FetchFailureKind } from './fetch-error.ts'
 import { SyncProgress } from './SyncProgress.tsx'
 import css from './BranchChip.module.css'
 import type { GitWorktreeKey } from './locales.ts'
@@ -93,6 +94,16 @@ const UPDATE_FAIL = {
   dirty: 'updateFailDirty',
   noUpstream: 'updateFailNoUpstream',
 } as const satisfies Record<UpdateFailureKind, GitWorktreeKey>
+
+/** The toast for a fetch failure the plugin can name: which remote failed
+ * and what to do about it. Git's own words name neither. */
+const FETCH_FAIL = {
+  remotePathMissing: 'fetchFailRemotePathMissing',
+  remoteNotFound: 'fetchFailRemoteNotFound',
+  remoteAuthFailed: 'fetchFailRemoteAuthFailed',
+  remoteUnreachable: 'fetchFailRemoteUnreachable',
+  remoteUnknown: 'fetchFailRemoteUnknown',
+} as const satisfies Record<FetchFailureKind, GitWorktreeKey>
 
 /** Full props: owner share + standard kit + injected adopt verb + locale seat. */
 export type BranchChipDockProps =
@@ -603,9 +614,29 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     })
   }, [cwd, refresh, watchingBranch])
 
-  const showError = useCallback((message: string) => {
-    pushToast(t('errorGeneric', { message }))
+  /**
+   * The plain sentence for a failed fetch. Git's own words name a path and
+   * say nothing about the next step; `git fetch --all` does not even name the
+   * remote that failed. The plugin does, so the toast can.
+   * @param raw - the error text the route returned.
+   * @returns true when the failure was a fetch failure, now said in words of
+   * its own instead of git's.
+   */
+  const showFetchError = useCallback((raw: string): boolean => {
+    const failure = explainFetchFailure(raw)
+    if (failure === null) return false
+    pushToast(t(FETCH_FAIL[failure.kind], {
+      remote: failure.remote ?? t('fetchFailRemoteUnnamed'),
+      path: failure.path ?? '',
+      url: failure.url ?? '',
+    }))
+    return true
   }, [pushToast, t])
+
+  const showError = useCallback((message: string) => {
+    if (showFetchError(message)) return
+    pushToast(t('errorGeneric', { message }))
+  }, [pushToast, showFetchError, t])
 
   /** Run one guarded confirm action: single-flight, toast on failure. On
    * success the confirm clears; the MENU closes unless `keepOpen` (the row

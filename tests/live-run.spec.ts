@@ -176,14 +176,24 @@ describe('fetchAll with a live run', () => {
     const { exec, calls } = recording([
       ...listing(['origin', 'fork', 'backup']),
       { code: 128, stderr: 'Receiving objects:  10% (1/10)\rfatal: early EOF\n' },
+      { stdout: 'git@github.com:LaoYueHanNi/cc-switch.git\n' },
       {},
       { code: 1, stderr: "fatal: 'backup' does not appear to be a git repository\n" },
+      { stdout: 'C:\\backup\\repo\n' },
     ])
     const failure = await fetchAll(exec, '/repo', {}).then(() => undefined, (error: unknown) => error)
-    expect(calls).toHaveLength(5)
+    expect(calls).toHaveLength(7)
     expect(failure).toBeInstanceOf(GitError)
     expect((failure as GitError).code).toBe(128)
-    expect((failure as GitError).message).toBe("git fetch --all --prune failed (exit 128): fatal: early EOF\nfatal: 'backup' does not appear to be a git repository")
+    // Each failure names its remote and the address that remote points at:
+    // `git fetch --all` reports neither, and the address is the fact the
+    // user has to fix.
+    expect((failure as GitError).message).toBe([
+      'git fetch --all --prune failed (exit 128): remote "origin" (url: git@github.com:LaoYueHanNi/cc-switch.git)',
+      'fatal: early EOF',
+      'remote "backup" (url: C:\\backup\\repo)',
+      "fatal: 'backup' does not appear to be a git repository",
+    ].join('\n'))
   })
 
   it('stops at once when cancelled, without starting the remotes still waiting', async () => {
@@ -206,10 +216,10 @@ describe('fetchAll with a live run', () => {
 
   it('fails with the command the user knows and git’s words, without the progress redraws', async () => {
     const stderr = 'Receiving objects:  10% (1/10)\rReceiving objects:  50% (5/10)\rfatal: early EOF\n'
-    const { exec } = recording([...listing(['origin']), { code: 128, stderr }])
+    const { exec } = recording([...listing(['origin']), { code: 128, stderr }, { stdout: 'git@github.com:x/y.git\n' }])
     const failure = await fetchAll(exec, '/repo', {}).then(() => undefined, (error: unknown) => error)
     expect(failure).toBeInstanceOf(GitError)
-    expect((failure as GitError).message).toBe('git fetch --all --prune failed (exit 128): fatal: early EOF')
+    expect((failure as GitError).message).toBe('git fetch --all --prune failed (exit 128): remote "origin" (url: git@github.com:x/y.git)\nfatal: early EOF')
   })
 })
 
