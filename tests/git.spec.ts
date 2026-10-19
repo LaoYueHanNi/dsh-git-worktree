@@ -49,9 +49,7 @@ const MAIN_ONLY = [
 describe('probeRepo', () => {
   it('assembles facts from rev-parse, branch refs, and worktree porcelain', async () => {
     const exec = scripted([
-      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
-      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
-      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+      { args: ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'], out: { stdout: '/repo\n/repo/.git\nmain\n' } },
       { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main[ahead 1, behind 2]\nfeat-x\n' } },
       { args: ['for-each-ref', 'refs/remotes'], out: { stdout: 'origin/HEAD\norigin/main\norigin/dev\nupstream/dev\n' } },
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
@@ -90,9 +88,7 @@ describe('probeRepo', () => {
 
   it('names the repository from the common dir inside a linked worktree', async () => {
     const exec = scripted([
-      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/root/repo/feat-x\n' } },
-      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/root/repo/.git\n' } },
-      { args: ['branch', '--show-current'], out: { stdout: 'feat-x\n' } },
+      { args: ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'], out: { stdout: '/root/repo/feat-x\n/root/repo/.git\nfeat-x\n' } },
       { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\nfeat-x\n' } },
       { args: ['for-each-ref', 'refs/remotes'], out: { code: 0, stdout: '' } },
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
@@ -113,9 +109,7 @@ describe('probeRepo', () => {
   it('marks a detached worktree branchless', async () => {
     const porcelain = ['worktree /repo', 'HEAD 111', 'branch refs/heads/main', '', 'worktree /wt', 'HEAD 222', 'detached', ''].join('\n')
     const exec = scripted([
-      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
-      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
-      { args: ['branch', '--show-current'], out: { stdout: '' } },
+      { args: ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'], out: { stdout: '/repo\n/repo/.git\nHEAD\n' } },
       { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\n' } },
       { args: ['for-each-ref', 'refs/remotes'], out: { code: 0, stdout: '' } },
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: porcelain } },
@@ -127,9 +121,7 @@ describe('probeRepo', () => {
 
   it('distinguishes unpublished, in-sync, gone and behind upstreams', async () => {
     const exec = scripted([
-      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
-      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
-      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+      { args: ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'], out: { stdout: '/repo\n/repo/.git\nmain\n' } },
       { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main[behind 3]\torigin/main\ndev[gone]\torigin/dev\nsync\torigin/sync\nnew\t\n' } },
       { args: ['for-each-ref', 'refs/remotes'], out: { code: 0, stdout: '' } },
       { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
@@ -145,9 +137,7 @@ describe('probeRepo', () => {
 
   it('skips the bare leftover ref under refs/remotes (no slash below it)', async () => {
     const exec = scripted([
-      { args: ['rev-parse', '--show-toplevel'], out: { stdout: '/repo\n' } },
-      { args: ['rev-parse', '--git-common-dir'], out: { stdout: '/repo/.git\n' } },
-      { args: ['branch', '--show-current'], out: { stdout: 'main\n' } },
+      { args: ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'], out: { stdout: '/repo\n/repo/.git\nmain\n' } },
       { args: ['for-each-ref', 'refs/heads'], out: { stdout: 'main\n' } },
       // `refs/remotes/origin` (shortname `origin`, no `/`) is a leftover
       // ref, not a remote branch — git branch -r hides it, so must the list.

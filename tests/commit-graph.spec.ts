@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterCommits, layoutCommits } from '../src/client/commit-graph.ts'
+import { filterCommits, HISTORY_SCROLL_SLACK, layoutCommits, shouldAutoLoadHistory } from '../src/client/commit-graph.ts'
 import type { HistoryCommit } from '../src/wire.ts'
 
 describe('filtered commit selection', () => {
@@ -25,6 +25,29 @@ describe('filtered commit selection', () => {
     expect(filterCommits(commits, 'release', 'Bob', commits[0]!.oid)).toEqual({ visible: [], selected: null })
     expect(filterCommits(commits, 'Alice', '', commits[0]!.oid)).toEqual({ visible: [], selected: null })
     expect(filterCommits([], '', '', commits[0]!.oid)).toEqual({ visible: [], selected: null })
+  })
+})
+
+describe('scroll-to-end history paging', () => {
+  const ready = { loading: false, hasNext: true, failed: false }
+  const box = (scrollTop: number, scrollHeight = 1000, clientHeight = 400) => ({ scrollTop, scrollHeight, clientHeight })
+
+  it('loads when the overflowing list is at its end, including a few pixels of slack', () => {
+    expect(shouldAutoLoadHistory(box(600), ready)).toBe(true)
+    expect(shouldAutoLoadHistory(box(600 - HISTORY_SCROLL_SLACK), ready)).toBe(true)
+  })
+
+  it('waits while more rows remain below the fold', () => {
+    expect(shouldAutoLoadHistory(box(600 - HISTORY_SCROLL_SLACK - 1), ready)).toBe(false)
+    expect(shouldAutoLoadHistory(box(0), ready)).toBe(false)
+  })
+
+  it('does not chain pages when the list is not scrollable, busy, failed, or finished', () => {
+    expect(shouldAutoLoadHistory(box(0, 400, 400), ready)).toBe(false)
+    expect(shouldAutoLoadHistory(box(0, 200, 400), ready)).toBe(false)
+    expect(shouldAutoLoadHistory(box(600), { ...ready, loading: true })).toBe(false)
+    expect(shouldAutoLoadHistory(box(600), { ...ready, failed: true })).toBe(false)
+    expect(shouldAutoLoadHistory(box(600), { ...ready, hasNext: false })).toBe(false)
   })
 })
 

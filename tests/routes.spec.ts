@@ -44,9 +44,7 @@ function scripted(table: Record<string, Partial<ExecResult>>): Exec {
 
 /** Repo facts as the git layer reports them for /repo. */
 const REPO_CALLS = {
-  'rev-parse --show-toplevel': { stdout: '/repo\n' },
-  'rev-parse --git-common-dir': { stdout: '/repo/.git\n' },
-  'branch --show-current': { stdout: 'main\n' },
+  'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
   'for-each-ref refs/heads': { stdout: 'main\nfeat/x\n' },
   'for-each-ref refs/remotes': { stdout: 'origin/HEAD\norigin/main\norigin/dev\n' },
   'worktree list --porcelain': {
@@ -67,7 +65,8 @@ const LIVE_REMOTES = {
  * in the main checkout. */
 const LINKED_CALLS = {
   ...REPO_CALLS,
-  'rev-parse --show-toplevel': { stdout: '/root/repo/feat-x\n' },
+  'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/root/repo/feat-x\n/repo/.git\nfeat/x\n' },
+  // updateBranch still asks the checked-out name on its own; the status probe no longer does.
   'branch --show-current': { stdout: 'feat/x\n' },
 } satisfies Record<string, Partial<ExecResult>>
 

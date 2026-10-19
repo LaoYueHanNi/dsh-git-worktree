@@ -62,4 +62,9 @@ export interface BranchChipInjected {
    * settings scope was not ready) — nothing happened, nothing to toast.
    */
   pruneWorktrees?: (createdPath: string) => Promise<PruneReport | undefined>
+  /**
+   * Whether clicking the composer branch button should open the commit graph.
+   * Read live from the settings snapshot; absent or unready means off.
+   */
+  openGraphByDefault: () => boolean
 }

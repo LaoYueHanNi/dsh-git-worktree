@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchCommit, fetchHistory } from '../src/client/api.ts'
-import { ROUTE_COMMIT, ROUTE_HISTORY } from '../src/wire.ts'
+import { fetchAuthors, fetchCommit, fetchHistory } from '../src/client/api.ts'
+import { ROUTE_AUTHORS, ROUTE_COMMIT, ROUTE_HISTORY } from '../src/wire.ts'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -25,6 +25,9 @@ describe('history client requests', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ body: 'first\n\nlast', files: 2 })))
     expect(await fetchCommit('/repo', 'a'.repeat(40), signal)).toEqual({ ok: true, body: 'first\n\nlast', files: 2 })
     expect(fetchMock).toHaveBeenLastCalledWith(ROUTE_COMMIT, expect.objectContaining({ body: JSON.stringify({ repoPath: '/repo', oid: 'a'.repeat(40) }), signal }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ tip: 'a'.repeat(40), authors: ['Ada'] })))
+    expect(await fetchAuthors({ repoPath: '/repo', ref: 'refs/heads/main', tip: 'a'.repeat(40) }, signal)).toEqual({ ok: true, tip: 'a'.repeat(40), authors: ['Ada'] })
+    expect(fetchMock).toHaveBeenLastCalledWith(ROUTE_AUTHORS, expect.objectContaining({ method: 'POST', body: JSON.stringify({ repoPath: '/repo', ref: 'refs/heads/main', tip: 'a'.repeat(40) }), signal }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'missing ref' }), { status: 400 }))
     expect(await fetchHistory({ repoPath: '/repo', ref: 'HEAD' }, signal)).toEqual({ ok: false, error: 'missing ref' })
     fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }))

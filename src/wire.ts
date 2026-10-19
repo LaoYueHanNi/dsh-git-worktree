@@ -15,8 +15,9 @@ export const ROUTE_STATUS = `${ROUTE_PREFIX}/status`
  * A file read of HEAD, not a git process. */
 export const ROUTE_HEAD = `${ROUTE_PREFIX}/head`
 
-/** Read-only POSTs: bounded history and one commit's full message/summary. */
+/** Read-only POSTs: bounded history, every author on that history, and one commit's full message/summary. */
 export const ROUTE_HISTORY = `${ROUTE_PREFIX}/history`
+export const ROUTE_AUTHORS = `${ROUTE_PREFIX}/authors`
 export const ROUTE_COMMIT = `${ROUTE_PREFIX}/commit`
 
 export interface HistoryBody {
@@ -26,6 +27,8 @@ export interface HistoryBody {
   /** Subsequent pages stay pinned to the first response's tip. */
   tip?: string
   offset?: string
+  /** The branch moved or the user reloaded: drop cached author lists for this repository. */
+  freshAuthors?: boolean
 }
 
 export interface HistoryCommit {
@@ -40,6 +43,21 @@ export interface CommitHistory {
   tip: string | null
   commits: HistoryCommit[]
   next: number | null
+}
+
+/** Distinct `%an` names reachable from a branch tip. */
+export interface AuthorsBody {
+  repoPath: string
+  ref: string
+  /** Pins the list to the history response's tip. */
+  tip?: string
+  /** Drop this repository's cached author lists and walk again. */
+  fresh?: boolean
+}
+
+export interface AuthorList {
+  tip: string | null
+  authors: readonly string[]
 }
 
 export interface CommitDetail extends HistoryCommit {

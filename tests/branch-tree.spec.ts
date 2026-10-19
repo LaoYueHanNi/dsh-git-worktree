@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows, repoHasRemotes, syncActions, syncMark,
+  branchFactsStamp, buildTree, chainExpanded, collectFolderPaths, groupKey, groupRows, repoHasRemotes, syncActions, syncMark,
   type BranchRow, type TreeNode,
 } from '../src/client/branch-tree.ts'
 import { buildBranchRows, buildLinkedWorktreeRows } from '../src/client/BranchChip.tsx'
@@ -363,5 +363,15 @@ describe('syncActions', () => {
 
   it('offers nothing on a remote row', () => {
     expect(syncActions({ name: 'origin/x', kind: 'remote' }, 'feat/x')).toEqual([])
+  })
+})
+
+describe('branchFactsStamp', () => {
+  it('changes when the checked-out branch or its upstream counts move', () => {
+    const branches = [{ kind: 'local', name: 'main', ahead: 0, behind: 1, upstream: 'origin/main' }]
+    const first = branchFactsStamp('main', branches)
+    expect(branchFactsStamp('main', branches)).toBe(first)
+    expect(branchFactsStamp('main', [{ ...branches[0]!, behind: 2 }])).not.toBe(first)
+    expect(branchFactsStamp('topic', branches)).not.toBe(first)
   })
 })

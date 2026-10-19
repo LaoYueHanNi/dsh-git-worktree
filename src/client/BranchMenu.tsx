@@ -117,6 +117,8 @@ import {
 } from './branch-tree.ts'
 import { dispatchBranchMenuKeyDown } from './branch-keyboard.ts'
 import { CommitGraph } from './CommitGraph.tsx'
+import { hostFrameTop } from './frame-top.ts'
+import { graphOpenAfter } from './graph-open.ts'
 import css from './BranchChip.module.css'
 
 // The row type travels with the component for every caller (BranchChip
@@ -262,6 +264,10 @@ export interface BranchMenuProps {
   updateBusy: boolean
   /** Dismiss the menu (outside click, Escape with nothing open). */
   onClose: () => void
+  /** When true, a click that opens this menu starts in the commit graph. */
+  defaultGraph?: boolean
+  /** Bumped when branch facts, fetch, or update may have moved a ref. */
+  branchEpoch?: number
   /** Bound locale translate (placeholder, empty state, heading, toolbar). */
   t: PropsLocale<'git-worktree'>['t']
 }
@@ -435,10 +441,16 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, repoPath, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, hasRemotes, updateBusy, onClose, t,
+  open, repoPath, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, hasRemotes, updateBusy, onClose, defaultGraph = false, branchEpoch = 0, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const [graphOpen, setGraphOpen] = useState(false)
+  const [menuWasOpen, setMenuWasOpen] = useState(open)
+  if (open !== menuWasOpen) {
+    setMenuWasOpen(open)
+    const next = graphOpenAfter(menuWasOpen, open, defaultGraph, graphOpen)
+    if (next !== graphOpen) setGraphOpen(next)
+  }
   const graphOpenRef = useRef(graphOpen)
   graphOpenRef.current = graphOpen
   const graphEscapeRef = useRef<(() => boolean) | null>(null)
@@ -751,6 +763,8 @@ export function BranchMenu({
 
   // Both modes grow upward from the chip. The composer only constrains
   // graph width; anchoring to its top would leave a large gap above the chip.
+  // The card is portaled to the body, so the graph must stop under the host
+  // title bar instead of the raw viewport top.
   useLayoutEffect(() => {
     if (!open) {
       setPos(null)
@@ -767,9 +781,14 @@ export function BranchMenu({
       const composer = anchor.closest<HTMLElement>('[data-composer-card]')
       const bounds = composer?.getBoundingClientRect() ?? rect
       const lowerEdge = Math.min(vh - MARGIN, rect.top - GAP)
+      const frame = getComputedStyle(document.documentElement)
+      const chromeTop = hostFrameTop(
+        frame.getPropertyValue('--dsh-frame-chrome-top'),
+        frame.getPropertyValue('--dsh-frame-top-clearance'),
+      )
       // A resize during the expansion must immediately obey the new bounds,
       // rather than letting the old animation drift from the chip.
-      const nextBounds = [vw, vh, rect.left, rect.top, bounds.left, bounds.width].join(':')
+      const nextBounds = [vw, vh, rect.left, rect.top, bounds.left, bounds.width, chromeTop].join(':')
       if (nextBounds !== previousBounds) {
         graphAnimationRef.current?.cancel()
         graphAnimationRef.current = null
@@ -777,7 +796,8 @@ export function BranchMenu({
       }
       if (graphOpen) {
         const width = Math.max(0, Math.min(1060, bounds.width, vw - 2 * MARGIN))
-        const height = Math.max(0, Math.min(700, lowerEdge - MARGIN))
+        const ceiling = chromeTop + MARGIN
+        const height = Math.max(0, Math.min(700, lowerEdge - ceiling))
         const left = Math.min(Math.max(bounds.left + (bounds.width - width) / 2, MARGIN), Math.max(MARGIN, vw - width - MARGIN))
         setPos({ left, width, height, bottom: vh - lowerEdge })
         return
@@ -1946,7 +1966,7 @@ export function BranchMenu({
               />
             </div>
           </div>
-          {graphOpen && <CommitGraph key={`${repoPath}:${browsingRef}`} repoPath={repoPath} branchRef={browsingRef}
+          {graphOpen && <CommitGraph key={`${repoPath}:${browsingRef}`} repoPath={repoPath} branchRef={browsingRef} branchEpoch={branchEpoch}
             branch={browsingBranch || 'HEAD'} escapeRef={graphEscapeRef} t={t} onClose={onClose} />}
         </div>,
         document.body,

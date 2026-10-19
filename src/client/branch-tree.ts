@@ -248,6 +248,14 @@ export function repoHasRemotes(branches: readonly { kind: 'local' | 'remote'; up
   return branches.some(branch => branch.kind === 'remote' || branch.upstream !== undefined)
 }
 
+/** Identity of the branch list the chip last showed. Ahead/behind, upstream,
+ * and the checked-out name moving means some ref's history may have changed. */
+export function branchFactsStamp(currentBranch: string, branches: readonly { kind: string; name: string; ahead?: number; behind?: number; upstream?: string; upstreamGone?: boolean }[]): string {
+  const rows = branches.map(branch => [branch.kind, branch.name, branch.ahead ?? '', branch.behind ?? '', branch.upstream ?? '', branch.upstreamGone ? 1 : 0].join('\0'))
+  rows.sort()
+  return `${currentBranch}\n${rows.join('\n')}`
+}
+
 /**
  * The remote-facing verbs a branch row's context menu offers. Where each one
  * sits in the menu is the menu's call (Update directly above Push, both ahead

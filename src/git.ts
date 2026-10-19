@@ -287,42 +287,47 @@ function isMainWorktree(toplevel: string, gitDir: string): boolean {
  * @param path - absolute directory the workspace reports.
  * @param dirExists - existence seam for stale-registration filtering.
  */
+/** One process for the three facts both probes need. On Windows each git
+ * spawn costs tens of milliseconds before it does any work, so folding
+ * these flags is the difference between one round trip and three. */
+const REV_PARSE_FACTS = ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'] as const
+
 export async function probeRepo(exec: Exec, path: string, dirExists: DirExists = fsDirExists): Promise<RepoFacts | undefined> {
-  const top = await gitMaybe(exec, path, ['rev-parse', '--show-toplevel'])
-  if (top === undefined) return undefined
-  const commonDir = await gitMaybe(exec, path, ['rev-parse', '--git-common-dir'])
+  const probed = await gitMaybe(exec, path, REV_PARSE_FACTS)
+  if (probed === undefined) return undefined
+  const [top = '', common = '', branchName = ''] = probed.split('\n').map(line => line.trim())
+  if (top === '' || common === '') return undefined
   // repoName comes from the shared .git location: a linked worktree's own
   // toplevel would name the branch folder, not the repository. Both git
   // outputs carry forward slashes on Windows — normalize every derived path.
-  const toplevel = normalize(top.trim())
-  const gitDir = commonDir !== undefined && commonDir.trim() !== ''
-    ? normalize(resolve(path, commonDir.trim()))
-    : resolve(toplevel, '.git')
+  const toplevel = normalize(top)
+  const gitDir = normalize(resolve(path, common))
   // Main worktree, not the queried directory: a linked worktree's
   // `--show-toplevel` is its own folder, which `git worktree remove` then
   // destroys (including `.git`). Later `worktree list` / `worktree prune`
   // must still run in a living git dir — the shared checkout
   // (`dirname(--git-common-dir)`), same grouping key as probeWorkspaceGit.
   const repoRoot = dirname(gitDir)
+  // Branch list and worktree list do not depend on each other. listBranches
+  // itself overlaps the local and remote ref walks.
+  const [branches, worktrees] = await Promise.all([
+    listBranches(exec, repoRoot),
+    listWorktrees(exec, repoRoot),
+  ])
   return {
     repoRoot,
     repoName: basename(dirname(gitDir)),
     toplevel,
     main: isMainWorktree(toplevel, gitDir),
-    currentBranch: await currentBranch(exec, path),
-    branches: await listBranches(exec, repoRoot),
+    // `--abbrev-ref HEAD` prints the synthetic `HEAD` when detached or unborn,
+    // which is the same answer an empty `branch --show-current` used to map to.
+    currentBranch: branchName === '' || branchName === 'HEAD' ? 'HEAD' : branchName,
+    branches,
     // A stale registration (directory removed behind git's back) must not
     // reach the UI as a real worktree — it would disable branch rows for a
     // folder that no longer exists.
-    worktrees: (await listWorktrees(exec, repoRoot)).filter(w => dirExists(w.path)),
+    worktrees: worktrees.filter(w => dirExists(w.path)),
   }
-}
-
-/** Currently checked-out branch of a directory; `HEAD` when detached or unborn. */
-async function currentBranch(exec: Exec, cwd: string): Promise<string> {
-  const name = await gitMaybe(exec, cwd, ['branch', '--show-current'])
-  const trimmed = name?.trim() ?? ''
-  return trimmed === '' ? 'HEAD' : trimmed
 }
 
 /**
@@ -335,7 +340,10 @@ async function currentBranch(exec: Exec, cwd: string): Promise<string> {
  * UI distinguish unpublished branches from synchronized and deleted ones.
  */
 async function listBranches(exec: Exec, repoRoot: string): Promise<BranchEntry[]> {
-  const localOut = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)%(upstream:track)%09%(upstream:short)'])
+  const [localOut, remoteOut] = await Promise.all([
+    git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)%(upstream:track)%09%(upstream:short)']),
+    gitMaybe(exec, repoRoot, ['for-each-ref', 'refs/remotes', '--format=%(refname:short)']),
+  ])
   const entries: BranchEntry[] = []
   for (const line of localOut.split('\n')) {
     const [label = '', upstream = ''] = line.split('\t')
@@ -354,7 +362,6 @@ async function listBranches(exec: Exec, repoRoot: string): Promise<BranchEntry[]
     if (behind !== null) entry.behind = Number(behind[1])
     entries.push(entry)
   }
-  const remoteOut = await gitMaybe(exec, repoRoot, ['for-each-ref', 'refs/remotes', '--format=%(refname:short)'])
   if (remoteOut !== undefined) {
     // Local names as a Set: the twin lookup runs once per remote row, and a
     // linear scan over the assembled list would make the loop quadratic —
@@ -875,7 +882,7 @@ export async function removeWorktree(
  * binary surfaces the same way — a non-zero exit through the seam).
  */
 export async function probeWorkspaceGit(exec: Exec, path: string): Promise<WorkspaceGitFacts | undefined> {
-  const out = await gitMaybe(exec, path, ['rev-parse', '--show-toplevel', '--git-common-dir', '--abbrev-ref', 'HEAD'])
+  const out = await gitMaybe(exec, path, REV_PARSE_FACTS)
   if (out === undefined) return undefined
   const lines = out.split('\n').map(line => line.trim())
   const top = lines[0] ?? ''

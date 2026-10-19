@@ -6,7 +6,7 @@
 
 import type { PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, SyncEvent, SyncFrame } from '../wire.ts'
 import { NDJSON_TYPE, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW } from '../wire.ts'
-import { ROUTE_HISTORY, ROUTE_COMMIT, type CommitHistory, type CommitDetail, type HistoryBody } from '../wire.ts'
+import { ROUTE_AUTHORS, ROUTE_HISTORY, ROUTE_COMMIT, type AuthorList, type AuthorsBody, type CommitHistory, type CommitDetail, type HistoryBody } from '../wire.ts'
 
 /** Read-only history requests can be cancelled when the user browses another branch. */
 async function graphRead<T>(url: string, body: unknown, signal: AbortSignal): Promise<Call<T>> {
@@ -16,6 +16,7 @@ async function graphRead<T>(url: string, body: unknown, signal: AbortSignal): Pr
 }
 
 export const fetchHistory = (body: HistoryBody, signal: AbortSignal): Promise<Call<CommitHistory>> => graphRead(ROUTE_HISTORY, body, signal)
+export const fetchAuthors = (body: AuthorsBody, signal: AbortSignal): Promise<Call<AuthorList>> => graphRead(ROUTE_AUTHORS, body, signal)
 export const fetchCommit = (repoPath: string, oid: string, signal: AbortSignal): Promise<Call<CommitDetail>> => graphRead(ROUTE_COMMIT, { repoPath, oid }, signal)
 import type {
   CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult, WorktreesAllResult,

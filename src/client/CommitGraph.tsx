@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefO
 import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CommitDetail, CommitHistory } from '../wire.ts'
-import { fetchCommit, fetchHistory } from './api.ts'
-import { filterCommits, layoutCommits, type GraphRow } from './commit-graph.ts'
+import { authorEpoch, cachedAuthors, forgetAuthors, rememberAuthors } from './author-cache.ts'
+import { fetchAuthors, fetchCommit, fetchHistory } from './api.ts'
+import { filterCommits, layoutCommits, shouldAutoLoadHistory, type GraphRow } from './commit-graph.ts'
 import css from './CommitGraph.module.css'
 
 type T = PropsLocale<'git-worktree'>['t']
@@ -58,10 +59,12 @@ function Detail({ detail, t }: { detail: CommitDetail; t: T }) {
 
 /** One branch browser. The owner keys by repository + ref: old async responses
  * can never replace a different branch's history or selected commit. */
-export function CommitGraph({ repoPath, branchRef, branch, onClose, escapeRef, t }: {
+export function CommitGraph({ repoPath, branchRef, branch, branchEpoch = 0, onClose, escapeRef, t }: {
   repoPath: string
   branchRef: string
   branch: string
+  /** Bumped when branch facts, fetch, or update may have moved a ref. */
+  branchEpoch?: number
   onClose: () => void
   escapeRef: MutableRefObject<(() => boolean) | null>
   t: T
@@ -76,29 +79,73 @@ export function CommitGraph({ repoPath, branchRef, branch, onClose, escapeRef, t
   const [detail, setDetail] = useState<CommitDetail | null>(null)
   const [detailError, setDetailError] = useState('')
   const [detailRevision, setDetailRevision] = useState(0)
+  const [allAuthors, setAllAuthors] = useState<readonly string[] | null>(null)
   const moreRequest = useRef<AbortController | null>(null)
+  const freshAuthors = useRef(false)
+  const seenEpoch = useRef(branchEpoch)
+  const historyGen = useRef(0)
+  const historyApplied = useRef(0)
+  if (seenEpoch.current !== branchEpoch) {
+    seenEpoch.current = branchEpoch
+    freshAuthors.current = true
+    forgetAuthors(repoPath)
+  }
+  const pagingOffset = useRef<number | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const detailHost = useRef<HTMLDivElement>(null)
 
   const commits = history?.commits ?? []
   const graph = useMemo(() => layoutCommits(commits), [commits])
   const { visible, selected: selectedOid } = useMemo(() => filterCommits(commits, query, author, selected), [commits, query, author, selected])
-  const authors = [...new Set(commits.map(item => item.author))].sort((a, b) => a.localeCompare(b))
+  const authors = useMemo(() => {
+    const names = new Set<string>(allAuthors ?? [])
+    if (!allAuthors) for (const item of commits) if (item.author) names.add(item.author)
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [allAuthors, commits])
   const filtered = !!query.trim() || !!author
   const graphWidth = filtered ? 30 : Math.max(42, graph.lanes * 12 + 14)
 
   useEffect(() => {
     const controller = new AbortController()
+    const gen = ++historyGen.current
+    const reloadAuthors = freshAuthors.current
+    freshAuthors.current = false
     moreRequest.current?.abort()
+    pagingOffset.current = null
     setHistory(null); setError(''); setLoading(true); setSelected(null); setDetail(null)
-    void fetchHistory({ repoPath, ref: branchRef }, controller.signal).then(result => {
-      if (controller.signal.aborted) return
+    void fetchHistory({ repoPath, ref: branchRef, ...(reloadAuthors ? { freshAuthors: true } : {}) }, controller.signal).then(result => {
+      if (controller.signal.aborted || historyGen.current !== gen) return
+      historyApplied.current = gen
       setLoading(false)
       if (result.ok) { setHistory(result); setSelected(result.commits[0]?.oid ?? null) }
       else setError(result.error)
     })
     return () => { controller.abort(); moreRequest.current?.abort() }
-  }, [repoPath, branchRef, revision])
+  }, [repoPath, branchRef, revision, branchEpoch])
+
+  useEffect(() => {
+    // Wait until the history reload that drops the author cache has landed.
+    // Reading the cache in the same turn would store the pre-update list again.
+    if (historyApplied.current !== historyGen.current) {
+      if (!history?.tip) setAllAuthors(null)
+      return
+    }
+    const tip = history?.tip
+    if (!tip) { setAllAuthors(null); return }
+    const hit = cachedAuthors(repoPath, tip)
+    if (hit) { setAllAuthors(hit); return }
+    setAllAuthors(null)
+    const epoch = authorEpoch(repoPath)
+    const gen = historyGen.current
+    const controller = new AbortController()
+    void fetchAuthors({ repoPath, ref: branchRef, tip }, controller.signal).then(result => {
+      if (controller.signal.aborted || !result.ok || result.tip !== tip) return
+      if (authorEpoch(repoPath) !== epoch || historyGen.current !== gen) return
+      rememberAuthors(repoPath, tip, result.authors, epoch)
+      setAllAuthors(result.authors)
+    })
+    return () => controller.abort()
+  }, [repoPath, branchRef, history])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -125,15 +172,34 @@ export function CommitGraph({ repoPath, branchRef, branch, onClose, escapeRef, t
 
   const loadMore = async (): Promise<void> => {
     if (loading || history?.next == null || !history.tip) return
+    // Scroll events repeat before the next paint. Hold this offset until the
+    // page lands or the user explicitly retries, so the same page is not requested twice.
+    if (pagingOffset.current === history.next) return
+    const offset = history.next
+    pagingOffset.current = offset
     moreRequest.current?.abort()
     const controller = new AbortController()
     moreRequest.current = controller
     setLoading(true); setError('')
-    const result = await fetchHistory({ repoPath, ref: branchRef, tip: history.tip, offset: String(history.next) }, controller.signal)
+    const result = await fetchHistory({ repoPath, ref: branchRef, tip: history.tip, offset: String(offset) }, controller.signal)
     if (controller.signal.aborted) return
     setLoading(false)
     if (result.ok) setHistory({ ...result, commits: [...history.commits, ...result.commits] })
     else setError(result.error)
+    // Leave pagingOffset set. Clearing it here would let the still-attached
+    // scroll handler request this same offset again before the next paint.
+  }
+
+  const reloadHistory = (): void => {
+    freshAuthors.current = true
+    forgetAuthors(repoPath)
+    setRevision(value => value + 1)
+  }
+
+  const retryHistory = (): void => {
+    pagingOffset.current = null
+    if (history) void loadMore()
+    else reloadHistory()
   }
 
   return <div className={css.panel} data-commit-history="" role="region" aria-label={t('graphTitle')}>
@@ -147,11 +213,16 @@ export function CommitGraph({ repoPath, branchRef, branch, onClose, escapeRef, t
         placeholder={t('graphSearchPlaceholder')} aria-label={t('graphSearch')} spellCheck={false} />
       {history && <span className={css.loaded} title={t('graphLoaded', { count: commits.length })}>{t('graphLoaded', { count: commits.length })}</span>}
       <button type="button" className={css.iconButton} title={t('graphRefresh')} aria-label={t('graphRefresh')}
-        disabled={loading} onClick={() => setRevision(value => value + 1)}>↻</button>
+        disabled={loading} onClick={reloadHistory}>↻</button>
       <button type="button" className={css.iconButton} title={t('graphCloseWindow')} aria-label={t('graphCloseWindow')} onClick={onClose}><IconCloseOutlineRegular className={css.closeIcon} size={12} /></button>
     </div>
     <div className={css.columns} aria-hidden="true"><span style={{ width: graphWidth }}>{t('graphColumn')}</span><span>{t('graphCommit')}</span><span>{t('graphAuthor')}</span><span>{t('graphDate')}</span></div>
     <div ref={listRef} className={css.list} role="listbox" aria-label={t('graphCommits')} aria-busy={loading}
+      onScroll={event => {
+        const el = event.currentTarget
+        if (!shouldAutoLoadHistory(el, { loading, hasNext: history?.next != null, failed: error !== '' })) return
+        void loadMore()
+      }}
       onKeyDown={event => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !visible.length) return
         event.preventDefault(); event.stopPropagation()
@@ -179,7 +250,7 @@ export function CommitGraph({ repoPath, branchRef, branch, onClose, escapeRef, t
     </div>
     {(error || history?.next != null) && <div className={css.footer}>
       {error && <span className={css.error} role="alert" title={error}>{error}</span>}
-      {error && <button type="button" className={css.textButton} disabled={loading} onClick={() => history ? void loadMore() : setRevision(value => value + 1)}>{t('graphRetry')}</button>}
+      {error && <button type="button" className={css.textButton} disabled={loading} onClick={retryHistory}>{t('graphRetry')}</button>}
       {history?.next != null && !error && <button type="button" className={css.textButton} disabled={loading} onClick={() => void loadMore()}>{t('graphMore')}</button>}
     </div>}
     <div ref={detailHost} className={css.detailHost}>

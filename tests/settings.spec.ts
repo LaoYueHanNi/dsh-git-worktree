@@ -26,12 +26,14 @@ describe('config section shapes', () => {
     expect(sectionOf({})).toEqual({
       groupSidebar: true,
       fetchBeforeCreate: false,
+      openGraphByDefault: false,
       autoPruneWorktrees: false,
       keepWorktrees: 30,
     })
-    expect(sectionOf({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 5 })).toEqual({
+    expect(sectionOf({ groupSidebar: false, fetchBeforeCreate: true, openGraphByDefault: true, autoPruneWorktrees: true, keepWorktrees: 5 })).toEqual({
       groupSidebar: false,
       fetchBeforeCreate: true,
+      openGraphByDefault: true,
       autoPruneWorktrees: true,
       keepWorktrees: 5,
     })
@@ -39,6 +41,7 @@ describe('config section shapes', () => {
       rootDir: 'D:\\wt',
       groupSidebar: true,
       fetchBeforeCreate: false,
+      openGraphByDefault: false,
       autoPruneWorktrees: false,
       keepWorktrees: 30,
     })
@@ -46,6 +49,7 @@ describe('config section shapes', () => {
       postCreateCopyFiles: ['.env'],
       groupSidebar: true,
       fetchBeforeCreate: false,
+      openGraphByDefault: false,
       autoPruneWorktrees: false,
       keepWorktrees: 30,
     })
@@ -56,6 +60,7 @@ describe('config section shapes', () => {
     expect(() => validateConfig({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 1, postCreateCopyFiles: ['.env'] })).not.toThrow()
     expect(() => validateConfig({ groupSidebar: 'yes' })).toThrow('"groupSidebar" must be a boolean')
     expect(() => validateConfig({ fetchBeforeCreate: 'yes' })).toThrow('"fetchBeforeCreate" must be a boolean')
+    expect(() => validateConfig({ openGraphByDefault: 'yes' })).toThrow('"openGraphByDefault" must be a boolean')
     expect(() => validateConfig({ autoPruneWorktrees: 'yes' })).toThrow('"autoPruneWorktrees" must be a boolean')
     expect(() => validateConfig({ postCreateCopyFiles: 'not-array' as unknown as string[] })).toThrow('"postCreateCopyFiles" must be an array of strings')
     expect(() => validateConfig({ postCreateCopyFiles: [123 as unknown as string] })).toThrow('"postCreateCopyFiles" must be an array of strings')

@@ -20,8 +20,8 @@ import {
   type RouteDeps, type RouteLive, type RouteOutcome,
 } from './routes.js'
 import { validateRootDir } from './settings.js'
-import { handleHistory, handleCommit } from './routes.js'
-import { ROUTE_HISTORY, ROUTE_COMMIT } from './wire.js'
+import { handleAuthors, handleHistory, handleCommit } from './routes.js'
+import { ROUTE_AUTHORS, ROUTE_HISTORY, ROUTE_COMMIT } from './wire.js'
 import { streamRoute } from './stream.js'
 import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
@@ -48,6 +48,8 @@ export interface Config {
   /** Fetch every remote before creating a worktree; absent = off. A failed
    * fetch never blocks the creation (see the /worktree route). */
   fetchBeforeCreate?: Volatile<boolean> | boolean
+  /** Open the commit graph when the composer branch button is clicked; absent = off. */
+  openGraphByDefault?: Volatile<boolean> | boolean
   /** Prune stale worktrees lazily after each creation; absent = off. */
   autoPruneWorktrees?: Volatile<boolean> | boolean
   /** Global cap the lazy prune trims down to (valid git worktrees only);
@@ -70,6 +72,7 @@ export const Config: z = z.object({
   rootDir: z.string().volatile(),
   groupSidebar: z.boolean().default(true).volatile(),
   fetchBeforeCreate: z.boolean().default(false).volatile(),
+  openGraphByDefault: z.boolean().default(false).volatile(),
   autoPruneWorktrees: z.boolean().default(false).volatile(),
   keepWorktrees: z.number().default(KEEP_WORKTREES_DEFAULT).volatile(),
   postCreateCopyFiles: z.array(z.string()).default([]).volatile(),
@@ -78,7 +81,7 @@ export const Config: z = z.object({
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: Config): void {
   const unknown = Object.keys(config).find(key =>
-    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees' && key !== 'postCreateCopyFiles')
+    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'openGraphByDefault' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees' && key !== 'postCreateCopyFiles')
   if (unknown !== undefined) {
     throw new Error(`GitWorktreeConfig: unknown key "${unknown}"`)
   }
@@ -93,6 +96,10 @@ export function validateConfig(config: Config): void {
   const fetchBeforeCreate = readVolatile(config.fetchBeforeCreate)
   if (fetchBeforeCreate !== undefined && typeof fetchBeforeCreate !== 'boolean') {
     throw new Error('GitWorktreeConfig: "fetchBeforeCreate" must be a boolean')
+  }
+  const openGraphByDefault = readVolatile(config.openGraphByDefault)
+  if (openGraphByDefault !== undefined && typeof openGraphByDefault !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "openGraphByDefault" must be a boolean')
   }
   const autoPruneWorktrees = readVolatile(config.autoPruneWorktrees)
   if (autoPruneWorktrees !== undefined && typeof autoPruneWorktrees !== 'boolean') {
@@ -133,6 +140,8 @@ export interface SectionConfig {
   groupSidebar?: boolean
   /** Fetch every remote before creating a worktree; absent = off. */
   fetchBeforeCreate?: boolean
+  /** Open the commit graph from the composer branch button; absent = off. */
+  openGraphByDefault?: boolean
   /** Prune stale worktrees lazily after each creation; absent = off. */
   autoPruneWorktrees?: boolean
   /** Global cap the lazy prune trims down to; absent = 30. */
@@ -150,6 +159,7 @@ export function sectionOf(config: Config): SectionConfig {
   const postCreateCopyFiles = readVolatile(config.postCreateCopyFiles)
   const groupSidebar = readVolatile(config.groupSidebar)
   const fetchBeforeCreate = readVolatile(config.fetchBeforeCreate)
+  const openGraphByDefault = readVolatile(config.openGraphByDefault)
   const autoPruneWorktrees = readVolatile(config.autoPruneWorktrees)
   const keepWorktrees = readVolatile(config.keepWorktrees)
   return {
@@ -159,6 +169,7 @@ export function sectionOf(config: Config): SectionConfig {
     // unset can always fall back to them.
     groupSidebar: groupSidebar ?? true,
     fetchBeforeCreate: fetchBeforeCreate ?? false,
+    openGraphByDefault: openGraphByDefault ?? false,
     autoPruneWorktrees: autoPruneWorktrees ?? false,
     keepWorktrees: keepWorktrees ?? KEEP_WORKTREES_DEFAULT,
   }
@@ -269,6 +280,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
     postRoute(ROUTE_WORKTREE, 'worktree', handleCreateWorktree)
     postRoute(ROUTE_HISTORY, 'history', handleHistory)
+    postRoute(ROUTE_AUTHORS, 'authors', handleAuthors)
     postRoute(ROUTE_COMMIT, 'commit', handleCommit)
     postRoute(ROUTE_SWITCH, 'switch', handleSwitch)
     postRoute(ROUTE_BRANCH, 'branch', handleCreateBranch)

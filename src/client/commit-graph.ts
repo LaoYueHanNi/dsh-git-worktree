@@ -1,5 +1,25 @@
 import type { HistoryCommit } from '../wire.ts'
 
+/** Distance from the bottom that still counts as having scrolled to the end. */
+export const HISTORY_SCROLL_SLACK = 8
+
+export interface ScrollMetrics {
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+}
+
+/** Next page loads when the user scrolls an overflowing list to its end.
+ * A short list has no end to reach, and a failed page must not retry itself. */
+export function shouldAutoLoadHistory(
+  metrics: ScrollMetrics,
+  state: { loading: boolean; hasNext: boolean; failed: boolean },
+): boolean {
+  if (state.loading || state.failed || !state.hasNext) return false
+  if (metrics.scrollHeight <= metrics.clientHeight) return false
+  return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight <= HISTORY_SCROLL_SLACK
+}
+
 /** Keep the selection inside the filtered rows, without scanning per row. */
 export function filterCommits(commits: readonly HistoryCommit[], query: string, author: string, selected: string | null): {
   visible: { item: HistoryCommit; index: number }[]

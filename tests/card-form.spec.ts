@@ -150,14 +150,16 @@ describe('CardForm write-through switches', () => {
     const scope = new FakeScope({})
     const form = new CardForm(scope)
     const store = form.bind()
-    expect(store.getSnapshot()).toMatchObject({ fetchBeforeCreate: false, autoPruneWorktrees: false })
+    expect(store.getSnapshot()).toMatchObject({ fetchBeforeCreate: false, openGraphByDefault: false, autoPruneWorktrees: false })
     await form.actions().setFetchBeforeCreate(true)
+    await form.actions().setOpenGraphByDefault(true)
     await form.actions().setAutoPruneWorktrees(true)
     expect(scope.writes).toEqual([
       { op: 'set', field: 'fetchBeforeCreate', value: true },
+      { op: 'set', field: 'openGraphByDefault', value: true },
       { op: 'set', field: 'autoPruneWorktrees', value: true },
     ])
-    expect(store.getSnapshot()).toMatchObject({ fetchBeforeCreate: true, autoPruneWorktrees: true, dirty: false })
+    expect(store.getSnapshot()).toMatchObject({ fetchBeforeCreate: true, openGraphByDefault: true, autoPruneWorktrees: true, dirty: false })
   })
 
   it('keeps the keep-cap default at 30 and reports it usable', () => {

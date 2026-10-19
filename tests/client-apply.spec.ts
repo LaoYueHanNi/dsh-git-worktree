@@ -168,6 +168,7 @@ describe('client apply', () => {
     const options = ctx.registrationOf('conversation.input.left')
     const face = (options.inject as () => BranchChipInjected)()
 
+    expect(face.openGraphByDefault()).toBe(false)
     expect(face.describeWorktreeRemoval('/repo/.dsh/gitworktree/feat')).toEqual({ running: true, archiveCount: 2 })
     expect(face.describeWorktreeRemoval('/not/registered')).toEqual({ running: false, archiveCount: 0 })
   })

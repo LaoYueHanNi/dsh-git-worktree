@@ -127,6 +127,22 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
         {t('cardRootDirHint')}
         {state.overridden ? ` ${t('cardOverridden')}` : ''}
       </p>
+      <label className={`${css.field} ${css.toggleRow}`}>
+        <span className={css.toggleText}>
+          <span className={css.toggleLabel}>{t('cardOpenGraphLabel')}</span>
+          <span className={css.toggleHint}>{t('cardOpenGraphHint')}</span>
+          {state.switchFailed === 'openGraphByDefault' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
+        </span>
+        <span className={css.toggleControl}>
+          <input
+            className={css.toggle}
+            type="checkbox"
+            disabled={lockInput}
+            checked={state.openGraphByDefault}
+            onChange={event => { props.setOpenGraphByDefault(event.target.checked) }}
+          />
+        </span>
+      </label>
       <div className={`${css.field} ${css.manageRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardManageWorktrees')}</span>

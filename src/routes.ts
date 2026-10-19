@@ -8,8 +8,8 @@ import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
 import { appendWorktreeExclude, fsExcludeSeams, CancelledError, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
 import { readCheckedOutBranch } from './head.js'
-import { readHistory, readCommit } from './history.js'
-import type { HistoryBody, CommitBody, CommitHistory, CommitDetail } from './wire.js'
+import { invalidateAuthorCache, readAuthors, readHistory, readCommit } from './history.js'
+import type { AuthorList, AuthorsBody, HistoryBody, CommitBody, CommitHistory, CommitDetail } from './wire.js'
 import { openPush, previewPush, pushBranch } from './push.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { createProgressReader } from './progress.js'
@@ -79,7 +79,7 @@ export async function fsMkdirRecursive(path: string): Promise<void> {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: CommitHistory | CommitDetail | PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
+  body: AuthorList | CommitHistory | CommitDetail | PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -419,12 +419,22 @@ function isOutcome(value: unknown): value is RouteOutcome {
 }
 
 export async function handleHistory(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  const parsed = readBody<HistoryBody>(body, ['repoPath', 'ref'], [], ['tip', 'offset'])
+  const parsed = readBody<HistoryBody>(body, ['repoPath', 'ref'], ['freshAuthors'], ['tip', 'offset'])
   if (isOutcome(parsed)) return parsed
   if (!isAbsoluteDir(parsed.repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (parsed.offset !== undefined && !/^\d+$/.test(parsed.offset)) return fail(400, 'Invalid history offset')
   try {
+    if (parsed.freshAuthors === true) invalidateAuthorCache(parsed.repoPath)
     return { status: 200, body: await readHistory(deps.exec, parsed.repoPath, parsed.ref, parsed.tip, Number(parsed.offset ?? 0)) }
+  } catch (error) { return fail(400, error instanceof Error ? error.message : String(error)) }
+}
+
+export async function handleAuthors(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<AuthorsBody>(body, ['repoPath', 'ref'], ['fresh'], ['tip'])
+  if (isOutcome(parsed)) return parsed
+  if (!isAbsoluteDir(parsed.repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  try {
+    return { status: 200, body: await readAuthors(deps.exec, parsed.repoPath, parsed.ref, parsed.tip, parsed.fresh === true) }
   } catch (error) { return fail(400, error instanceof Error ? error.message : String(error)) }
 }
 

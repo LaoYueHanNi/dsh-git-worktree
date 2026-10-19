@@ -146,6 +146,10 @@ export function apply(ctx: ClientContext): void {
         },
       )
     },
+    openGraphByDefault: () => {
+      const section = groupingForm.getSnapshot()
+      return section.status === 'ready' && section.value?.openGraphByDefault === true
+    },
     // The lazy auto-prune, fired by the chip after a creation fully lands.
     // Everything here is a browser-side fact: the switches ride the settings
     // scope, the cap counts valid scan entries only (orphans never count and

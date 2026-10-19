@@ -76,8 +76,9 @@ import type { BranchEntry, PushBody, RepoStatus, WorktreeEntry } from '../wire.t
 import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestInspectWorktree, requestPush, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { subscribeCheckedOutBranch } from './head-poll.ts'
 import { PushDialog } from './PushDialog.tsx'
+import { forgetAuthors } from './author-cache.ts'
 import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
-import { repoHasRemotes } from './branch-tree.ts'
+import { branchFactsStamp, repoHasRemotes } from './branch-tree.ts'
 import type { BranchChipInjected } from './slots.ts'
 import { cancelSyncJob, findSyncJob, recordPushFailure, runSyncJob, subscribeSyncJobs, takePushFailure, type PushFailure, type SyncJob } from './sync-job.ts'
 import { explainUpdateFailure, updateErrorText, type UpdateFailureKind } from './update-error.ts'
@@ -471,7 +472,7 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, describeWorktreeRemoval, removeWorktree, pruneWorktrees, t }: BranchChipDockProps) {
+export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, describeWorktreeRemoval, removeWorktree, pruneWorktrees, openGraphByDefault, t }: BranchChipDockProps) {
   const summary = useSessions(state => state.byId[sessionId])
   const session = useSession(s => s)
   const cwd = summary?.cwd
@@ -512,6 +513,21 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
    * not refetch while it is still empty (the mount fetch owns that). */
   const shownBranchRef = useRef<string | undefined>(undefined)
   shownBranchRef.current = repo.facts?.currentBranch
+  const [branchEpoch, setBranchEpoch] = useState(0)
+  const [syncMark, setSyncMark] = useState(0)
+  const authorRepo = cwd ?? repo.facts?.repoRoot ?? ''
+  const factsStamp = repo.facts === null ? '' : `${branchFactsStamp(repo.facts.currentBranch, repo.facts.branches)}\n${syncMark}`
+  const seenFacts = useRef<string | null>(null)
+  useEffect(() => { seenFacts.current = null }, [authorRepo])
+  useEffect(() => {
+    if (factsStamp === '' || authorRepo === '') return
+    if (seenFacts.current === null) { seenFacts.current = factsStamp; return }
+    if (seenFacts.current === factsStamp) return
+    seenFacts.current = factsStamp
+    forgetAuthors(authorRepo)
+    setBranchEpoch(epoch => epoch + 1)
+  }, [factsStamp, authorRepo])
+  const noteBranchSync = useCallback((): void => { setSyncMark(mark => mark + 1) }, [])
   /** One poll-triggered status fetch at a time. Focus and menu opens do not
    * take this flag; the generation in useRepoStatus orders those bodies. */
   const pollRefreshRef = useRef(false)
@@ -712,6 +728,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     if (cancelled && !result.ok) {
       // A remote fetched before the cancel already moved its tracking refs.
       await refresh()
+      noteBranchSync()
       pushToast(t('fetchCancelled'))
       return
     }
@@ -720,8 +737,9 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return
     }
     await refresh()
+    noteBranchSync()
     pushToast(t('fetchDone'))
-  }, [blocked, cwd, pushToast, refresh, showError, t])
+  }, [blocked, cwd, noteBranchSync, pushToast, refresh, showError, t])
 
   /** Update-current-branch flow: POST /update (fetch every remote, then
    * fast-forward the checked-out branch to its upstream), then refetch the
@@ -739,6 +757,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     const { result, cancelled } = outcome
     if (cancelled && !result.ok) {
       await refresh()
+      noteBranchSync()
       pushToast(t('updateCancelled'))
       return
     }
@@ -749,8 +768,9 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       return
     }
     await refresh()
+    noteBranchSync()
     pushToast(result.updated ? t('updateDone', { branch: result.branch }) : t('updateUpToDate'))
-  }, [blocked, cwd, pushToast, refresh, showError, t])
+  }, [blocked, cwd, noteBranchSync, pushToast, refresh, showError, t])
 
   /**
    * Push flow: the window hands the push over and closes; the push itself
@@ -783,12 +803,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       if (!result.ok && !stopped) recordPushFailure(cwd, failure(result.error))
       if (currentCwdRef.current !== cwd) return
       await refresh()
+      noteBranchSync()
       if (currentCwdRef.current !== cwd) return
       if (stopped) pushToast(t('pushCancelled'))
       else if (result.ok) pushToast(t('pushDone', { branch: body.branch, remote: result.remote, target: result.target }))
     })()
     return Promise.resolve(undefined)
-  }, [blocked, cwd, pushToast, refresh, t])
+  }, [blocked, cwd, noteBranchSync, pushToast, refresh, t])
 
   /** Worktree-group flow: hop the session into the EXISTING worktree
    * directory. No git action, no confirm — the row menu's hop IS the jump
@@ -1008,6 +1029,8 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       </span>
       <BranchMenu
         open={menuOpen}
+        defaultGraph={openGraphByDefault()}
+        branchEpoch={branchEpoch}
         repoPath={cwd ?? facts.repoRoot}
         anchorRef={chipRef}
         rows={rows}

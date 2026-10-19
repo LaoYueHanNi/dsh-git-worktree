@@ -141,6 +141,8 @@ export type GitWorktreeKey =
   | 'cardSave'
   | 'cardSaving'
   | 'cardSwitchFailed'
+  | 'cardOpenGraphLabel'
+  | 'cardOpenGraphHint'
   | 'cardManageWorktrees'
   | 'cardManageHint'
   | 'cardFetchBeforeCreateLabel'
@@ -345,6 +347,8 @@ export const en: Record<GitWorktreeKey, string> = {
   cardSave: 'Save',
   cardSaving: 'Saving…',
   cardSwitchFailed: 'This switch did not save. Try again.',
+  cardOpenGraphLabel: 'Open the commit graph by default',
+  cardOpenGraphHint: 'Clicking the branch button in the composer opens the graph.',
   cardManageWorktrees: 'Manage worktrees…',
   cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces.',
   cardFetchBeforeCreateLabel: 'Fetch upstream before creating',
@@ -550,6 +554,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardSave: '保存',
   cardSaving: '保存中…',
   cardSwitchFailed: '该开关未保存，请重试。',
+  cardOpenGraphLabel: '默认展开 Git 图谱',
+  cardOpenGraphHint: '点击对话框里的分支图标时直接打开提交图谱。',
   cardManageWorktrees: '管理工作树…',
   cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录。',
   cardFetchBeforeCreateLabel: '创建工作树前同步上游',

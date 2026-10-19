@@ -30,6 +30,8 @@ export interface SectionValue {
   rootDir?: string
   /** Sync the remotes before creating a worktree; absent = off. */
   fetchBeforeCreate?: boolean
+  /** Open the commit graph from the composer branch button; absent = off. */
+  openGraphByDefault?: boolean
   /** Prune stale worktrees lazily after each creation; absent = off. */
   autoPruneWorktrees?: boolean
   /** Global cap the lazy prune trims down to; absent = 30. */
@@ -55,7 +57,7 @@ export interface CardStore {
 /** Which write-through switch failed to persist, if any. Unlike the staged
  * root field these flip immediately, so a rejected write leaves the control
  * silently snapping back — the card needs to say which one did not take. */
-export type SwitchField = 'fetchBeforeCreate' | 'autoPruneWorktrees'
+export type SwitchField = 'fetchBeforeCreate' | 'openGraphByDefault' | 'autoPruneWorktrees'
 
 /** What the git-worktree settings card renders. */
 export interface CardState {
@@ -76,6 +78,8 @@ export interface CardState {
   failed: boolean
   /** Resolved fetch-before-create switch (user layer over the default off). */
   fetchBeforeCreate: boolean
+  /** Resolved open-graph-by-default switch (user layer over the default off). */
+  openGraphByDefault: boolean
   /** Resolved auto-prune switch (user layer over the default off). */
   autoPruneWorktrees: boolean
   /** The keep-cap field as TEXT: the effective value, or the live draft. */
@@ -99,6 +103,8 @@ export interface CardActions {
   discard: () => void
   /** Persist the fetch-before-create switch (takes effect immediately). */
   setFetchBeforeCreate: (value: boolean) => void
+  /** Persist the open-graph-by-default switch (takes effect immediately). */
+  setOpenGraphByDefault: (value: boolean) => void
   /** Persist the auto-prune switch (takes effect immediately). */
   setAutoPruneWorktrees: (value: boolean) => void
   /** Stage draft text for the keep-cap field (validated on save). */
@@ -157,6 +163,7 @@ export class CardForm {
         this.publish()
       },
       setFetchBeforeCreate: (value) => this.setSimpleFlag('fetchBeforeCreate', value),
+      setOpenGraphByDefault: (value) => this.setSimpleFlag('openGraphByDefault', value),
       setAutoPruneWorktrees: (value) => this.setSimpleFlag('autoPruneWorktrees', value),
       editKeepWorktrees: (text) => {
         this.keepDraft = text
@@ -212,7 +219,7 @@ export class CardForm {
    * snapping back with no explanation. The failure is recorded instead and
    * the card renders a retry note beside the switch.
    */
-  private async setSimpleFlag(field: 'fetchBeforeCreate' | 'autoPruneWorktrees', value: boolean): Promise<void> {
+  private async setSimpleFlag(field: 'fetchBeforeCreate' | 'openGraphByDefault' | 'autoPruneWorktrees', value: boolean): Promise<void> {
     const current = this.scope.getSnapshot().value?.[field] ?? false
     if (value === current) return
     try {
@@ -300,6 +307,7 @@ export class CardForm {
       saving: this.saving,
       failed: this.failed,
       fetchBeforeCreate: this.scope.getSnapshot().value?.fetchBeforeCreate ?? false,
+      openGraphByDefault: this.scope.getSnapshot().value?.openGraphByDefault ?? false,
       autoPruneWorktrees: this.scope.getSnapshot().value?.autoPruneWorktrees ?? false,
       keepWorktreesText: keepText,
       keepWorktreesValid: keepParsed !== undefined && keepParsed >= 1,
