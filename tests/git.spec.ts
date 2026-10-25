@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, normalize, resolve } from 'node:path'
 import {
-  addWorktree, addWorktreeCutout, appendWorktreeExclude, createBranch, cutoutBranchName, deleteBranch, fetchAll, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch, WORKTREE_EXCLUDE_RULE,
+  addWorktree, addWorktreeCutout, appendWorktreeExclude, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsSweepDir, inspectWorktree, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, switchBranch, updateBranch, WORKTREE_EXCLUDE_RULE,
   type ExcludeSeams, type Exec, type ExecResult,
 } from '../src/git.ts'
 
@@ -593,6 +596,54 @@ describe('removeWorktree', () => {
     ])
     await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async () => 'occupied'))
       .rejects.toThrow('Permission denied')
+  })
+
+  it('treats Windows Filename too long as success after git already unregistered', async () => {
+    const swept: string[] = []
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 1, stderr: "error: failed to delete '/root/repo/feat-x': Filename too long\n" } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: MAIN_ONLY } },
+    ])
+    expect(await removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async (path) => {
+      swept.push(path)
+      return 'gone'
+    })).toEqual({ path: p('/root/repo/feat-x'), pruned: false })
+    expect(swept).toEqual([p('/root/repo/feat-x')])
+  })
+
+  it('still refuses Filename too long when the leftover directory has files', async () => {
+    const exec = scripted([
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: TWO_WORKTREES } },
+      { args: ['worktree', 'remove', p('/root/repo/feat-x')],
+        out: { code: 1, stderr: "error: failed to delete '/root/repo/feat-x': Filename too long\n" } },
+      { args: ['worktree', 'list', '--porcelain'], out: { stdout: MAIN_ONLY } },
+    ])
+    await expect(removeWorktree(exec, '/repo', '/root/repo/feat-x', false, () => true, async () => 'occupied'))
+      .rejects.toThrow('Filename too long')
+  })
+})
+
+describe('fsSweepDir', () => {
+  it('answers gone for an absent path without touching the disk', async () => {
+    await expect(fsSweepDir(resolve(tmpdir(), 'dsh-sweep-absent-does-not-exist'))).resolves.toBe('gone')
+  })
+
+  it('deletes a beyond-260-char tree, the shape git gave up on', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'))
+    let deep = root
+    for (let i = 0; i < 60; i += 1) deep = join(deep, 'nest')
+    await mkdir(deep, { recursive: true })
+    await writeFile(join(deep, 'dep.js'), 'export {}')
+    // The chain must actually cross the Windows limit the prefix exists for.
+    expect(resolve(deep, 'dep.js').length).toBeGreaterThan(260)
+    try {
+      await expect(fsSweepDir(root)).resolves.toBe('gone')
+      expect(existsSync(root)).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

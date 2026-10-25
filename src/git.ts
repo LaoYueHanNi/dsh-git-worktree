@@ -214,17 +214,33 @@ export const fsDirExists: DirExists = path => existsSync(path)
 
 /**
  * Leftover-directory sweeper after `git worktree remove` unregisters but
- * fails the final rmdir (Windows EPERM when a process still has the folder
- * as cwd). `gone` = deleted; `empty` = still there but vacant (cwd hold);
- * `occupied` = still has files — the caller must not pretend removal finished.
+ * fails partway through deleting the tree — a Windows hold (EPERM when a
+ * process still has the folder as cwd) or a deep path beyond the 260-char
+ * limit (`Filename too long`, node_modules chains). `gone` = deleted;
+ * `empty` = still there but vacant (cwd hold); `occupied` = still has
+ * files — the caller must not pretend removal finished.
  */
 export type SweepDir = (path: string) => Promise<'gone' | 'empty' | 'occupied'>
 
-/** Real leftover sweep: `fs.rm` with Windows EPERM retries, then classify. */
+/**
+ * Windows extended-length form (`\\?\…`) of a path: the prefix skips the
+ * 260-char normalization that makes deep node_modules chains unlink-fail —
+ * exactly the shape `git worktree remove` gave up on. POSIX paths and
+ * already extended paths pass through.
+ */
+function asExtendedLengthPath(path: string): string {
+  if (process.platform !== 'win32') return path
+  const abs = resolve(path)
+  if (abs.startsWith('\\\\?\\')) return abs
+  return abs.startsWith('\\\\') ? `\\\\?\\UNC${abs.slice(1)}` : `\\\\?\\${abs}`
+}
+
+/** Real leftover sweep: `fs.rm` (extended-length on Windows) with EPERM
+ * retries, then classify. */
 export async function fsSweepDir(path: string): Promise<'gone' | 'empty' | 'occupied'> {
   if (!existsSync(path)) return 'gone'
   try {
-    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+    await rm(asExtendedLengthPath(path), { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
   } catch {
     // Retries exhausted; classify whatever is still on disk.
   }
@@ -236,13 +252,15 @@ export async function fsSweepDir(path: string): Promise<'gone' | 'empty' | 'occu
   }
 }
 
-/** stderr of a git rmdir that lost to an OS file lock (not git's dirty check). */
+/** stderr of a git rmdir that lost to the OS (not git's dirty check): an
+ * open handle on the tree, or a deep path past the 260-char limit. */
 function isDirBusyGitError(error: GitError): boolean {
   const text = error.stderr
   return /permission denied/i.test(text)
     || /\bEPERM\b/i.test(text)
     || /\bEACCES\b/i.test(text)
     || /\bEBUSY\b/i.test(text)
+    || /filename too long/i.test(text)
 }
 
 /**
@@ -851,8 +869,10 @@ export async function removeWorktree(
     return { path: target, pruned: false }
   } catch (error) {
     // Windows: git often unregisters the worktree and empties the tree,
-    // then fails the last rmdir (`Permission denied`) because some process
-    // still has the folder as cwd. `--force` does not help — that flag only
+    // then fails a deletion — the last rmdir lost to an open handle
+    // (`Permission denied`, a process holding the folder as cwd), or an
+    // unlink hit a deep path past the 260-char limit (`Filename too long`,
+    // node_modules chains). `--force` does not help — that flag only
     // bypasses dirty/lock checks, not OS handles. Relist from `repoRoot`
     // (the main checkout, which still has `.git`); listing from the target
     // path would throw "not a git repository" once git has stripped its
