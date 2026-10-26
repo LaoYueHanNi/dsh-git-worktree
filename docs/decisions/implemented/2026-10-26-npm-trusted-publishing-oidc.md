@@ -20,6 +20,8 @@ CI 侧 `.github/workflows/publish.yml` 删除 `NODE_AUTH_TOKEN: ${{ secrets.NPM_
 
 本机手动发布的退路不变，且不需要新造长期凭据：npm 官网登录态支持交互式 WebAuthn / OTP 二次认证，本机 `npm publish` 走这条路径即可，无需绕过 2FA 的 token。因此仓库 Secrets 可以保持为空。
 
+该连接已于 2026-10-26 由 `0.4.13` tag 触发的首次发布验证通过，npm 侧状态由 Pending validation 变为 Valid，验证窗口不再构成期限。
+
 ## Alternatives considered
 
 - **继续用 granular access token 存进 `NPM_TOKEN`** —— 要在 GitHub Secrets 长期保管一份可发布凭据，轮换与泄露风险随时间累积；npm 已公告限制绕过 2FA 的 token，2027 年 1 月后该路径可能直接失效，届时发布链路要整体重建。输在把发布可用性押在一份会被政策收回的凭据上。
