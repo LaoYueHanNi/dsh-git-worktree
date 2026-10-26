@@ -8,6 +8,9 @@ Status: implemented
 
 ## Decision
 
+> [!NOTE]
+> 本决策中的"发版方式为手动流程：commit → `npm publish`"已于 2026-10-26 由 [DR: 版本 tag 触发的 npm 发布流水线](2026-10-26-tag-triggered-npm-publish.md) 取代。
+
 以 scoped 包名 **@laoyuehanni/dsh-git-worktree** 发布到公共 registry，版本沿用 0.4.0 作首版。package.json 补齐元数据：keywords/homepage/bugs/author，`repository.url` 改 `git+https://`（ssh 形式在 npm 页面无法展示）；`files` 白名单追加两份 README；新增 `publishConfig` 固定官方 registry 并声明 `access: "public"`（scoped 默认 restricted，字段兜底使任何机器上发布都不必记得加 `--access public`，registry 字段防国内镜像机器误发）；新增 `prepublishOnly` 串联 typecheck → test → build → build:client，保证每次 publish 产物新鲜且全绿。改名后的两处包名死角在同一次提交内同步（token-usage 项目 0.3.7~0.3.9 各踩一个）：`cordis.patch.yml` 的 `name` 是宿主加载插件时的 import 模块说明符，随包名改为 scoped 名；tsdown 构建把插件 id 烧进 `__ModuleLoader__.load` 注册横幅与 `data-plugin-css` 样式标签，宿主校验"注册 id 必须等于 loader 入口的包名"，故 PLUGIN_ID 改为构建时从 package.json 派生，改名不再可能失配。发版方式为手动流程：commit → `npm publish`。README 在线上验证通过后切换 npm 渠道，并在顶部放置旧 github 安装的重装指引。
 
 ## Alternatives considered
@@ -18,5 +21,5 @@ Status: implemented
 
 ## Consequences
 
-- 代价：包名变化要求 README 与既有用户改用新安装名。经 token-usage 项目实测，旧 `github:` 安装（依赖键 `dsh-git-worktree`）用 `update` 无法迁移：pnpm 只在原 git 渠道重新解析，且按仓库现名装出 scoped 包后宿主按 patch 的 import 说明符（`@laoyuehanni/dsh-git-worktree`）在 `node_modules` 下解析不到对应目录，启动报 `ERR_MODULE_NOT_FOUND`；按新名 `update` 则因依赖键不存在而静默无效。故 README 顶部放置重装指引（先 `remove dsh-git-worktree` 再 `add` npm 包，`~/.dsh/gitworktree/` 数据不受影响）；每次发布必须在发布机跑完整 typecheck+test+双构建（耗时换安全）；publish 者必须持有 npm 上 laoyuehanni scope 的权限；维护者本机 `web` profile 亦为 github 直装，发布后需按同一步骤迁移（同时充当真实环境验证）——0.4.0 发布当日已完成：`web` profile 走 remove → add 迁到 npm 包，`web-local` 重挂 link，重启 `dsh web` 后页面与分支 chip 渲染正常，npm 渠道验证通过。
+- 代价：包名变化要求 README 与既有用户改用新安装名。经 token-usage 项目实测，旧 `github:` 安装（依赖键 `dsh-git-worktree`）用 `update` 无法迁移：pnpm 只在原 git 渠道重新解析，且按仓库现名装出 scoped 包后宿主按 patch 的 import 说明符（`@laoyuehanni/dsh-git-worktree`）在 `node_modules` 下解析不到对应目录，启动报 `ERR_MODULE_NOT_FOUND`；按新名 `update` 则因依赖键不存在而静默无效。故 README 顶部放置重装指引（先 `remove dsh-git-worktree` 再 `add` npm 包，`~/.dsh/gitworktree/` 数据不受影响）；每次发布必须在发布机跑完整 typecheck+test+双构建（耗时换安全；此负担已由 tag 触发的 CI 流水线接管，见 Decision 顶部警示）；publish 者必须持有 npm 上 laoyuehanni scope 的权限；维护者本机 `web` profile 亦为 github 直装，发布后需按同一步骤迁移（同时充当真实环境验证）——0.4.0 发布当日已完成：`web` profile 走 remove → add 迁到 npm 包，`web-local` 重挂 link，重启 `dsh web` 后页面与分支 chip 渲染正常，npm 渠道验证通过。
 - 换来：获得 registry 的语义化版本分发与一行安装；公共包规范（许可证/元数据/入口类型声明）全部齐备；prepublishOnly 兜底使"忘构建就发包"这类事故结构性消失；PLUGIN_ID 派生化使未来改名或分叉维护不再有横幅失配死角。
