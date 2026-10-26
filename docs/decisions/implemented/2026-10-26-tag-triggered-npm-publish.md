@@ -8,7 +8,10 @@ Status: implemented
 
 ## Decision
 
-新增 `.github/workflows/publish.yml`：push `v*` / `[0-9]*` 形态的 tag 触发。流程为 checkout → `pnpm/action-setup@v4`（从 `packageManager` 字段读 pnpm 版本）→ `setup-node` 22 + pnpm 缓存 → 校验 tag 名与 package.json `version` 一致（错配即报错退出）→ `pnpm install --frozen-lockfile` → `npm publish --provenance --access public`（publish 前自动执行 `prepublishOnly`：typecheck → test → build:all）；版本号含预发布段（`-`）自动改挂 `next` dist-tag，不污染 `latest`。`permissions.id-token: write` 供 provenance 签发的 OIDC。认证使用 npm granular token（限定本包 Read and write）存 GitHub 仓库 Secret `NPM_TOKEN`。发版流程固化为：bump version → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。本决策取代 [DR: 以 @laoyuehanni/dsh-git-worktree 发布到公共 NPM](2026-08-30-publish-to-npm.md) 中的"手动发版"方式；包名、`files` 白名单、`publishConfig`、`prepublishOnly` 等其余决策不变。
+> [!NOTE]
+> 本决策中的 CI 发布认证方式已于 2026-10-26 由 [DR: npm 发布改用 Trusted Publishing（OIDC 免 token）](2026-10-26-npm-trusted-publishing-oidc.md) 部分取代：不再使用 granular access token，改为 OIDC 换取短期令牌，仓库 Secrets 保持为空。其余决策（tag 触发、版本校验、rc 挂 next、发布前质量门）继续有效。
+
+新增 `.github/workflows/publish.yml`：push `v*` / `[0-9]*` 形态的 tag 触发。流程为 checkout → `pnpm/action-setup@v4`（从 `packageManager` 字段读 pnpm 版本）→ `setup-node` 22 + pnpm 缓存 → 校验 tag 名与 package.json `version` 一致（错配即报错退出）→ `pnpm install --frozen-lockfile` → `npm publish --provenance --access public`（publish 前自动执行 `prepublishOnly`：typecheck → test → build:all）；版本号含预发布段（`-`）自动改挂 `next` dist-tag，不污染 `latest`。`permissions.id-token: write` 供 provenance 签发的 OIDC。认证原使用 npm granular token（限定本包 Read and write）存 GitHub 仓库 Secret `NPM_TOKEN`，现已改为 OIDC（见上方 NOTE）。发版流程固化为：bump version → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。本决策取代 [DR: 以 @laoyuehanni/dsh-git-worktree 发布到公共 NPM](2026-08-30-publish-to-npm.md) 中的"手动发版"方式；包名、`files` 白名单、`publishConfig`、`prepublishOnly` 等其余决策不变。
 
 ## Alternatives considered
 
