@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "dsh git 工作树",
-    "description": "支持分支操作与工作树功能的dsh插件"
+    "description": "输入框工具行的分支菜单：查看并原地切换分支，右键新建、重命名、删除或推送，在提交图谱里浏览历史；空白会话勾选「工作树」，新会话就在仓库内的独立 Git 工作树中开始。",
+    "detail": "docs/DETAIL.zh.md"
   }
 }

@@ -1,3 +1,7 @@
 {
-  "meta": {}
+  "meta": {
+    "title": "Git worktree",
+    "description": "A branch menu in the composer tool row: inspect and switch branches in place, right-click to create, rename, delete, or push, and browse history in the commit graph; tick Worktree on a blank session to start it inside its own Git worktree in the repository.",
+    "detail": "docs/DETAIL.md"
+  }
 }

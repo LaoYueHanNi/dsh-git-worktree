@@ -45,7 +45,9 @@
     "!lib/**/*.map",
     "cordis.patch.yml",
     "README.md",
-    "README.zh.md"
+    "README.zh.md",
+    "docs/DETAIL.md",
+    "docs/DETAIL.zh.md"
   ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
