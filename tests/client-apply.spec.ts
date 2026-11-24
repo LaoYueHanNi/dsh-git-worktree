@@ -250,4 +250,38 @@ describe('client apply', () => {
     // The chip is namespace-independent and stays.
     expect(ctx.slotNames).toContain('conversation.input.left')
   })
+
+  it('prefers SyncedConfig over configForms for read-only switches when provided', () => {
+    const ctx = new FakeCtx()
+    let openGraph = true
+    apply(ctx as never, {
+      openGraphByDefault: {
+        get: () => openGraph,
+        subscribe: () => () => {},
+      },
+    })
+    const options = ctx.registrationOf('conversation.input.left')
+    const face = (options.inject as () => BranchChipInjected)()
+
+    expect(face.openGraphByDefault()).toBe(true)
+    openGraph = false
+    expect(face.openGraphByDefault()).toBe(false)
+  })
+
+  it('falls back to configForms when SyncedConfig is absent', () => {
+    const ctx = new FakeCtx()
+    const origGet = ctx.configForms.get
+    ctx.configForms.get = (<T, >(entryId: string) => {
+      const base = origGet<T>(entryId)
+      return {
+        ...base,
+        getSnapshot: () => ({ status: 'ready', value: { openGraphByDefault: true } as unknown as T, user: undefined, writable: true }),
+      }
+    }) as typeof ctx.configForms.get
+    apply(ctx as never)
+    const options = ctx.registrationOf('conversation.input.left')
+    const face = (options.inject as () => BranchChipInjected)()
+
+    expect(face.openGraphByDefault()).toBe(true)
+  })
 })

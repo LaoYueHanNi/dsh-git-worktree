@@ -78,15 +78,38 @@ const GIT_WORKTREE_NS = 'git-worktree'
  */
 const PLUGIN_PACKAGE = '@laoyuehanni/dsh-git-worktree'
 
+/** Minimal SyncedConfig reference face (DSH 0.2.2+ @deepseek-ai/dsh-client-config). */
+export interface SyncedConfigRefLike<T = unknown> {
+  get(): T
+  subscribe(listener: () => void): () => void
+}
+
+/**
+ * Minimal SyncedConfig map passed as the second argument of `apply(ctx, config)`
+ * on hosts that project Host `.volatile()` fields to the browser. Absent
+ * (`undefined`) on older hosts, where `configForms` remains the fallback read source.
+ */
+export interface SyncedConfigLike {
+  readonly openGraphByDefault?: SyncedConfigRefLike<boolean | undefined>
+  readonly autoPruneWorktrees?: SyncedConfigRefLike<boolean | undefined>
+  readonly keepWorktrees?: SyncedConfigRefLike<number | undefined>
+}
+
+const hasSyncedRef = <T>(ref: SyncedConfigRefLike<T> | undefined): ref is SyncedConfigRefLike<T> =>
+  ref !== undefined && typeof ref.get === 'function' && typeof ref.subscribe === 'function'
+
 /** Required services: the slot ledger, session/workspace runtimes, the
  * workspace navigation/directory face, copy, and the config forms backing
  * the plugin configuration card. */
 export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'locale', 'connection', 'remote', 'configForms']
 
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'git-worktree: dictionaries')
 
   const groupingForm = ctx.configForms.get<SectionValue>(GIT_WORKTREE_NS)
+  const openGraphRef = hasSyncedRef(config?.openGraphByDefault) ? config.openGraphByDefault : undefined
+  const autoPruneRef = hasSyncedRef(config?.autoPruneWorktrees) ? config.autoPruneWorktrees : undefined
+  const keepWorktreesRef = hasSyncedRef(config?.keepWorktrees) ? config.keepWorktrees : undefined
 
   /** The DSH half of one worktree removal, read from the live snapshots: the
    * workspace registration sitting on the directory, whether any of its
@@ -147,20 +170,28 @@ export function apply(ctx: ClientContext): void {
       )
     },
     openGraphByDefault: () => {
+      if (openGraphRef !== undefined) return openGraphRef.get() === true
       const section = groupingForm.getSnapshot()
       return section.status === 'ready' && section.value?.openGraphByDefault === true
     },
     // The lazy auto-prune, fired by the chip after a creation fully lands.
-    // Everything here is a browser-side fact: the switches ride the settings
-    // scope, the cap counts valid scan entries only (orphans never count and
-    // never go), and activity is the freshest qualifying session's
-    // updatedAt — running-session directories, the fresh creation, and the
-    // current session's directory are excluded from selection outright.
+    // Everything here is a browser-side fact: the switches ride SyncedConfig
+    // on 0.2.2+ hosts (falling back to the settings scope on older hosts), the
+    // cap counts valid scan entries only (orphans never count and never go),
+    // and activity is the freshest qualifying session's updatedAt —
+    // running-session directories, the fresh creation, and the current
+    // session's directory are excluded from selection outright.
     pruneWorktrees: async (createdPath) => {
-      const section = groupingForm.getSnapshot()
-      if (section.status !== 'ready') return undefined
-      if ((section.value?.autoPruneWorktrees ?? false) !== true) return undefined
-      const keep = section.value?.keepWorktrees ?? 30
+      const section = (autoPruneRef === undefined || keepWorktreesRef === undefined)
+        ? groupingForm.getSnapshot()
+        : undefined
+      const autoPrune = autoPruneRef !== undefined
+        ? autoPruneRef.get() === true
+        : (section !== undefined && section.status === 'ready' && (section.value?.autoPruneWorktrees ?? false) === true)
+      if (!autoPrune) return undefined
+      const keep = keepWorktreesRef !== undefined
+        ? (keepWorktreesRef.get() ?? 30)
+        : (section?.status === 'ready' ? (section.value?.keepWorktrees ?? 30) : 30)
       const workspaces = ctx.workspaces.list.getSnapshot()
       const scan = await requestWorktreesAll(workspaces.items.map(workspace => workspace.path))
       if (!scan.ok) return undefined
