@@ -1,0 +1,22 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M11.5 13.3V22.7" stroke="url(#dsh_git_worktree_trunk)" stroke-width="2.4" stroke-linecap="round" />
+  <path d="M13.95 24.15C18.55 23.25 23.65 21.1 23.65 16.5" stroke="url(#dsh_git_worktree_branch)" stroke-width="2.4" stroke-linecap="round" />
+  <circle cx="11.5" cy="10.5" r="2.8" stroke="#7AC2FF" stroke-width="2.4" />
+  <circle cx="11.5" cy="25.5" r="2.8" stroke="#4A65E8" stroke-width="2.4" />
+  <path d="M18.8 10.1C18.8 9.216 19.516 8.5 20.4 8.5H22.7C23.16 8.5 23.6 8.698 23.9 9.045L24.55 9.8H26.9C27.784 9.8 28.5 10.516 28.5 11.4V15.3C28.5 16.184 27.784 16.9 26.9 16.9H20.4C19.516 16.9 18.8 16.184 18.8 15.3V10.1Z" fill="url(#dsh_git_worktree_folder)" fill-opacity="0.9" />
+  <path d="M21.4 13.35H25.9" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" />
+  <defs>
+    <linearGradient id="dsh_git_worktree_trunk" x1="11.5" y1="13.3" x2="11.5" y2="22.7" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7AC2FF" />
+      <stop offset="1" stop-color="#4A65E8" />
+    </linearGradient>
+    <linearGradient id="dsh_git_worktree_branch" x1="13.95" y1="24.15" x2="23.65" y2="16.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4A65E8" />
+      <stop offset="1" stop-color="#22B8A6" />
+    </linearGradient>
+    <linearGradient id="dsh_git_worktree_folder" x1="23.65" y1="8.5" x2="23.65" y2="16.9" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#52E5B5" />
+      <stop offset="1" stop-color="#0C8F9A" />
+    </linearGradient>
+  </defs>
+</svg>
