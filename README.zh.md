@@ -1,94 +1,160 @@
+<div align="center">
+
+<img src="./icon.svg" width="64" height="64" alt="dsh-git-worktree 图标" />
+
 # dsh-git-worktree
 
-[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+**面向 [DeepSeek Harness (dsh)][dsh] 的 IDEA 风格分支管理、提交图谱、实时 Git 操作与 Worktree 隔离插件。**
 
-![Web 界面中的 dsh-git-worktree](docs/images/gitworktree_zh.png)
+<p>
+  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin" height="20" /></a>
+  <a href="https://www.npmjs.com/package/@laoyuehanni/dsh-git-worktree"><img src="https://img.shields.io/npm/v/%40laoyuehanni%2Fdsh-git-worktree?color=cb3837" alt="npm version" height="20" /></a>
+  <a href="https://www.npmjs.com/package/@laoyuehanni/dsh-git-worktree"><img src="https://img.shields.io/npm/dm/%40laoyuehanni%2Fdsh-git-worktree?color=0ea5e9" alt="npm downloads" height="20" /></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/dsh-%3E%3D0.2.0--rc.1-6366f1" alt="dsh >= 0.2.0-rc.1" height="20" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/LaoYueHanNi/dsh-git-worktree" alt="MIT License" height="20" /></a>
+</p>
 
-简体中文 | [English](./README.md)
+**简体中文** · [English](./README.md)
 
-一个 [dsh] 插件：在 Web 界面进行简单的分支与 worktree 管理。输入框工具行显示当前分支 —— 选其他分支原地切换；勾选**「工作树」**则获得一个注册为真实工作区的隔离 worktree，效果见上图。
+[快速安装](#安装) · [核心功能](#核心功能) · [Worktree 隔离与管理](#4-worktree-隔离删除与跨仓库管理) · [本地开发](#开发)
 
-[dsh]: https://github.com/cordiverse/dsh
+</div>
 
-仓库：<https://github.com/LaoYueHanNi/dsh-git-worktree>
+<p align="center">
+  <img src="docs/images/gitworktree_zh.png" alt="Web 界面中的 dsh-git-worktree" width="100%" />
+</p>
 
-> [!IMPORTANT]
-> **GitHub 直装已终止**——仓库不再携带构建产物，请改从 npm 安装：
->
-> ```sh
-> dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
-> ```
->
-> **从旧 `github:` 安装升级（≤ 0.3.2，包名 `dsh-git-worktree`）？** 原地 `update` 会加载失败——先移除旧包名，再重新安装。worktree 目录与插件设置完整保留。
+---
 
-## 功能
+## 核心亮点
 
-- **提交图谱**：分支菜单左侧的图谱按钮原位扩大浮层，左侧浏览分支，右侧查看真实提交与合并关系。浏览不会检出分支；选中提交可查看作者、时间、完整正文与文件摘要。正文默认三行缩略，可展开并内部滚动；历史滚到列表末端自动加载下一页，也可点“加载更多”；搜索已加载提交的标题或哈希。作者下拉列出该分支的全部作者，同一提交的名单缓存在内存里；分支更新、抓取或刷新后缓存失效。
-- **IDEA 风格分支选择器**：分支菜单把 `/` 视为文件夹层级——可折叠文件夹、末段标签，当前分支所在链路默认展开并居中。本地与远程分支分两个可折叠分组（单远程自动剥掉前缀），底部搜索保留匹配分支的祖先文件夹并高亮命中，左侧工具栏提供定位当前分支与全部展开/折叠。本地和工作树行用绿色 ↗N / 蓝色 ↙N 表示领先/落后，分叉同时显示；未发布（无上游）显示不带数字的绿色 ↗（仓库没有任何远程时不显示），上游失效显示 `!`。
-- **远程分支检出**：远程组里选中 `origin/feat-x` 直接原地检出并自动创建跟踪分支（免确认）；勾选工作树开关则改为隔离进独立 worktree。
-- **行级右键菜单**：分支行右键弹出六个动作——签出（免确认直接切）、新建、新建并检出、重命名分支（本地行）、删除分支（本地行，安全 `-d`，git 拒绝未合并提交与被占用分支）、复制分支；工作树行为跳到此工作树 + 复制路径 + 删除工作树。二级弹窗（命名/确认）直接在菜单位置就地展开，原地动作完成后菜单保持打开，可连续操作。键盘走方向键 + Enter。
-- **工作树快捷入口**：主仓库空白会话的分支菜单把被 worktree 占用的分支收进**「工作树」**分组（hover 显示目录路径），右键「跳到此工作树」直接跳进对应目录开始新会话。
-- **分支切换**：选分支即原地 `git switch`（免确认）。worktree 会话里入口整体收敛：其他分支照常展示但置灰，操作提示去主仓库发起；已启动的会话菜单只显示自己的分支（提取与更新仍可用）。
-- **从任意分支新建/重命名**：右键任意分支行即可**从该分支**新建（不动当前检出）或新建并检出（当场签出），创建弹窗边输边校验（git ref 规则 + 重名检查）、一把执行，失败后弹窗保留、可改名重试；本地行还可原地重命名。
-- **远程同步**：工具栏末位的刷新按钮 fetch 全部远程并清理失效跟踪分支——列表原地刷新，无需去终端。
-- **实时进度**：提取、更新与推送期间出现悬浮进度卡片（类似 IDEA 的后台任务），显示当前远程、git 原话的阶段/计数/速度，右上角 × 可取消——不挡页面、切换会话后仍在，长传输也不再被 20 秒（推送为 120 秒）超时误杀（仅 5 分钟无任何输出才终止）。期间该目录的其它 git 动作会等它结束；更新末尾的快进一步不可再取消。
-- **分支推送**：本地分支和工作树行右键「推送」打开紧凑的独立窗口。展示来源、远程和目标分支，只有多个远程时显示远程选择；目标分支可编辑，Enter 应用；编辑弹窗只通过 Enter、Esc 或 × 关闭，点击别处既不关闭它也不关闭推送窗口。待推送提交只显示第一行消息，列表独立滚动；先显示本地预览，后台校验远程，校验完成后才能推送。支持推送 Git 标记（所有 / 跟随提交），下拉「强制推送」使用 force-with-lease，拒绝覆盖预览后新增的远程提交。操作针对右键分支，无需切换检出或提交工作区文件；点击「推送」后窗口立即关闭，推送在进度卡片中继续（可随时取消）；失败时窗口带着原因和之前选的远程、目标、标记弹回，说明常见原因（远端已前进、lease 过期、受保护分支、认证），并为重试重新读取目的地。
-- **更新当前分支**：工具栏与当前行右键可把当前分支快进到其上游；本地分叉、无上游、工作区改动冲突都会被拒绝并给出 git 原话——插件绝不代你 stash 或改写历史。
-- **工作树隔离**：未开始的会话里，右键任意分支行即可**「创建工作树」**（复用或新建目录）或**「新建分支并创建工作树」**（从该分支切出新分支，名字手动输入），确认后隔离到仓库内的 `<repo>/.dsh/gitworktree/<分支>/`（通过 `.git/info/exclude` 本地忽略——源仓库 `git status` 保持干净）并注册为真实工作区，重复创建复用已有（无论它位于何处）；会话开始后目录固定，工作树选项随「工作树」分组一并隐藏。
-- **删除工作树**：分支菜单**「工作树」**分组的行右键（及管理弹窗）提供**「删除工作树」**——弹窗先红色列出未提交文件数、标注领先提交数，并预告工作区下的会话将一并归档；确认后先删 git worktree（分支本身保留），再归档会话、注销工作区。git 失败时 DSH 侧零变更、弹窗原地重试；有正在运行的会话时该项禁用。
-- **工作树管理**：**设置 → 插件**里的插件配置页可打开管理弹窗，跨仓库列出两处存放位置（各仓库的 `.dsh/gitworktree` 布局与旧的集中根目录）的全部工作树，按仓库分组并带来源标识，无法识别的目录也在列。
-- **历史位置只读**：同一页面只读展示历史集中存放根（默认 `~/.dsh/gitworktree`）——已有工作树原地保留、照常可用，新建的落在各仓库内。旧版 `~/.dsh/gitworktree/settings.json` 的值升级后自动迁入。
+| 能力 | 一句话说明 |
+| --- | --- |
+| **IDEA 风格分支树** | 按 `/` 折叠目录、本地/远程分组、实时搜索与定位当前分支，支持彩色 `↗N` / `↙N` / `↗` / `!` 上游状态标记。 |
+| **原位提交图谱** | 在分支弹窗内直接展开浏览任意分支的真实提交历史与合并图谱，无需切换检出。 |
+| **一键 Worktree 隔离** | 将会话隔离到 `<repo>/.dsh/gitworktree/<分支>/` 并注册为真实工作区，保持主仓库 `git status` 干净。 |
+| **安全推送与后台进度** | 独立推送预览窗（支持 Tag 与 `force-with-lease`）、严格快进更新，以及不挡页面的悬浮实时进度卡。 |
+| **跨仓库工作树管理** | 在 **设置 → 插件** 中统一管理各仓库内与历史集中存放的 worktree，删除前风险提示并安全归档会话。 |
 
-> [!NOTE]
-> - 原生侧边栏不受影响：工作树是普通注册工作区，工作区树会把各仓库内的布局自动归到其仓库之下（集中存放的旧工作树位置不变，只有新建的才归位）。
-> - `git clean -xdff`（双 `-f`）会删掉仓库内的工作树目录（单 `-f` 会跳过嵌套仓库）；删后 `git worktree prune` 可恢复注册，但其中未提交的改动会丢。
-> - 某仓库的工作区全部注销后，它的工作树不再出现在管理弹窗与自动清理中；重新注册该仓库任一目录即可找回。
+---
 
 ## 安装
+
+需要 `web` profile（`dsh web`）以及 **dsh `0.2.0-rc.1`** 或更新宿主。
 
 ```sh
 dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 ```
 
-> 包声明了 `dsh.bundle`，`add` 会自动把插件挂进 profile 的层栈，无需手动改配置。需要 `web` profile（`dsh web`）以及 dsh **0.2.0-rc.1**（或更新）宿主。
+> [!TIP]
+> 包已声明 `dsh.bundle`，执行 `add` 会自动把插件挂进 profile 层栈，无需手动修改配置。
 
-运行 dsh **0.1.2 alpha** 宿主？请改装专用兼容版本：
+**更新与移除**
+
+```sh
+# 更新插件
+dsh plugin --profile web update @laoyuehanni/dsh-git-worktree
+
+# 移除插件（两处位置的 worktree 目录会保留，插件设置存于 dsh 设置文档）
+dsh plugin --profile web remove @laoyuehanni/dsh-git-worktree
+```
+
+<details>
+<summary>使用 dsh <code>0.1.2 alpha</code> 宿主，或从旧版 <code>github:</code> 直装（≤ 0.3.2）升级？</summary>
+
+**运行 dsh `0.1.2 alpha` 宿主**请安装专用兼容通道（当前解析到 `0.4.3-dsh-0.1.2-alpha.5`，peer 锁定 alpha 线，普通 `update` 不会混装）：
 
 ```sh
 dsh plugin --profile web add @laoyuehanni/dsh-git-worktree@dsh-alpha
 ```
 
-> `@dsh-alpha` 是 dist-tag，解析为最新的 alpha 宿主兼容构建（当前 `0.4.3-dsh-0.1.2-alpha.5`），peer 锁定 alpha 线——普通 `update` 不会把两条通道混装。已在 0.2.0-rc.1 或更新宿主上，请用上面的默认线。
-
-## 更新
+**从旧版 `github:` 直装（≤ 0.3.2，包名 `dsh-git-worktree`）升级？** GitHub 直装已终止，原地 `update` 会加载失败，请先移除旧包名再从 npm 重新安装：
 
 ```sh
-dsh plugin --profile web update @laoyuehanni/dsh-git-worktree
+dsh plugin --profile web remove dsh-git-worktree
+dsh plugin --profile web add @laoyuehanni/dsh-git-worktree
 ```
 
-## 移除
+已有 worktree 目录与插件设置会完整保留。
 
-```sh
-dsh plugin --profile web remove @laoyuehanni/dsh-git-worktree
-```
+</details>
 
-两处位置（各仓库的 `.dsh/gitworktree` 布局与旧的集中根目录）的 worktree 目录都会保留；插件自身的设置存于 dsh 设置文档。
+---
+
+## 核心功能
+
+### 1. IDEA 风格分支选择器 & 提交图谱
+
+- **树形目录结构**：把 `/` 视为可折叠文件夹并以末段为标签，打开时自动展开并居中定位当前分支。本地与远程分支分为两组（单远程自动剥离前缀）。
+- **搜索与上游标记**：底部搜索保留匹配分支的祖先目录并高亮命中；左侧工具栏提供定位当前分支及全部展开/折叠。本地与工作树行用绿色 `↗N` / 蓝色 `↙N` 表示领先与落后，无上游显示绿色 `↗`（无远程时不显示），上游失效显示 `!`。
+- **原位提交图谱**：点击分支菜单左侧图谱按钮即可原位扩大浮层，左侧浏览分支、右侧查看真实提交与合并关系，全程不检出分支。选中提交可查看作者、时间、完整正文（默认三行缩略，可展开内部滚动）与文件摘要。
+
+<details>
+<summary>展开详情：提交图谱分页、搜索与作者缓存</summary>
+
+- 列表滚到底部自动加载下一页（同时保留「加载更多」按钮），支持按已加载提交的标题或哈希搜索。
+- 作者下拉列出该分支的全部作者并缓存于内存；分支更新、抓取或刷新后自动失效。
+
+</details>
+
+---
+
+### 2. 分支操作 & 行级右键菜单
+
+- **免确认切分支与远程检出**：点击本地分支直接原地 `git switch`；在远程组点击 `origin/feat-x` 直接原地检出并自动建立跟踪分支（勾选工作树开关则隔离进独立 worktree）。在 worktree 会话内其他分支置灰并提示去主仓库操作；已启动会话的菜单只显示当前分支（提取与更新仍可用）。
+- **行级右键菜单（键盘支持方向键 + Enter）**：分支行提供「签出 / 新建 / 新建并检出 / 重命名（本地）/ 删除（本地，安全 `-d`，拒绝未合并或被占用分支）/ 复制分支」六个动作；工作树行提供「跳到此工作树 / 复制路径 / 删除工作树」。
+- **就地弹窗与连续操作**：新建、重命名、确认等二级弹窗直接在菜单位置展开，边输边校验 git ref 规则与重名；原地动作完成后菜单保持打开可连续操作，失败时保留弹窗便于改名重试。
+
+---
+
+### 3. 远程同步、快进更新、分支推送 & 实时进度
+
+- **远程同步**：工具栏末位刷新按钮一键 fetch 全部远程并清理失效跟踪分支，列表原地刷新，无需切去终端。
+- **快进更新当前分支**：工具栏或当前行右键可将当前分支快进到上游；本地分叉、无上游或工作区改动冲突时直接拒绝并给出 git 原话——插件绝不代你 stash 或改写历史。
+- **分支推送预览窗**：本地与工作树行右键「推送」打开独立预览窗，先展示本地待推送提交（独立滚动于固定底栏之上）并在后台校验远端，无需切换检出或提交工作区文件。支持推送 Git 标记（所有 / 跟随提交），下拉「强制推送」采用 `force-with-lease` 防止覆盖新提交。
+- **悬浮实时进度卡片**：提取、更新、推送期间显示类似 IDEA 后台任务的悬浮卡片，展示远程、git 原始阶段/计数/速度及右上角 `×` 取消按钮。不挡页面、切换会话仍在，长传输不再被 20s / 120s 超时误杀（仅 5 分钟无输出才终止）。
+
+<details>
+<summary>展开详情：推送弹窗交互与并发规则</summary>
+
+- **远程与目标编辑**：仅在存在多个远程时显示远程下拉；目标分支按 `Enter` 应用，编辑浮层仅通过 `Enter`、`Esc` 或 `×` 关闭（点击别处不会误关编辑框或推送窗口）。
+- **失败自动回弹**：点击「推送」后窗口关闭、进度卡接管；若失败则自动带回错误原因（远端已前进、lease 过期、受保护分支、认证失败）及上次选择的远程/目标/标记，并重新读取目的地供重试。
+- **同目录串行保护**：同一目录的其它 git 动作会等待当前传输完成；更新末尾的快进一步开始后不可再取消。
+
+</details>
+
+---
+
+### 4. Worktree 隔离、删除与跨仓库管理
+
+- **Worktree 隔离**：未开始的会话中，右键任意分支即可**「创建工作树」**或**「新建分支并创建工作树」**，隔离至 `<repo>/.dsh/gitworktree/<分支>/`（通过 `.git/info/exclude` 本地忽略，源仓库 `git status` 保持干净）并注册为真实工作区；重复创建同一分支自动复用已有 worktree。会话启动后目录锁定，工作树选项自动隐藏。
+- **工作树快捷入口**：主仓库空白会话把被 worktree 占用的分支归入**「工作树」**分组（hover 显示路径），右键「跳到此工作树」直接进入对应目录开启新会话。
+- **安全删除工作树**：在「工作树」分组右键或管理弹窗中操作（有运行中会话时禁用）。确认弹窗会用红色标出未提交文件数、领先提交数，并提示对应工作区会话将归档；确认后先删 git worktree（分支保留），仅在 git 成功后才归档会话并注销工作区，失败则 DSH 侧零变更且支持原地重试。
+- **工作树管理 & 历史位置只读**：在 **设置 → 插件** 中打开管理弹窗，跨仓库列出各仓库 `.dsh/gitworktree` 与只读历史集中根（默认 `~/.dsh/gitworktree`，旧版 `settings.json` 自动迁入）下的全部工作树（含孤儿目录），按仓库分组并带来源标识。
+
+> [!NOTE]
+> - **不影响原生侧边栏**：工作树即普通注册工作区，工作区树会自动把各仓库内的新建工作树归到对应仓库之下（旧的集中存放工作树保持原位）。
+> - **`git clean -xdff`（双 `-f`）** 会删掉仓库内的工作树目录（单 `-f` 会跳过嵌套仓库）；删后可通过 `git worktree prune` 恢复注册，但其中未提交的改动会丢失。
+> - 某仓库的工作区全部注销后，其工作树不再出现在管理弹窗与自动清理中；重新注册该仓库任一目录即可找回。
+
+---
 
 ## 开发
-
-构建一次、装符号链接、迭代：
 
 ```sh
 pnpm install
 pnpm build:all
 pnpm test                # vitest
-node scripts/smoke.mjs  # 基于构建产物的真实 git 冒烟
+node scripts/smoke.mjs   # 基于构建产物的真实 git 冒烟
 dsh plugin --profile web add link:D:/Code/dsh-worktree
 ```
 
-重新构建并重启 `dsh web` 即可生效（插件目录里跑 `pnpm watch:client` 可热重载客户端）。刻意不设 `prepare` 脚本——`lib/` 不入库，`pnpm publish` 现场构建打进 tarball。
+重新构建并重启 `dsh web` 即可生效，客户端开发可在插件目录运行 `pnpm watch:client` 热重载。刻意不设 `prepare` 脚本——`lib/` 不入库，`pnpm publish` 时现场构建打进 tarball。
 
-临时只挂 host 半边（仅当次启动生效，不动 profile）：在仓库旁建 `cordis.yml` 指向构建出的 host 半边（Windows 需要 `file:///` 形式），随补丁启动：
+<details>
+<summary>临时只挂 host 半边（仅当次启动生效，不动 profile）</summary>
+
+在仓库旁创建 `cordis.yml` 指向构建出的 host 入口（Windows 需要 `file:///` 形式）：
 
 ```yml
 - insert:
@@ -96,8 +162,16 @@ dsh plugin --profile web add link:D:/Code/dsh-worktree
       name: 'file:///D:/Code/dsh-worktree/lib/index.js'
 ```
 
+然后随补丁启动：
+
 ```sh
 dsh web --patch <插件目录>/cordis.yml
 ```
 
-此模式只挂载 host 半边（`/plugin/git-worktree/*` 三条路由照常工作）；开发 UI 请用上面的 `link:` 安装方式。
+此模式仅挂载 host 半边（`/plugin/git-worktree/*` 路由照常工作）；开发 UI 请使用上面的 `link:` 安装方式。
+
+</details>
+
+---
+
+[dsh]: https://github.com/deepseek-ai/deepseek-harness
