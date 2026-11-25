@@ -196,6 +196,28 @@ export type GitWorktreeKey =
   | 'manager.openSession'
   | 'manager.copyPath'
   | 'manager.openFailed'
+  | 'manager.scopeRepo'
+  | 'manager.showAllRepos'
+  | 'manager.scopeBack'
+  | 'manager.emptyScoped'
+  | 'contextMenu.newWorktree'
+  | 'contextMenu.manageWorktrees'
+  | 'contextMenu.removeWorktree'
+  | 'contextMenu.removeDone'
+  | 'sidebar.worktreeBadge'
+  | 'sidebar.worktreeBadgeWithBranch'
+  | 'sidebar.worktreeHover'
+  | 'sidebar.worktreeHoverWithBranch'
+  | 'createModal.title'
+  | 'createModal.loading'
+  | 'createModal.loadFailed'
+  | 'createModal.searchPlaceholder'
+  | 'createModal.cutNewBranch'
+  | 'createModal.noMatches'
+  | 'createModal.tagCurrent'
+  | 'createModal.tagWorktree'
+  | 'createModal.tagRemote'
+  | 'createModal.creating'
   | 'fetchWarning'
   | 'excludeWarning'
   | 'copyWarning'
@@ -422,6 +444,28 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.openSession': 'Open session in this worktree',
   'manager.copyPath': 'Copy path',
   'manager.openFailed': 'Could not open worktree: {message}',
+  'manager.scopeRepo': 'Current repository',
+  'manager.showAllRepos': 'Show all repositories',
+  'manager.scopeBack': 'Only {repo}',
+  'manager.emptyScoped': 'No worktrees found for {repo}.',
+  'contextMenu.newWorktree': 'New worktree from branch…',
+  'contextMenu.manageWorktrees': 'Manage worktrees…',
+  'contextMenu.removeWorktree': 'Remove this worktree…',
+  'contextMenu.removeDone': 'Worktree removed',
+  'sidebar.worktreeBadge': 'Git worktree · {repo}',
+  'sidebar.worktreeBadgeWithBranch': 'Git worktree · {repo} ({branch})',
+  'sidebar.worktreeHover': 'Worktree · {repo}',
+  'sidebar.worktreeHoverWithBranch': 'Worktree · {repo} / {branch}',
+  'createModal.title': 'New worktree · {repo}',
+  'createModal.loading': 'Loading branches…',
+  'createModal.loadFailed': 'Could not load branches: {message}',
+  'createModal.searchPlaceholder': 'Search branches or enter a new branch name',
+  'createModal.cutNewBranch': 'Create branch “{name}” from {base} in a new worktree',
+  'createModal.noMatches': 'No matching branches',
+  'createModal.tagCurrent': 'current',
+  'createModal.tagWorktree': 'worktree',
+  'createModal.tagRemote': 'remote',
+  'createModal.creating': 'Creating worktree…',
   fetchWarning: 'Upstream sync failed; created from the local state: {message}',
   excludeWarning: 'The ignore rule for the repository could not be written; `.dsh/` will show as untracked: {message}',
   copyWarning: 'Some configuration files could not be copied: {message}',
@@ -649,6 +693,28 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.openSession': '在此工作树中打开会话',
   'manager.copyPath': '复制路径',
   'manager.openFailed': '无法打开工作树：{message}',
+  'manager.scopeRepo': '当前仓库',
+  'manager.showAllRepos': '显示全部仓库',
+  'manager.scopeBack': '仅看 {repo}',
+  'manager.emptyScoped': '当前仓库 {repo} 暂无工作树。',
+  'contextMenu.newWorktree': '从分支新建工作树…',
+  'contextMenu.manageWorktrees': '管理工作树…',
+  'contextMenu.removeWorktree': '删除此工作树…',
+  'contextMenu.removeDone': '已删除工作树',
+  'sidebar.worktreeBadge': 'Git 工作树 · {repo}',
+  'sidebar.worktreeBadgeWithBranch': 'Git 工作树 · {repo}（{branch}）',
+  'sidebar.worktreeHover': '工作树 · {repo}',
+  'sidebar.worktreeHoverWithBranch': '工作树 · {repo} / {branch}',
+  'createModal.title': '新建工作树 · {repo}',
+  'createModal.loading': '正在加载分支…',
+  'createModal.loadFailed': '分支加载失败：{message}',
+  'createModal.searchPlaceholder': '搜索已有分支，或输入新分支名',
+  'createModal.cutNewBranch': '从 {base} 切出新分支“{name}”并新建工作树',
+  'createModal.noMatches': '没有匹配的分支',
+  'createModal.tagCurrent': '当前',
+  'createModal.tagWorktree': '已有工作树',
+  'createModal.tagRemote': '远程',
+  'createModal.creating': '正在创建工作树…',
   fetchWarning: '上游同步失败，已按本地状态创建：{message}',
   excludeWarning: '仓库忽略规则写入失败，`.dsh/` 将显示为未跟踪目录：{message}',
   copyWarning: '部分配置文件未能复制到新工作树：{message}',

@@ -20,6 +20,60 @@
   gap: 8px;
 }
 
+.scopeBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2));
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.scopeInfo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scopeName {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeToggle {
+  flex-shrink: 0;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: transparent;
+  color: var(--dsw-alias-link);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .scopeToggle:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.scopeToggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+.emptyAction {
+  margin-left: 8px;
+}
+
 .count {
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);

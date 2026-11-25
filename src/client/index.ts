@@ -41,13 +41,19 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import { IconBranchOutlineRegular, IconFolderCloseRegular, IconTrashOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
+import { CONTEXT_MENU_ICON_KEYS, registerNativeContextMenus, type ContextMenusLike } from './context-menus.ts'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
+import { LegacySessionMenuItem } from './LegacySessionMenuItem.tsx'
+import { SidebarWorktreeHover, SidebarWorktreeTrailing } from './SidebarWorktreeBadge.tsx'
+import { WorktreeActionHost } from './WorktreeActionHost.tsx'
 import type { WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import { requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
 import { WorktreeToastHost } from './ToastHost.tsx'
+import { createWorkspaceGitCache, resolveSessionPath, type SnapshotObservable } from './workspace-git-cache.ts'
 import { pathKey, freshestUpdatedAt, planPrune, runAutoPrune } from './worktree-prune.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { recordPruneRun } from './prune-history.ts'
@@ -64,6 +70,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** Application-level overlay slot owned by ui-layout (DSH >= 0.2.0-rc.1). */
     'shell.overlay': { kind: 'list'; scope: 'root' }
+    /** Context-menu icon renderer keyed by action icon key (DSH >= 0.2.2-rc.5). */
+    'contextMenu.icon': { kind: 'keyed'; scope: 'root'; inline: true; owner: { icon: { readonly key: string; readonly src?: string } } }
+    /** Non-interactive icons after the session row's time label (DSH >= 0.2.2-rc.5). */
+    'sidebar.session.row.trailing': { kind: 'list'; scope: 'root'; inline: true; owner: { readonly sessionId: SessionId } }
   }
 }
 
@@ -102,6 +112,17 @@ export interface SyncedConfigLike {
 
 const hasSyncedRef = <T>(ref: SyncedConfigRefLike<T> | undefined): ref is SyncedConfigRefLike<T> =>
   ref !== undefined && typeof ref.get === 'function' && typeof ref.subscribe === 'function'
+
+const isObservable = (value: unknown): value is SnapshotObservable<unknown> =>
+  typeof value === 'object'
+  && value !== null
+  && typeof (value as { getSnapshot?: unknown }).getSnapshot === 'function'
+  && typeof (value as { subscribe?: unknown }).subscribe === 'function'
+
+const hasContextMenus = (value: unknown): value is { readonly contextMenus: ContextMenusLike } =>
+  typeof value === 'object'
+  && value !== null
+  && typeof (value as { contextMenus?: { register?: unknown } }).contextMenus?.register === 'function'
 
 /** Required services: the slot ledger, session/workspace runtimes, the
  * workspace navigation/directory face, copy, and the config forms backing
@@ -299,6 +320,28 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     order: 20,
   }, WorktreeToastHost))
 
+  const gitCache = createWorkspaceGitCache()
+  const syncWorkspaceGitFacts = (): void => {
+    const paths = ctx.workspaces.list.getSnapshot().items.map(workspace => workspace.path)
+    void gitCache.syncPaths(paths, true)
+  }
+  const resolveSessionPathFromCtx = (sessionId: string): string | undefined =>
+    resolveSessionPath(
+      sessionId,
+      ctx.sessions.list.getSnapshot().byId,
+      ctx.workspaces.list.getSnapshot().items,
+    )
+  syncWorkspaceGitFacts()
+  const unsubscribeWorkspaces = isObservable(ctx.workspaces.list)
+    ? ctx.workspaces.list.subscribe(syncWorkspaceGitFacts)
+    : undefined
+  let pluginDisposed = false
+  ctx.effect(() => () => {
+    pluginDisposed = true
+    unsubscribeWorkspaces?.()
+    gitCache.dispose()
+  }, 'git-worktree: workspace git cache lifecycle')
+
   // The Plugins configuration tab dispatches keyed cards for the namespaces
   // the Host serves; the git-worktree host half registers this key, so the
   // storage-root card pairs with it without any upstream change. One bind
@@ -364,7 +407,111 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       const workspace = await ctx.workspaces.create({ path })
       ctx.uiWorkspace.startSession(workspace.workspaceId)
     },
+    onWorktreeRemoved: (path) => {
+      gitCache.invalidate(path)
+    },
   })
+
+  // Root overlay host for dialogs opened from native sidebar/header menus
+  // (manage scoped to a repository, create from branch, guarded remove).
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'git-worktree-actions',
+    order: 18,
+    locale: NS,
+    inject: () => {
+      const chip = chipInjected()
+      return {
+        manager: managerFace(),
+        adoptWorktree: chip.adoptWorktree,
+        describeWorktreeRemoval: chip.describeWorktreeRemoval,
+        removeWorktree: chip.removeWorktree,
+        pruneWorktrees: chip.pruneWorktrees,
+        onWorktreeCreated: (path: string) => { void gitCache.refresh([path]) },
+        onWorktreeRemoved: (path: string) => { gitCache.invalidate(path) },
+      }
+    },
+  }, WorktreeActionHost))
+
+  // Native sidebar decorations for linked worktree sessions (DSH 0.2.2-rc.5+):
+  // trailing branch badge and hover card repository/branch identity.
+  const badgeInjected = () => ({
+    gitCache,
+    resolveSessionPath: resolveSessionPathFromCtx,
+  })
+  ctx.slots.inject('sidebar.session.row.trailing', () => ctx.slots.register({
+    name: 'sidebar.session.row.trailing',
+    id: 'git-worktree',
+    order: 10,
+    locale: NS,
+    inject: badgeInjected,
+  }, SidebarWorktreeTrailing))
+  ctx.slots.inject('sidebar.session.row.hover', () => ctx.slots.register({
+    name: 'sidebar.session.row.hover',
+    id: 'git-worktree',
+    order: 20,
+    locale: NS,
+    inject: badgeInjected,
+  }, SidebarWorktreeHover))
+
+  // Legacy session menu fallback for hosts without `ctx.contextMenus`. Disposed
+  // automatically while native `ctx.contextMenus` is active to prevent duplicate items.
+  let legacyMenuDisposer: (() => void) | undefined
+  const mountLegacySessionMenu = (): void => {
+    if (pluginDisposed || legacyMenuDisposer !== undefined) return
+    legacyMenuDisposer = ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({
+      name: 'sidebar.workspaces.session.menu.item',
+      id: 'git-worktree-remove',
+      order: 500,
+      locale: NS,
+      inject: badgeInjected,
+    }, LegacySessionMenuItem))
+  }
+  const unmountLegacySessionMenu = (): void => {
+    legacyMenuDisposer?.()
+    legacyMenuDisposer = undefined
+  }
+  mountLegacySessionMenu()
+  ctx.effect(() => unmountLegacySessionMenu, 'git-worktree: legacy session menu lifecycle')
+
+  // Optional structured context menus (`workspace`, `session`, `sessionHeader`)
+  // on hosts that provide `contextMenus` (DSH >= 0.2.2-rc.5).
+  if (typeof ctx.inject === 'function') {
+    const injectOptional = ctx.inject.bind(ctx) as (
+      deps: readonly string[],
+      callback: (scope: ClientContext) => void,
+    ) => unknown
+    injectOptional(['contextMenus'], (menuCtx) => {
+      if (!hasContextMenus(menuCtx)) return
+      unmountLegacySessionMenu()
+      const icons = [
+        [CONTEXT_MENU_ICON_KEYS.create, IconBranchOutlineRegular],
+        [CONTEXT_MENU_ICON_KEYS.manage, IconFolderCloseRegular],
+        [CONTEXT_MENU_ICON_KEYS.remove, IconTrashOutlineRegular],
+      ] as const
+      const iconDisposer = menuCtx.slots.inject('contextMenu.icon', function* () {
+        for (const [key, Icon] of icons) {
+          yield menuCtx.slots.register({ name: 'contextMenu.icon', key }, Icon)
+        }
+      })
+      const extraObservers: SnapshotObservable<unknown>[] = []
+      if (isObservable(ctx.locale)) extraObservers.push(ctx.locale)
+      if (isObservable(ctx.sessions.list)) extraObservers.push(ctx.sessions.list)
+      if (isObservable(ctx.workspaces.list)) extraObservers.push(ctx.workspaces.list)
+      const menuDisposer = registerNativeContextMenus({
+        contextMenus: menuCtx.contextMenus,
+        gitCache,
+        resolveSessionPath: resolveSessionPathFromCtx,
+        t: ctx.locale.bind(NS),
+        extraObservers,
+      })
+      menuCtx.effect(() => () => {
+        menuDisposer()
+        iconDisposer()
+        mountLegacySessionMenu()
+      }, 'git-worktree: native context menus')
+    })
+  }
 
   const form = new CardForm(groupingForm)
   const store = form.bind()

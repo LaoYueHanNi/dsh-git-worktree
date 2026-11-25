@@ -179,9 +179,11 @@ describe('client apply', () => {
     ctx.sessionSummaries = { a: { running: false, blank: false, updatedAt: 1 } }
     const calls: Array<{ url: string; body: unknown }> = []
     vi.stubGlobal('fetch', async (url: string, init?: { body?: string }): Promise<Response> => {
-      calls.push({ url, body: init?.body === undefined ? undefined : JSON.parse(init.body) })
+      if (url === ROUTE_REMOVE || url === ROUTE_EXISTS) {
+        calls.push({ url, body: init?.body === undefined ? undefined : JSON.parse(init.body) })
+      }
       if (url === ROUTE_REMOVE) return new Response(JSON.stringify({ path: '', pruned: false }), { status: 200 })
-      return new Response(JSON.stringify({ exists: {} }), { status: 200 })
+      return new Response(JSON.stringify({ exists: {}, facts: {} }), { status: 200 })
     })
     apply(ctx as never)
     const options = ctx.registrationOf('conversation.input.left')
@@ -289,6 +291,10 @@ describe('client apply', () => {
     const ctx = new FakeCtx()
     apply(ctx as never)
     expect(ctx.slotNames).toContain('shell.overlay')
+    expect(ctx.slotNames).toContain('sidebar.session.row.trailing')
+    expect(ctx.slotNames).toContain('sidebar.session.row.hover')
+    expect(ctx.slotNames).toContain('sidebar.workspaces.session.menu.item')
+    expect(ctx.registered.some(r => r.options.name === 'shell.overlay' && r.options.id === 'git-worktree-actions')).toBe(true)
     const options = ctx.registrationOf('plugins.bundle.config')
     const injected = (options.inject as () => { manager: { openWorktree: (path: string) => Promise<void> } })()
 
@@ -296,5 +302,35 @@ describe('client apply', () => {
 
     expect(ctx.workspaces.created).toEqual([{ path: '/repo/.dsh/gitworktree/feat-a' }])
     expect(ctx.uiWorkspace.started).toEqual([['ws-1']])
+  })
+
+  it('registers native contextMenus and unmounts legacy session menu fallback when contextMenus is available', () => {
+    const ctx = new FakeCtx()
+    const menuRegistrations: Array<{ target: string; id: string }> = []
+    const menuCtx = Object.assign(ctx, {
+      locale: {
+        register: ctx.locale.register,
+        bind: () => (key: string) => key,
+      },
+      contextMenus: {
+        register: (contribution: { target: string; id: string }) => {
+          menuRegistrations.push({ target: contribution.target, id: contribution.id })
+          return () => {}
+        },
+      },
+      inject: (deps: readonly string[], cb: (scope: unknown) => void) => {
+        if (deps.includes('contextMenus')) cb(menuCtx)
+      },
+    })
+
+    apply(menuCtx as never)
+
+    expect(menuRegistrations).toEqual([
+      { target: 'workspace', id: 'git-worktree.workspace' },
+      { target: 'session', id: 'git-worktree.session' },
+      { target: 'sessionHeader', id: 'git-worktree.sessionHeader' },
+    ])
+    expect(ctx.slotNames).toContain('contextMenu.icon')
+    expect(ctx.slotNames).not.toContain('sidebar.workspaces.session.menu.item')
   })
 })

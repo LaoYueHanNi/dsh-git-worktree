@@ -54,7 +54,7 @@ Status: implemented
 
 - **做 0.1.6 与 0.1.7 双版本运行时动态兼容**：上游处于 alpha 快速迭代期，相邻版本不承诺向下兼容；双版本不仅无法规避 pnpm 对 alpha peerDependencies 的严格校验冲突，还会导致代码中充满不可测的动态探测逻辑，维护成本高。
 - **保留 pre-0.3 settings.json 迁移逻辑并适配 0.1.7 的 update 接口**：该旧文件早已在实际环境中绝迹，宿主持久化范式已迁入 Profile Patch，保留该链路只会徒增复杂度与冷启动耗时。
-- **顺便利用 0.1.7 新开放的 session.menu.item 插槽开发会话右键菜单**：违背单一职责与风险隔离原则；会话右键菜单涉及新的 UI 交互、测试和国际化，已单独作为 [DR: 利用原生会话菜单插槽支持工作树行级快捷操作](../proposed/2026-09-22-session-context-menu-worktree-actions.md) 规划，升级改动聚焦消除编译与运行时断代。
+- **顺便利用 0.1.7 新开放的 session.menu.item 插槽开发会话右键菜单**：违背单一职责与风险隔离原则；会话右键菜单涉及新的 UI 交互、测试和国际化，已单独作为 [DR: 原生侧边栏右键菜单集成与工作树视觉标记](./2026-09-22-session-context-menu-worktree-actions.md) 规划并后续落地，升级改动聚焦消除编译与运行时断代。
 
 ## Consequences
 

@@ -517,6 +517,9 @@ export interface WorktreesAllBody {
 export interface WorktreeScanEntry {
   /** Absolute directory path. */
   path: string
+  /** Canonical main repository root directory; absent for unrecognized/orphan
+   * directories or older host builds. */
+  repoRoot?: string
   /** Main repository directory basename; null = the directory is not inside
    * a git repository (an orphan or foreign folder — shown as unrecognized,
    * never deleted, never counted against the prune cap). */

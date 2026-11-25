@@ -212,7 +212,7 @@ export async function handleWorktreesAll(deps: RouteDeps, body: unknown): Promis
           const gitFacts = await probeWorkspaceGit(deps.exec, path)
           return gitFacts === undefined
             ? { path, repoName: null, branch: null, source }
-            : { path, repoName: gitFacts.repoName, branch: gitFacts.branch, source }
+            : { path, repoRoot: gitFacts.repoRoot, repoName: gitFacts.repoName, branch: gitFacts.branch, source }
         } catch {
           return { path, repoName: null, branch: null, source }
         }

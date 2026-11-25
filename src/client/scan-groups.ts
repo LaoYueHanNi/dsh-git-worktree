@@ -11,6 +11,31 @@
  */
 
 import type { WorktreeScanEntry } from '../wire.ts'
+import { pathKey } from './worktree-prune.ts'
+
+/** Target repository used when scoping the worktree manager modal to one repo. */
+export interface RepoScopeFilter {
+  readonly repoRoot: string
+  readonly repoName: string
+}
+
+/**
+ * Filter scanned worktree entries to those belonging to one repository.
+ * Prefers exact canonical `repoRoot` matching when the host supplies it and
+ * falls back to `repoName` for older host responses. Orphan entries (repoName
+ * === null) are excluded while scoped.
+ */
+export function filterScanEntriesByRepo(
+  entries: readonly WorktreeScanEntry[],
+  repo: RepoScopeFilter,
+): WorktreeScanEntry[] {
+  const targetRoot = pathKey(repo.repoRoot)
+  return entries.filter((entry) => {
+    if (entry.repoName === null) return false
+    if (entry.repoRoot !== undefined) return pathKey(entry.repoRoot) === targetRoot
+    return entry.repoName === repo.repoName
+  })
+}
 
 /** One display group: `repoName` names the repository; null = the
  * unrecognized (non-git) group, always ordered last. `source` names which

@@ -22,7 +22,7 @@ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './relative-time.ts'
 import { mapLimit } from './concurrency.ts'
-import { groupScanEntries } from './scan-groups.ts'
+import { filterScanEntriesByRepo, groupScanEntries, type RepoScopeFilter } from './scan-groups.ts'
 import { emitToast } from './toast-bus.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { freshestUpdatedAt, pathKey } from './worktree-prune.ts'
@@ -50,6 +50,8 @@ export interface WorktreeManagerFace {
   readonly deleteWorkspace: (workspaceId: string) => Promise<unknown>
   /** Register the directory as a workspace and open a session in it. */
   readonly openWorktree?: (path: string) => Promise<void>
+  /** Optional notification after a worktree or orphan folder is removed. */
+  readonly onWorktreeRemoved?: (path: string) => void
 }
 
 export interface WorktreeManagerModalProps {
@@ -57,6 +59,8 @@ export interface WorktreeManagerModalProps {
   readonly onClose: () => void
   readonly face: WorktreeManagerFace
   readonly t: PropsLocale<'git-worktree'>['t']
+  /** When opened from a workspace context menu, default to showing only this repository's worktrees. */
+  readonly initialRepoFilter?: RepoScopeFilter | undefined
 }
 
 type ScanState =
@@ -89,7 +93,7 @@ function archiveIdsFor(face: WorktreeManagerFace, sessionIds: readonly string[])
   return ids
 }
 
-export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManagerModalProps) {
+export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter }: WorktreeManagerModalProps) {
   const [scan, setScan] = useState<ScanState>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
   const [openingPath, setOpeningPath] = useState<string | null>(null)
@@ -98,6 +102,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [scopedToRepo, setScopedToRepo] = useState<boolean>(initialRepoFilter !== undefined)
   const [now, setNow] = useState(() => Date.now())
   const scanGenRef = useRef(0)
 
@@ -154,9 +159,10 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
     setRemoveTarget(null)
     setRemoveError(null)
     setOpeningPath(null)
+    setScopedToRepo(initialRepoFilter !== undefined)
     loadWorktrees(true)
     return () => { scanGenRef.current += 1 }
-  }, [open, loadWorktrees])
+  }, [open, loadWorktrees, initialRepoFilter?.repoRoot])
 
   const closeRemove = (): void => {
     if (removing) return
@@ -222,6 +228,7 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
       () => {
         setRemoving(false)
         setRemoveTarget(null)
+        face.onWorktreeRemoved?.(target.path)
         // Re-scan entries, inspect facts, and running paths together so no stale state lingers.
         loadWorktrees(false)
       },
@@ -238,8 +245,13 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
     return freshestUpdatedAt(workspace.sessionIds.map(id => face.sessionById(id)))
   }
 
-  const validCount = scan.status === 'ready' ? scan.entries.filter(entry => entry.repoName !== null).length : 0
-  const orphanCount = scan.status === 'ready' ? scan.entries.length - validCount : 0
+  const activeScope = scopedToRepo ? initialRepoFilter : undefined
+  const visibleEntries = scan.status === 'ready'
+    ? (activeScope === undefined ? scan.entries : filterScanEntriesByRepo(scan.entries, activeScope))
+    : []
+  const validCount = visibleEntries.filter(entry => entry.repoName !== null).length
+  const orphanCount = visibleEntries.length - validCount
+  const totalCount = scan.status === 'ready' ? scan.entries.length : 0
 
   return (
     <>
@@ -263,6 +275,29 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         )}
         {scan.status === 'ready' && (
           <div className={css.body}>
+            {initialRepoFilter !== undefined && (
+              <div className={css.scopeBar}>
+                <span className={css.scopeInfo}>
+                  {activeScope !== undefined ? (
+                    <>
+                      <span>{t('manager.scopeRepo')}</span>
+                      <span className={css.scopeName}>{initialRepoFilter.repoName}</span>
+                    </>
+                  ) : (
+                    <span>{t('manager.showAllRepos')}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className={css.scopeToggle}
+                  onClick={() => { setScopedToRepo(prev => !prev) }}
+                >
+                  {activeScope !== undefined
+                    ? t('manager.showAllRepos')
+                    : t('manager.scopeBack', { repo: initialRepoFilter.repoName })}
+                </button>
+              </div>
+            )}
             <div className={css.toolbar}>
               <div className={css.count} role="status">
                 {t('manager.count', { n: validCount })}
@@ -281,9 +316,26 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
               </button>
             </div>
             {scan.truncated && <div className={css.warn} role="status">{t('manager.truncated')}</div>}
-            {scan.entries.length === 0 && <div className={css.empty}>{t('manager.empty')}</div>}
+            {visibleEntries.length === 0 && (
+              <div className={css.empty}>
+                {activeScope !== undefined ? (
+                  <>
+                    <span>{t('manager.emptyScoped', { repo: activeScope.repoName })}</span>
+                    {totalCount > 0 && (
+                      <button
+                        type="button"
+                        className={`${css.scopeToggle} ${css.emptyAction}`}
+                        onClick={() => { setScopedToRepo(false) }}
+                      >
+                        {t('manager.showAllRepos')}
+                      </button>
+                    )}
+                  </>
+                ) : t('manager.empty')}
+              </div>
+            )}
             <div className={css.list}>
-              {groupScanEntries(scan.entries).map(group => (
+              {groupScanEntries(visibleEntries).map(group => (
                 <div key={`${group.source}:${group.repoName ?? '<orphans>'}`} className={css.group}>
                   <div className={css.groupHead} role="presentation">
                     <span className={css.groupIcon} aria-hidden="true"><IconFolderCloseRegular size={13} /></span>

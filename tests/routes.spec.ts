@@ -1246,9 +1246,9 @@ describe('handleWorktreesAll', () => {
       status: 200,
       body: {
         worktrees: [
-          { path: wtA, repoName: 'repo-feat-x', branch: 'feat/x', source: 'legacy' },
+          { path: wtA, repoRoot: resolve(wtA), repoName: 'repo-feat-x', branch: 'feat/x', source: 'legacy' },
           { path: junk, repoName: null, branch: null, source: 'legacy' },
-          { path: wtB, repoName: 'repo-main-wt', branch: 'main-wt', source: 'legacy' },
+          { path: wtB, repoRoot: resolve(wtB), repoName: 'repo-main-wt', branch: 'main-wt', source: 'legacy' },
         ],
         legacyRoot: ROOT,
         legacyRootExists: false,
@@ -1290,8 +1290,8 @@ describe('handleWorktreesAll', () => {
     expect(outcome.status).toBe(200)
     if (outcome.status !== 200 || !('worktrees' in outcome.body)) throw new Error('expected a scan body')
     expect(outcome.body.worktrees).toEqual([
-      { path: legacyWt, repoName: 'repo-a-main', branch: 'main', source: 'legacy' },
-      { path: wtA, repoName: 'feat-x', branch: 'feat/x', source: 'project' },
+      { path: legacyWt, repoRoot: resolve(legacyWt), repoName: 'repo-a-main', branch: 'main', source: 'legacy' },
+      { path: wtA, repoRoot: resolve(wtA), repoName: 'feat-x', branch: 'feat/x', source: 'project' },
     ])
     expect(outcome.body.legacyRoot).toBe(ROOT)
   })
