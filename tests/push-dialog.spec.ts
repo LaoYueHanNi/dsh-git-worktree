@@ -78,7 +78,16 @@ const hooks = vi.hoisted(() => {
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...hooks }))
 vi.mock('../src/client/api.ts', () => ({ requestPushPlan: vi.fn(), requestPushPreview: vi.fn() }))
-vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({ Button: 'button', Modal: 'modal', Menu: 'menu', IconBranchOutlineRegular: 'svg', IconCloseOutlineRegular: 'svg' }))
+vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
+  Button: 'button',
+  Checkbox: 'checkbox',
+  Modal: 'modal',
+  Menu: 'menu',
+  IconBranchOutlineRegular: 'svg',
+  IconChevronDownOutlineRegular: 'svg',
+  IconCloseOutlineRegular: 'svg',
+  IconRefreshOutlineRegular: 'svg',
+}))
 
 const preview = { ok: true as const, sourceOid: 'a'.repeat(40), targetOid: 'b'.repeat(40), commits: [{ oid: 'a'.repeat(40), subject: 'one subject' }], total: 1, truncated: false }
 let props: PushDialogProps
@@ -286,7 +295,7 @@ describe('push review dialog', () => {
 
   it('keeps force push as one dropdown action, leases its target and forwards the selected tag scope', async () => {
     let output = await hooks.flush(render)
-    find(output, p => p.type === 'checkbox').onChange({ target: { checked: true } })
+    find(output, p => p.label === 'pushTags').onChange(true)
     output = await hooks.flush(render)
     find(output, p => p.items?.[0]?.id === 'all').onSelect('follow')
     output = await hooks.flush(render)
@@ -301,13 +310,13 @@ describe('push review dialog', () => {
     vi.mocked(requestPushPreview).mockResolvedValue({ ...preview, commits: [], total: 0 })
     let output = await hooks.flush(render)
     expect(push(output).disabled).toBe(true)
-    find(output, p => p.type === 'checkbox').onChange({ target: { checked: true } })
+    find(output, p => p.label === 'pushTags').onChange(true)
     output = await hooks.flush(render)
     expect(push(output).disabled).toBe(false)
     vi.mocked(requestPushPreview).mockResolvedValue({ ...preview, targetOid: null, commits: [], total: 0 })
     remoteMenu(output).onSelect('github')
     output = await hooks.flush(render)
-    find(output, p => p.type === 'checkbox').onChange({ target: { checked: false } })
+    find(output, p => p.label === 'pushTags').onChange(false)
     output = await hooks.flush(render)
     expect(push(output).disabled).toBe(false)
     expect(JSON.stringify(output)).toContain('pushNewEmpty')
@@ -513,7 +522,7 @@ describe('push review dialog', () => {
       expect(vi.mocked(requestPushPreview).mock.calls.every(([body]) => body.remote === 'github' && body.target === 'review/x')).toBe(true)
       expect(vi.mocked(requestPushPreview).mock.calls.length).toBeGreaterThan(0)
       expect(JSON.stringify(output)).toContain('review/x')
-      expect(find(output, p => p.type === 'checkbox').checked).toBe(true)
+      expect(find(output, p => p.label === 'pushTags').checked).toBe(true)
       expect(find(output, p => p.items?.[0]?.id === 'all').selectedId).toBe('follow')
       // One click from the retry, with exactly those choices.
       expect(push(output).disabled).toBe(false)
@@ -558,7 +567,7 @@ describe('push review dialog', () => {
     it('is a normal window without it: nothing to explain, default tag choice', async () => {
       const output = await hooks.flush(render)
       expect(JSON.stringify(output)).not.toContain('pushFail')
-      expect(find(output, p => p.type === 'checkbox').checked).toBe(false)
+      expect(find(output, p => p.label === 'pushTags').checked).toBe(false)
     })
   })
 

@@ -119,6 +119,7 @@ import { dispatchBranchMenuKeyDown } from './branch-keyboard.ts'
 import { CommitGraph } from './CommitGraph.tsx'
 import { hostFrameTop } from './frame-top.ts'
 import { graphOpenAfter } from './graph-open.ts'
+import { emitToast, hasGlobalToastHost } from './toast-bus.ts'
 import css from './BranchChip.module.css'
 
 // The row type travels with the component for every caller (BranchChip
@@ -141,6 +142,8 @@ export interface BranchConfirmFly {
   confirmLabel: string
   /** Cancel-button label. */
   cancelLabel: string
+  /** True when confirming destroys a branch or worktree (renders in danger tone). */
+  danger?: boolean
   /** True while the action runs: both buttons disable. */
   busy: boolean
   /** Editable draft (the cutout flow's new-branch name): present, the
@@ -453,6 +456,16 @@ export function BranchMenu({
   }
   const graphOpenRef = useRef(graphOpen)
   graphOpenRef.current = graphOpen
+  const [branchesHidden, setBranchesHidden] = useState(false)
+  useEffect(() => {
+    if (!graphOpen) {
+      setBranchesHidden(false)
+      return
+    }
+    if (typeof window !== 'undefined' && window.innerWidth <= 640) {
+      setBranchesHidden(true)
+    }
+  }, [graphOpen])
   const graphEscapeRef = useRef<(() => boolean) | null>(null)
   const graphAnimationRef = useRef<Animation | null>(null)
   const graphStartRectRef = useRef<DOMRect | null>(null)
@@ -1550,7 +1563,7 @@ export function BranchMenu({
    * (重命名分支, 删除分支, 复制分支); on a worktree row the pair follows the
    * hop. The menu opens NEITHER select NOR pick — it launches, never
    * re-semantics. */
-  const ctxItems: { id: string; label: string; icon: React.ReactNode; disabled?: boolean; title?: string; run: () => void }[] = []
+  const ctxItems: { id: string; label: string; icon: React.ReactNode; disabled?: boolean; danger?: boolean; title?: string; run: () => void }[] = []
   if (ctx !== null) {
     const { row, name, x, y } = ctx
     const isWorktree = row?.kind === 'worktree'
@@ -1621,7 +1634,11 @@ export function BranchMenu({
         run: () => {
           setCtx(null)
           const text = row?.path !== undefined ? row.path : name
-          void writeClipboard(text).then(ok => { if (ok) setCopiedSeq(Date.now()) })
+          void writeClipboard(text).then((ok) => {
+            if (!ok) return
+            if (hasGlobalToastHost()) emitToast(t('hover.copied'), 'success')
+            else setCopiedSeq(Date.now())
+          })
         },
       })
       // The destructive verb rides LAST (the branch rows put 删除分支 at the
@@ -1637,6 +1654,7 @@ export function BranchMenu({
           id: 'remove-worktree',
           label: t('worktreeRemove.menu'),
           icon: <IconTrashOutlineRegular size={14} />,
+          danger: true,
           ...blocked ? { disabled: true, title: t('manager.running') } : {},
           run: () => {
             confirmRef.current?.onCancel()
@@ -1744,6 +1762,7 @@ export function BranchMenu({
               id: 'delete',
               label: t('ctxDelete'),
               icon: <IconTrashOutlineRegular size={14} />,
+              danger: true,
               run: () => {
                 confirmRef.current?.onCancel()
                 markPoint()
@@ -1761,7 +1780,11 @@ export function BranchMenu({
         icon: <IconCopyOutlineRegular size={14} />,
         run: () => {
           setCtx(null)
-          void writeClipboard(name).then(ok => { if (ok) setCopiedSeq(Date.now()) })
+          void writeClipboard(name).then((ok) => {
+            if (!ok) return
+            if (hasGlobalToastHost()) emitToast(t('hover.copied'), 'success')
+            else setCopiedSeq(Date.now())
+          })
         },
       })
     }
@@ -1891,7 +1914,7 @@ export function BranchMenu({
               {allExpanded ? <IconChevronUpOutlineRegular size={14} /> : <IconChevronDownOutlineRegular size={14} />}
             </button>
           </div>
-          <div className={css.menuMain}>
+          <div className={`${css.menuMain} ${graphOpen && branchesHidden ? css.menuMainHidden : ''}`}>
             <div className={css.menuHeading}>{t('menuBranches')}</div>
             <div className={css.menuRows} role="presentation" ref={holdRowsCenter}>
               {needle === '' ? (
@@ -1966,8 +1989,20 @@ export function BranchMenu({
               />
             </div>
           </div>
-          {graphOpen && <CommitGraph key={`${repoPath}:${browsingRef}`} repoPath={repoPath} branchRef={browsingRef} branchEpoch={branchEpoch}
-            branch={browsingBranch || 'HEAD'} escapeRef={graphEscapeRef} t={t} onClose={onClose} />}
+          {graphOpen && (
+            <CommitGraph
+              key={`${repoPath}:${browsingRef}`}
+              repoPath={repoPath}
+              branchRef={browsingRef}
+              branchEpoch={branchEpoch}
+              branchesHidden={branchesHidden}
+              onToggleBranches={() => { setBranchesHidden(hidden => !hidden) }}
+              branch={browsingBranch || 'HEAD'}
+              escapeRef={graphEscapeRef}
+              t={t}
+              onClose={onClose}
+            />
+          )}
         </div>,
         document.body,
       )}
@@ -2014,6 +2049,7 @@ export function BranchMenu({
             <button
               ref={flyConfirmRef}
               type="button"
+              className={confirm.danger === true ? css.popConfirmDanger : undefined}
               disabled={confirm.busy || confirm.draftInvalid === true}
               onClick={confirm.onConfirm}
             >
@@ -2135,7 +2171,7 @@ export function BranchMenu({
               key={item.id}
               type="button"
               role="menuitem"
-              className={css.ctxItem}
+              className={item.danger === true ? `${css.ctxItem} ${css.ctxItemDanger}` : css.ctxItem}
               disabled={busy || item.disabled}
               title={item.title}
               onClick={item.run}

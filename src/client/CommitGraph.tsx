@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
-import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineRegular, IconPanelLeftOutlineRegular, IconRefreshOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CommitDetail, CommitHistory } from '../wire.ts'
 import { authorEpoch, cachedAuthors, forgetAuthors, rememberAuthors } from './author-cache.ts'
@@ -59,12 +59,16 @@ function Detail({ detail, t }: { detail: CommitDetail; t: T }) {
 
 /** One branch browser. The owner keys by repository + ref: old async responses
  * can never replace a different branch's history or selected commit. */
-export function CommitGraph({ repoPath, branchRef, branch, branchEpoch = 0, onClose, escapeRef, t }: {
+export function CommitGraph({ repoPath, branchRef, branch, branchEpoch = 0, branchesHidden = false, onToggleBranches, onClose, escapeRef, t }: {
   repoPath: string
   branchRef: string
   branch: string
   /** Bumped when branch facts, fetch, or update may have moved a ref. */
   branchEpoch?: number
+  /** Whether the left branch sidebar is currently collapsed in graph mode. */
+  branchesHidden?: boolean
+  /** Toggle visibility of the left branch tree column (useful on narrow viewports). */
+  onToggleBranches?: () => void
   onClose: () => void
   escapeRef: MutableRefObject<(() => boolean) | null>
   t: T
@@ -204,6 +208,18 @@ export function CommitGraph({ repoPath, branchRef, branch, branchEpoch = 0, onCl
 
   return <div className={css.panel} data-commit-history="" role="region" aria-label={t('graphTitle')}>
     <div className={css.heading}>
+      {onToggleBranches !== undefined && (
+        <button
+          type="button"
+          className={`${css.iconButton} ${!branchesHidden ? css.iconButtonActive : ''}`}
+          title={t(branchesHidden ? 'graphShowBranches' : 'graphHideBranches')}
+          aria-label={t(branchesHidden ? 'graphShowBranches' : 'graphHideBranches')}
+          aria-pressed={!branchesHidden}
+          onClick={onToggleBranches}
+        >
+          <IconPanelLeftOutlineRegular size={14} />
+        </button>
+      )}
       <span className={css.branch} title={branch}>{branch}</span>
       <select className={css.authorFilter} aria-label={t('graphAuthorFilter')} value={author} onChange={event => setAuthor(event.target.value)}>
         <option value="">{t('graphAllAuthors')}</option>
@@ -212,9 +228,11 @@ export function CommitGraph({ repoPath, branchRef, branch, branchEpoch = 0, onCl
       <input className={css.search} value={query} onChange={event => setQuery(event.target.value)}
         placeholder={t('graphSearchPlaceholder')} aria-label={t('graphSearch')} spellCheck={false} />
       {history && <span className={css.loaded} title={t('graphLoaded', { count: commits.length })}>{t('graphLoaded', { count: commits.length })}</span>}
-      <button type="button" className={css.iconButton} title={t('graphRefresh')} aria-label={t('graphRefresh')}
-        disabled={loading} onClick={reloadHistory}>↻</button>
-      <button type="button" className={css.iconButton} title={t('graphCloseWindow')} aria-label={t('graphCloseWindow')} onClick={onClose}><IconCloseOutlineRegular className={css.closeIcon} size={12} /></button>
+      <div className={css.headingActions}>
+        <button type="button" className={css.iconButton} title={t('graphRefresh')} aria-label={t('graphRefresh')}
+          disabled={loading} onClick={reloadHistory}><IconRefreshOutlineRegular size={14} /></button>
+        <button type="button" className={css.iconButton} title={t('graphCloseWindow')} aria-label={t('graphCloseWindow')} onClick={onClose}><IconCloseOutlineRegular className={css.closeIcon} size={12} /></button>
+      </div>
     </div>
     <div className={css.columns} aria-hidden="true"><span style={{ width: graphWidth }}>{t('graphColumn')}</span><span>{t('graphCommit')}</span><span>{t('graphAuthor')}</span><span>{t('graphDate')}</span></div>
     <div ref={listRef} className={css.list} role="listbox" aria-label={t('graphCommits')} aria-busy={loading}

@@ -282,4 +282,44 @@ describe('CardForm keep-cap staging', () => {
       dirty: false,
     })
   })
+
+  it('rejects absolute paths and parent traversal in postCreateCopyFiles before saving', async () => {
+    const scope = new FakeScope({})
+    const form = new CardForm(scope)
+    const store = form.bind()
+
+    form.actions().editPostCreateCopyFiles('.env\n../secret.key')
+    expect(store.getSnapshot().postCreateCopyFilesValid).toBe(false)
+    await form.actions().save()
+    expect(scope.writes).toEqual([])
+
+    form.actions().editPostCreateCopyFiles('/etc/passwd')
+    expect(store.getSnapshot().postCreateCopyFilesValid).toBe(false)
+
+    form.actions().editPostCreateCopyFiles('C:\\Windows\\win.ini')
+    expect(store.getSnapshot().postCreateCopyFilesValid).toBe(false)
+
+    form.actions().editPostCreateCopyFiles('.env\nconfig/local.json')
+    expect(store.getSnapshot().postCreateCopyFilesValid).toBe(true)
+    await form.actions().save()
+    expect(scope.writes).toEqual([
+      { op: 'set', field: 'postCreateCopyFiles', value: ['.env', 'config/local.json'] },
+    ])
+    expect(store.getSnapshot().failed).toBe(false)
+  })
+
+  it('flags a refused postCreateCopyFiles write and keeps the draft staged', async () => {
+    const scope = new FakeScope({})
+    scope.applyWrites = false
+    const form = new CardForm(scope)
+    const store = form.bind()
+
+    form.actions().editPostCreateCopyFiles('.env')
+    await form.actions().save()
+    expect(store.getSnapshot()).toMatchObject({
+      postCreateCopyFilesText: '.env',
+      dirty: true,
+      failed: true,
+    })
+  })
 })

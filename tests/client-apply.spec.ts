@@ -284,4 +284,17 @@ describe('client apply', () => {
 
     expect(face.openGraphByDefault()).toBe(true)
   })
+
+  it('registers the global toast host in shell.overlay and injects openWorktree into the manager face', async () => {
+    const ctx = new FakeCtx()
+    apply(ctx as never)
+    expect(ctx.slotNames).toContain('shell.overlay')
+    const options = ctx.registrationOf('plugins.bundle.config')
+    const injected = (options.inject as () => { manager: { openWorktree: (path: string) => Promise<void> } })()
+
+    await injected.manager.openWorktree('/repo/.dsh/gitworktree/feat-a')
+
+    expect(ctx.workspaces.created).toEqual([{ path: '/repo/.dsh/gitworktree/feat-a' }])
+    expect(ctx.uiWorkspace.started).toEqual([['ws-1']])
+  })
 })

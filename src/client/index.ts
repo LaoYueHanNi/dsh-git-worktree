@@ -45,8 +45,9 @@ import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import type { WorktreeManagerFace } from './WorktreeManagerModal.tsx'
-import { requestEnsureDirectory, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
+import { requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
+import { WorktreeToastHost } from './ToastHost.tsx'
 import { pathKey, freshestUpdatedAt, planPrune, runAutoPrune } from './worktree-prune.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { recordPruneRun } from './prune-history.ts'
@@ -59,6 +60,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** The git-worktree chip, dialogs, and settings card copy. */
     'git-worktree': GitWorktreeKey
+  }
+  interface SlotMap {
+    /** Application-level overlay slot owned by ui-layout (DSH >= 0.2.0-rc.1). */
+    'shell.overlay': { kind: 'list'; scope: 'root' }
   }
 }
 
@@ -288,6 +293,12 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     inject: chipInjected,
   }, BranchChipDock))
 
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'git-worktree-toasts',
+    order: 20,
+  }, WorktreeToastHost))
+
   // The Plugins configuration tab dispatches keyed cards for the namespaces
   // the Host serves; the git-worktree host half registers this key, so the
   // storage-root card pairs with it without any upstream change. One bind
@@ -349,6 +360,10 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     },
     archiveSession: (sessionId) => ctx.workspaces.archiveSession(sessionId as SessionId),
     deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
+    openWorktree: async (path) => {
+      const workspace = await ctx.workspaces.create({ path })
+      ctx.uiWorkspace.startSession(workspace.workspaceId)
+    },
   })
 
   const form = new CardForm(groupingForm)

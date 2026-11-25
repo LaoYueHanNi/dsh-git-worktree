@@ -1,13 +1,10 @@
 /* The worktree manager dialog opened from the git-worktree settings card.
- * Tokens only, mirroring the card chrome and the sidebar's removal dialog
- * (a list body, a warn tint on dirty facts, the delete-tinted confirm). */
+ * Semantic alias tokens only, mirroring DSH dialog chrome and typography. */
 
-/* The dialog CARD is widened here — the primitive pins its own .dialog to
- * min(380px, 100%), and the width lives on the card, not the content region
- * (this class rides Modal's className prop, which lands on the card; the
- * doubled class out-specifies the primitive regardless of bundle order). */
 .dialog.dialog {
   width: min(680px, 100%);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .body {
@@ -16,9 +13,48 @@
   gap: 8px;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .count {
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
+}
+
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .refresh:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
+}
+
+.refresh:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.refresh:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
 }
 
 .status {
@@ -29,7 +65,7 @@
 
 .error {
   font-size: 13px;
-  color: var(--dsw-alias-label-danger, #d64545);
+  color: var(--dsw-alias-state-error-primary);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -40,18 +76,11 @@
   padding: 12px 0;
 }
 
-/* The scan-cap notice. Not .error: the list below it is real and usable,
- * the sentence only says it is a first slice — and unlike .error it carries
- * prose, so no break-all. */
 .warn {
   font-size: 12px;
-  color: var(--dsw-alias-label-warning, #b07000);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
-/* The scroll region: worktree counts grow without bound, the dialog must
- * not (BranchMenu's cap posture, dialog-scaled). No frame of its own —
- * each repository group is a card below, and a border around cards would
- * read as one flat list again. */
 .list {
   display: flex;
   flex-direction: column;
@@ -61,29 +90,20 @@
   padding: 1px;
 }
 
-/* One repository = one card: the outline plus the tinted header bar make
- * the group read as a container that OWNS its rows, not as one more row
- * in a flat list (the previous bare-text header sat at nearly the same
- * size and weight as the branch rows, and the belonging was invisible). */
 .group {
   border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 10px;
-  /* Clip the header background to the card's rounded corners. */
+  border-radius: var(--dsw-radius-md, 12px);
   overflow: hidden;
 }
 
-/* The per-repository header bar (and the trailing unrecognized-directory
- * group): the tinted fill separates projects at a glance, the folder icon
- * names what the header IS (a project, not a branch), and the trailing
- * count answers "how many of my worktrees live here" without counting. */
 .groupHead {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
-  background: var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.12));
+  background: var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2));
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
 }
 
@@ -100,19 +120,6 @@
   white-space: nowrap;
 }
 
-/* Where the group's rows physically live (project layout vs the legacy
- * central root): a quiet tag after the name, so a repo appearing under both
- * locations reads as two deliberate halves rather than a duplication bug. */
-.groupSource {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--dsw-alias-label-secondary);
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-
 .groupCount {
   margin-left: auto;
   flex-shrink: 0;
@@ -125,11 +132,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  /* The 29px left step = the header's 10px pad + 13px icon + 6px gap:
-   * row content starts level with the header TEXT, so every row visibly
-   * sits INSIDE its project instead of beside it. */
   padding: 8px 10px 8px 29px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
 .row:last-child {
@@ -144,8 +148,6 @@
   gap: 2px;
 }
 
-/* Head line: branch, dirty mark, then the activity time pushed to the
- * row's right edge (the repository lives in the card's header bar). */
 .rowHead {
   display: flex;
   align-items: baseline;
@@ -164,7 +166,7 @@
 
 .rowDirty {
   font-size: 11px;
-  color: var(--dsw-alias-label-danger, #d64545);
+  color: var(--dsw-alias-state-error-primary);
   flex-shrink: 0;
 }
 
@@ -175,37 +177,73 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* The tail of the path is the identity (the <repo>-<branch> folder name), so
- * the ellipsis trims the head. */
 .rowPath {
   font-size: 11px;
+  line-height: 16px;
   color: var(--dsw-alias-label-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
+  max-width: 100%;
+}
+
+.rowActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.rowAction {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .rowAction:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
+}
+
+.rowAction:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+.rowAction:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .remove {
   appearance: none;
   flex-shrink: 0;
   border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 8px;
+  border-radius: var(--dsw-radius-sm, 8px);
   background: none;
   font: inherit;
   font-size: 12px;
-  color: var(--dsw-alias-label-danger, #d64545);
-  padding: 5px 10px;
+  color: var(--dsw-alias-state-error-primary);
+  padding: 4px 10px;
+  height: 28px;
   cursor: pointer;
 }
 
-.remove:hover:not(:disabled) {
-  border-color: var(--dsw-alias-label-danger, #d64545);
+@media (hover: hover) {
+  .remove:hover:not(:disabled) {
+    border-color: var(--dsw-alias-state-error-primary);
+    background: var(--dsw-alias-interactive-bg-hover-danger, var(--dsw-alias-interactive-bg-hover));
+  }
 }
 
 .remove:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
 }
 
@@ -215,7 +253,14 @@
 }
 
 .removeConfirm {
-  color: var(--dsw-alias-label-danger, #d64545);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+@media (hover: hover) {
+  .removeConfirm:hover:not(:disabled) {
+    border-color: var(--dsw-alias-state-error-primary);
+    background: var(--dsw-alias-interactive-bg-hover-danger, var(--dsw-alias-interactive-bg-hover));
+  }
 }
 
 .removeFacts {
@@ -230,5 +275,5 @@
 }
 
 .removeFactWarn {
-  color: var(--dsw-alias-label-danger, #d64545);
+  color: var(--dsw-alias-state-error-primary);
 }

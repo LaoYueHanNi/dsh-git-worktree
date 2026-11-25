@@ -1,29 +1,29 @@
 /**
  * WorktreeManagerModal: the settings card's second-level dialog listing EVERY
  * direct child of the worktree storage root — across repositories, orphan
- * directories included. Belonging is structural: each repository renders as
- * a card whose tinted header bar carries the folder icon, the repo name and
- * its worktree count, and every row steps in under that header — the
- * project→worktree ownership is readable from the layout alone. A row
- * spells the checked-out branch and the last-use time (the freshest
- * qualifying session's updatedAt, the same activity the lazy prune orders
- * by); the delete button rides the shared removal flow, so a removal here
- * is behaviorally the sidebar's removal: confirm with dirty/ahead facts,
- * git first, archives and unregistration after. Unrecognized directories
- * (probe finds no git repository) render read-only — deleting someone
- * else's folder is outside "worktree management" — and directories with a
- * running session withhold their delete button.
+ * directories included.
  *
  * @module git-worktree/client/WorktreeManagerModal
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { Button, IconFolderCloseRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Button,
+  IconCopyOutlineRegular,
+  IconFolderCloseRegular,
+  IconRefreshOutlineRegular,
+  IconRightUpOutlineRegular,
+  Modal,
+  PathLabel,
+  Tag,
+  writeClipboard,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './relative-time.ts'
 import { mapLimit } from './concurrency.ts'
 import { groupScanEntries } from './scan-groups.ts'
+import { emitToast } from './toast-bus.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { freshestUpdatedAt, pathKey } from './worktree-prune.ts'
 import css from './WorktreeManagerModal.module.css'
@@ -31,38 +31,25 @@ import css from './WorktreeManagerModal.module.css'
 /** Structural minimums of the browser facts the dialog reads; the slot
  * entry injects these from the framework snapshots. */
 export interface WorktreeManagerFace {
-  /** Scan both storage locations; rejects with the host error text.
-   * `truncated` marks a location that held more children than the host
-   * probes; `legacyRoot`/`legacyRootExists` describe the historical central
-   * location (the settings card renders it read-only). */
   readonly listWorktrees: () => Promise<{
     worktrees: WorktreeScanEntry[]
     legacyRoot: string
     legacyRootExists: boolean
     truncated?: boolean
   }>
-  /** The legacy storage location alone (the card's read-only row): the
-   * Host-resolved absolute root and whether it exists on disk. Rejects with
-   * the host error text. */
   readonly describeStorage: () => Promise<{ legacyRoot: string; legacyRootExists: boolean }>
-  /** Pre-delete facts of one directory; rejects with the host error text. */
   readonly inspectWorktree: (path: string) => Promise<{ dirty: number; ahead: number | undefined }>
-  /** Registered workspaces (path → identity + session membership). */
   readonly workspaces: () => ReadonlyArray<{ workspaceId: string; path: string; sessionIds: readonly string[] }>
-  /** Session summary by id (running/blank/origin/updatedAt), when listed. */
   readonly sessionById: (sessionId: string) => { running: boolean; blank: boolean; origin?: 'subagent'; updatedAt: number } | undefined
-  /** The registry-global archive set. */
   readonly archivedSessionIds: () => readonly string[]
-  /** The shared removal flow's transport actions. */
   readonly removeWorktree: (path: string, force: boolean) => Promise<void>
-  /** Directory-existence probe (the Windows half-removal disambiguator). */
   readonly probeDirectories: (paths: readonly string[]) =>
     Promise<{ exists: Readonly<Record<string, boolean>> } | undefined>
-  /** Delete a NON-git leftover folder directly (host-gated to the storage
-   * root); rejects with the host error text. */
   readonly purgeDirectory: (path: string) => Promise<void>
   readonly archiveSession: (sessionId: string) => Promise<unknown>
   readonly deleteWorkspace: (workspaceId: string) => Promise<unknown>
+  /** Register the directory as a workspace and open a session in it. */
+  readonly openWorktree?: (path: string) => Promise<void>
 }
 
 export interface WorktreeManagerModalProps {
@@ -80,25 +67,16 @@ type ScanState =
 /** Per-directory pre-delete facts, probed for every valid row up front. */
 type InspectMap = Readonly<Record<string, { dirty: number; ahead: number | undefined }>>
 
-/** Concurrent inspects while the dialog loads. One inspect is one git
- * process on the host, so this is the browser-side twin of the /group
- * route's batch cap. */
+/** Concurrent inspects while the dialog loads. */
 const INSPECT_CONCURRENCY = 8
 
-/** One removal the confirm dialog is staged for. `git` targets ride the
- * shared removal flow; `orphan` targets (no git identity) are purged
- * directly, then their workspace registration (if one lingers) follows. */
 interface RemoveTarget {
   readonly path: string
   readonly branch: string | null
   readonly kind: 'git' | 'orphan'
 }
 
-/**
- * The sessions of `workspace.sessionIds` the removal flow will archive:
- * everything visible — not archived, not blank, not a subagent row (the
- * same qualification every removal entry shares).
- */
+/** The sessions of `workspace.sessionIds` the removal flow will archive. */
 function archiveIdsFor(face: WorktreeManagerFace, sessionIds: readonly string[]): string[] {
   const archived = new Set(face.archivedSessionIds())
   const ids: string[] = []
@@ -113,40 +91,32 @@ function archiveIdsFor(face: WorktreeManagerFace, sessionIds: readonly string[])
 
 export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManagerModalProps) {
   const [scan, setScan] = useState<ScanState>({ status: 'loading' })
+  const [refreshing, setRefreshing] = useState(false)
+  const [openingPath, setOpeningPath] = useState<string | null>(null)
   const [inspects, setInspects] = useState<InspectMap>({})
-  /** Paths known to hold a running session — their delete buttons withhold. */
   const [runningPaths, setRunningPaths] = useState<ReadonlySet<string>>(new Set())
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
-  /** The "last used" column's reference point. Re-read on every OPEN: this
-   * component is mounted for as long as the settings card is expanded (the
-   * `open` prop only drives the Modal), so a value frozen at mount would
-   * have the dialog quoting hour-old distances. */
   const [now, setNow] = useState(() => Date.now())
+  const scanGenRef = useRef(0)
 
-  /** Workspaces indexed by their normalized path. Every row's "last used"
-   * cell needs one, and the removal flow needs two more — as linear finds
-   * that is rows × workspaces per render, on a list whose whole point is
-   * holding every worktree of every repository. */
   const workspaceAt = useMemo(() => {
     const byPath = new Map(face.workspaces().map(ws => [pathKey(ws.path), ws] as const))
     return (path: string) => byPath.get(pathKey(path))
-  }, [face])
+  }, [face, scan, now])
 
-  // One scan per open; the derived workspace/session facts come from the
-  // same frame's snapshots, so the whole dialog data is coherent.
-  useEffect(() => {
-    if (!open) return
-    let live = true
-    setScan({ status: 'loading' })
-    setInspects({})
-    setRemoveTarget(null)
-    setRemoveError(null)
+  const loadWorktrees = useCallback((showLoadingState: boolean): void => {
+    const gen = ++scanGenRef.current
     setNow(Date.now())
+    if (showLoadingState) {
+      setScan({ status: 'loading' })
+      setInspects({})
+    }
+    setRefreshing(true)
     void face.listWorktrees().then(
       async ({ worktrees: entries, truncated }) => {
-        if (!live) return
+        if (scanGenRef.current !== gen) return
         setScan({ status: 'ready', entries, truncated: truncated === true })
         const valid = entries.filter(entry => entry.repoName !== null)
         const workspaces = face.workspaces()
@@ -157,11 +127,6 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
           }
         }
         setRunningPaths(running)
-        // Bounded fan-out: every inspect is one git process on the host,
-        // and a storage root can hold dozens of directories. An unbounded
-        // Promise.all here would spawn all of them at once (Windows feels
-        // it most) — the /group route caps its own batch for the same
-        // reason.
         const facts = await mapLimit(valid, INSPECT_CONCURRENCY, async (entry) => {
           try {
             return [entry.path, await face.inspectWorktree(entry.path)] as const
@@ -169,20 +134,56 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
             return [entry.path, undefined] as const
           }
         })
-        if (!live) return
+        if (scanGenRef.current !== gen) return
         setInspects(Object.fromEntries(facts.filter(([, value]) => value !== undefined)) as InspectMap)
+        setRefreshing(false)
       },
       (reason: unknown) => {
-        if (live) setScan({ status: 'error', error: reason instanceof Error ? reason.message : String(reason) })
+        if (scanGenRef.current !== gen) return
+        setRefreshing(false)
+        setScan({ status: 'error', error: reason instanceof Error ? reason.message : String(reason) })
       },
     )
-    return () => { live = false }
-  }, [open, face])
+  }, [face])
+
+  useEffect(() => {
+    if (!open) {
+      scanGenRef.current += 1
+      return
+    }
+    setRemoveTarget(null)
+    setRemoveError(null)
+    setOpeningPath(null)
+    loadWorktrees(true)
+    return () => { scanGenRef.current += 1 }
+  }, [open, loadWorktrees])
 
   const closeRemove = (): void => {
     if (removing) return
     setRemoveTarget(null)
     setRemoveError(null)
+  }
+
+  const handleOpenWorktree = (path: string): void => {
+    if (face.openWorktree === undefined || openingPath !== null) return
+    setOpeningPath(path)
+    void face.openWorktree(path).then(
+      () => {
+        setOpeningPath(null)
+        onClose()
+      },
+      (reason: unknown) => {
+        setOpeningPath(null)
+        const message = reason instanceof Error ? reason.message : String(reason)
+        emitToast(t('manager.openFailed', { message }))
+      },
+    )
+  }
+
+  const handleCopyPath = (path: string): void => {
+    void writeClipboard(path).then((ok) => {
+      if (ok) emitToast(t('hover.copied'), 'success')
+    })
   }
 
   const confirmRemove = (): void => {
@@ -221,10 +222,8 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
       () => {
         setRemoving(false)
         setRemoveTarget(null)
-        // Refresh the list in place: the removed row is gone, facts follow.
-        void face.listWorktrees().then(({ worktrees: entries, truncated }) => {
-          setScan({ status: 'ready', entries, truncated: truncated === true })
-        })
+        // Re-scan entries, inspect facts, and running paths together so no stale state lingers.
+        loadWorktrees(false)
       },
       (reason: unknown) => {
         setRemoving(false)
@@ -236,15 +235,10 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
   const activityOf = (path: string): number => {
     const workspace = workspaceAt(path)
     if (workspace === undefined) return 0
-    // The same helper the lazy prune orders by — the manager's last-use
-    // column and the prune's victim order cannot disagree.
     return freshestUpdatedAt(workspace.sessionIds.map(id => face.sessionById(id)))
   }
 
   const validCount = scan.status === 'ready' ? scan.entries.filter(entry => entry.repoName !== null).length : 0
-  /** Directories the scan could not read as a worktree. They sit in their
-   * own trailing group, so the headline count must say they exist — a bare
-   * "3 worktrees" over four groups reads as a miscount. */
   const orphanCount = scan.status === 'ready' ? scan.entries.length - validCount : 0
 
   return (
@@ -257,12 +251,34 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         className={css.dialog ?? ''}
       >
         {scan.status === 'loading' && <div className={css.status} role="status">{t('manager.loading')}</div>}
-        {scan.status === 'error' && <div className={css.error} role="alert">{t('manager.loadFailed', { message: scan.error })}</div>}
+        {scan.status === 'error' && (
+          <div className={css.body}>
+            <div className={css.error} role="alert">{t('manager.loadFailed', { message: scan.error })}</div>
+            <div className={css.toolbar}>
+              <Button size="sm" variant="outline" disabled={refreshing} onClick={() => { loadWorktrees(true) }}>
+                {t('manager.refresh')}
+              </Button>
+            </div>
+          </div>
+        )}
         {scan.status === 'ready' && (
           <div className={css.body}>
-            <div className={css.count} role="status">
-              {t('manager.count', { n: validCount })}
-              {orphanCount > 0 && t('manager.countOrphans', { n: orphanCount })}
+            <div className={css.toolbar}>
+              <div className={css.count} role="status">
+                {t('manager.count', { n: validCount })}
+                {orphanCount > 0 && t('manager.countOrphans', { n: orphanCount })}
+              </div>
+              <button
+                type="button"
+                className={css.refresh}
+                disabled={refreshing}
+                title={t('manager.refresh')}
+                aria-label={t('manager.refresh')}
+                onClick={() => { loadWorktrees(false) }}
+              >
+                <IconRefreshOutlineRegular size={13} />
+                <span>{t('manager.refresh')}</span>
+              </button>
             </div>
             {scan.truncated && <div className={css.warn} role="status">{t('manager.truncated')}</div>}
             {scan.entries.length === 0 && <div className={css.empty}>{t('manager.empty')}</div>}
@@ -273,9 +289,9 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
                     <span className={css.groupIcon} aria-hidden="true"><IconFolderCloseRegular size={13} /></span>
                     <span className={css.groupName}>{group.repoName ?? t('manager.orphans')}</span>
                     {group.repoName !== null && (
-                      <span className={css.groupSource}>
+                      <Tag tone="neutral">
                         {t(group.source === 'legacy' ? 'manager.sourceLegacy' : 'manager.sourceProject')}
-                      </span>
+                      </Tag>
                     )}
                     {group.repoName !== null && (
                       <span className={css.groupCount}>{t('manager.count', { n: group.entries.length })}</span>
@@ -302,37 +318,60 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
                               </span>
                             )}
                           </div>
-                          <div className={css.rowPath} title={entry.path}>{entry.path}</div>
+                          <PathLabel path={entry.path} className={css.rowPath ?? ''} />
                         </div>
-                        {!unknown ? (
+                        <div className={css.rowActions}>
+                          {!unknown && face.openWorktree !== undefined && (
+                            <button
+                              type="button"
+                              className={css.rowAction}
+                              disabled={openingPath !== null}
+                              title={t('manager.openSession')}
+                              aria-label={t('manager.openSession')}
+                              onClick={() => { handleOpenWorktree(entry.path) }}
+                            >
+                              <IconRightUpOutlineRegular size={14} />
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className={css.remove}
-                            disabled={running}
-                            title={running ? t('manager.running') : t('manager.removeAria', { path: entry.path })}
-                            aria-label={t('manager.removeAria', { path: entry.path })}
-                            onClick={() => {
-                              setRemoveTarget({ path: entry.path, branch: entry.branch, kind: 'git' })
-                              setRemoveError(null)
-                            }}
+                            className={css.rowAction}
+                            title={t('manager.copyPath')}
+                            aria-label={t('manager.copyPath')}
+                            onClick={() => { handleCopyPath(entry.path) }}
                           >
-                            {t('worktreeRemove.menu')}
+                            <IconCopyOutlineRegular size={14} />
                           </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className={css.remove}
-                            disabled={running}
-                            title={running ? t('manager.running') : t('manager.purgeAria', { path: entry.path })}
-                            aria-label={t('manager.purgeAria', { path: entry.path })}
-                            onClick={() => {
-                              setRemoveTarget({ path: entry.path, branch: null, kind: 'orphan' })
-                              setRemoveError(null)
-                            }}
-                          >
-                            {t('manager.purgeMenu')}
-                          </button>
-                        )}
+                          {!unknown ? (
+                            <button
+                              type="button"
+                              className={css.remove}
+                              disabled={running}
+                              title={running ? t('manager.running') : t('manager.removeAria', { path: entry.path })}
+                              aria-label={t('manager.removeAria', { path: entry.path })}
+                              onClick={() => {
+                                setRemoveTarget({ path: entry.path, branch: entry.branch, kind: 'git' })
+                                setRemoveError(null)
+                              }}
+                            >
+                              {t('worktreeRemove.menu')}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className={css.remove}
+                              disabled={running}
+                              title={running ? t('manager.running') : t('manager.purgeAria', { path: entry.path })}
+                              aria-label={t('manager.purgeAria', { path: entry.path })}
+                              onClick={() => {
+                                setRemoveTarget({ path: entry.path, branch: null, kind: 'orphan' })
+                                setRemoveError(null)
+                              }}
+                            >
+                              {t('manager.purgeMenu')}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )
                   })}
@@ -369,9 +408,9 @@ export function WorktreeManagerModal({ open, onClose, face, t }: WorktreeManager
         {removeTarget?.kind === 'git' && inspects[removeTarget.path] !== undefined && (
           <div className={css.removeFacts}>
             <div className={(inspects[removeTarget.path]?.dirty ?? 0) > 0 ? `${css.removeFact} ${css.removeFactWarn}` : css.removeFact}>
-            {(inspects[removeTarget.path]?.dirty ?? 0) > 0
-              ? t((inspects[removeTarget.path]?.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: inspects[removeTarget.path]?.dirty ?? 0 })
-              : t('worktreeRemove.clean')}
+              {(inspects[removeTarget.path]?.dirty ?? 0) > 0
+                ? t((inspects[removeTarget.path]?.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: inspects[removeTarget.path]?.dirty ?? 0 })
+                : t('worktreeRemove.clean')}
             </div>
             {removeTarget !== null && inspects[removeTarget.path]?.ahead !== undefined && (inspects[removeTarget.path]?.ahead ?? 0) > 0 && (
               <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: inspects[removeTarget.path]?.ahead ?? 0 })}</div>

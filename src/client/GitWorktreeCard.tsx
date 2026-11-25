@@ -5,7 +5,7 @@
  * bundle's row, `view: 'page'` renders the configuration form inside the
  * bundle's page. The legacy storage root is READ-ONLY (existing worktrees
  * stay where they are; new ones are created inside their repository), while
- * the keep cap and the write-through switches remain editable.
+ * the keep cap, copy files fallback, and write-through switches remain editable.
  *
  * Renders nothing while the namespace is unavailable: a deployment that did
  * not compose the host half shows no trace of the card.
@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the plugins-page slot's owner share (`view`), plus the SlotMap
 // merge naming 'plugins.bundle.config' itself.
 import type { PluginConfigViewProps } from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
@@ -44,9 +45,7 @@ export interface GitWorktreeCardFace extends CardActions {
 /** Prune runs shown before the log folds behind "show all". */
 const HISTORY_PREVIEW = 3
 
-/** One removed worktree as "repo/branch" — or whichever half the scan
- * knew. The belonging is a snapshot taken at prune time and either field
- * can be missing; joining them unconditionally printed a bare " /". */
+/** One removed worktree as "repo/branch" — or whichever half the scan knew. */
 function labelOfRemoved(item: { repoName?: string | null; branch?: string | null }): string {
   const parts = [item.repoName, item.branch].filter((part): part is string => typeof part === 'string' && part !== '')
   return parts.length === 0 ? '?' : parts.join('/')
@@ -67,19 +66,9 @@ interface StorageFacts {
  */
 export function GitWorktreeCard(props: GitWorktreeCardProps) {
   const [managerOpen, setManagerOpen] = useState(false)
-  /** The prune log and the clock it is measured against, both read ONCE per
-   * page mount. Reading localStorage (and Date.now) from the render body
-   * made every unrelated re-render re-parse the log and shift the relative
-   * times underneath the user. */
   const [history, setHistory] = useState<readonly PruneRunEntry[]>([])
   const [historyNow, setHistoryNow] = useState(() => Date.now())
-  /** Whether the log is showing past its preview. Collapses again on every
-   * page mount: the log can hold 20 runs, and a settings page is not where
-   * a wall of them belongs by default. */
   const [historyAll, setHistoryAll] = useState(false)
-  /** The legacy root as the Host resolves it (covers the inherited default
-   * the scope snapshot cannot spell), plus whether it exists on disk —
-   * "未使用" reads better than hiding the field. */
   const [storage, setStorage] = useState<StorageFacts | null>(null)
   const onPage = props.view === 'page'
   useEffect(() => {
@@ -105,10 +94,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
     return <p className={css.summary}>{t('cardDescription')}</p>
   }
   const lockInput = !state.writable
-  // The keep draft failing validation blocks the save outright: an integer
-  // >= 1 is the only shape the Host accepts, so the button disables in
-  // lockstep with the inline hint.
-  const lockActions = !state.dirty || state.saving || !state.keepWorktreesValid
+  const lockActions = !state.dirty || state.saving || !state.keepWorktreesValid || !state.postCreateCopyFilesValid
   const legacyRootText = storage?.legacyRoot ?? (state.rootDir === '' ? '—' : state.rootDir)
 
   return (
@@ -119,7 +105,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
         <span className={css.rootRow}>
           <span className={css.rootValue} title={legacyRootText}>{legacyRootText}</span>
           {storage !== null && !storage.legacyRootExists && (
-            <span className={css.rootUnused}>{t('cardLegacyUnused')}</span>
+            <Tag tone="neutral">{t('cardLegacyUnused')}</Tag>
           )}
         </span>
       </div>
@@ -127,67 +113,64 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
         {t('cardRootDirHint')}
         {state.overridden ? ` ${t('cardOverridden')}` : ''}
       </p>
-      <label className={`${css.field} ${css.toggleRow}`}>
+      <div className={`${css.field} ${css.toggleRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardOpenGraphLabel')}</span>
           <span className={css.toggleHint}>{t('cardOpenGraphHint')}</span>
           {state.switchFailed === 'openGraphByDefault' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
         </span>
         <span className={css.toggleControl}>
-          <input
-            className={css.toggle}
-            type="checkbox"
+          <Switch
+            label={t('cardOpenGraphLabel')}
             disabled={lockInput}
             checked={state.openGraphByDefault}
-            onChange={event => { props.setOpenGraphByDefault(event.target.checked) }}
+            onChange={props.setOpenGraphByDefault}
           />
         </span>
-      </label>
+      </div>
       <div className={`${css.field} ${css.manageRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardManageWorktrees')}</span>
           <span className={css.toggleHint}>{t('cardManageHint')}</span>
         </span>
-        <button
-          type="button"
-          className={css.manage}
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => { setManagerOpen(true) }}
         >
           {t('cardManageWorktrees')}
-        </button>
+        </Button>
       </div>
-      <label className={`${css.field} ${css.toggleRow}`}>
+      <div className={`${css.field} ${css.toggleRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardFetchBeforeCreateLabel')}</span>
           <span className={css.toggleHint}>{t('cardFetchBeforeCreateHint')}</span>
           {state.switchFailed === 'fetchBeforeCreate' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
         </span>
         <span className={css.toggleControl}>
-          <input
-            className={css.toggle}
-            type="checkbox"
+          <Switch
+            label={t('cardFetchBeforeCreateLabel')}
             disabled={lockInput}
             checked={state.fetchBeforeCreate}
-            onChange={event => { props.setFetchBeforeCreate(event.target.checked) }}
+            onChange={props.setFetchBeforeCreate}
           />
         </span>
-      </label>
-      <label className={`${css.field} ${css.toggleRow}`}>
+      </div>
+      <div className={`${css.field} ${css.toggleRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardAutoPruneLabel')}</span>
           <span className={css.toggleHint}>{t('cardAutoPruneHint')}</span>
           {state.switchFailed === 'autoPruneWorktrees' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
         </span>
         <span className={css.toggleControl}>
-          <input
-            className={css.toggle}
-            type="checkbox"
+          <Switch
+            label={t('cardAutoPruneLabel')}
             disabled={lockInput}
             checked={state.autoPruneWorktrees}
-            onChange={event => { props.setAutoPruneWorktrees(event.target.checked) }}
+            onChange={props.setAutoPruneWorktrees}
           />
         </span>
-      </label>
+      </div>
       <label className={`${css.field} ${css.keepRow}`} htmlFor="git-worktree-card-keep">
         <span className={css.fieldLabel}>{t('cardKeepWorktreesLabel')}</span>
         <span className={css.keepControl}>
@@ -212,19 +195,14 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
           className={css.copyFilesInput}
           rows={3}
           disabled={lockInput}
+          aria-invalid={!state.postCreateCopyFilesValid}
           placeholder={t('cardPostCreateCopyFilesPlaceholder')}
           value={state.postCreateCopyFilesText}
           onChange={event => { props.editPostCreateCopyFiles(event.target.value) }}
         />
         <span className={css.toggleHint}>{t('cardPostCreateCopyFilesHint')}</span>
+        {!state.postCreateCopyFilesValid && <span className={css.copyFilesBad} role="alert">{t('cardPostCreateCopyFilesBad')}</span>}
       </label>
-      {/* The auto-prune's audit trail (browser-local, newest first):
-        * which run removed whose worktrees, so a misjudged activity
-        * is discoverable after the toast has faded. Read once per page
-        * mount — a finished prune shows on the next look. Shown whenever
-        * there is history, NOT only while the switch is on: having just
-        * turned auto-prune off is exactly when a user goes looking for
-        * what it did. */}
       {history.length > 0 && (
         <div className={`${css.field} ${css.historyRow}`}>
           <span className={css.fieldLabel}>{t('cardPruneHistoryLabel')}</span>
@@ -274,22 +252,22 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
         {state.failed
           ? <p className={css.failed} role="status">{t('cardSaveFailed')}</p>
           : null}
-        <button
-          type="button"
-          className={css.discard}
+        <Button
+          size="sm"
+          variant="outline"
           disabled={lockActions}
           onClick={props.discard}
         >
           {t('cardDiscard')}
-        </button>
-        <button
-          type="button"
-          className={css.save}
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
           disabled={lockActions}
           onClick={props.save}
         >
           {t(state.saving ? 'cardSaving' : 'cardSave')}
-        </button>
+        </Button>
       </div>
     </div>
   )

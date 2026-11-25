@@ -81,11 +81,23 @@ import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import { branchFactsStamp, repoHasRemotes } from './branch-tree.ts'
 import type { BranchChipInjected } from './slots.ts'
 import { cancelSyncJob, findSyncJob, recordPushFailure, runSyncJob, subscribeSyncJobs, takePushFailure, type PushFailure, type SyncJob } from './sync-job.ts'
+import { explainGitOpFailure, type GitOpFailureKind } from './git-error.ts'
+import { emitToast, hasGlobalToastHost } from './toast-bus.ts'
 import { explainUpdateFailure, updateErrorText, type UpdateFailureKind } from './update-error.ts'
 import { explainFetchFailure, type FetchFailureKind } from './fetch-error.ts'
 import { SyncProgress } from './SyncProgress.tsx'
 import css from './BranchChip.module.css'
 import type { GitWorktreeKey } from './locales.ts'
+
+/** Friendly localized errors for common switch / delete / worktree failures. */
+const GIT_OP_FAIL = {
+  switchDirty: 'gitFailSwitchDirty',
+  switchMissing: 'gitFailSwitchMissing',
+  deleteBranchUnmerged: 'gitFailDeleteUnmerged',
+  deleteBranchCheckedOut: 'gitFailDeleteCheckedOut',
+  worktreeOccupied: 'gitFailWorktreeOccupied',
+  worktreePathExists: 'gitFailWorktreePathExists',
+} as const satisfies Record<GitOpFailureKind, GitWorktreeKey>
 
 /** The toast for an update failure the plugin can name. Each one says what
  * to do next; git's hint essay is not part of it. */
@@ -346,6 +358,8 @@ interface ChipConfirmProps {
   confirmLabel: string
   /** Cancel-button label. */
   cancelLabel: string
+  /** True when confirming destroys a branch or worktree (renders in danger tone). */
+  danger?: boolean
   /** True while the action runs: both buttons disable. */
   busy: boolean
   /** Editable new-branch name (cutout flow): present, the dialog renders a
@@ -375,7 +389,7 @@ interface ChipConfirmProps {
  * confirm button does so Enter commits.
  */
 function ChipConfirm({
-  anchorRef, ask, subject, details, confirmLabel, cancelLabel, busy,
+  anchorRef, ask, subject, details, confirmLabel, cancelLabel, danger, busy,
   draft, onDraftChange, draftPlaceholder, draftInvalid, draftHint,
   onConfirm, onCancel,
 }: ChipConfirmProps) {
@@ -471,6 +485,7 @@ function ChipConfirm({
         <button
           ref={confirmRef}
           type="button"
+          className={danger === true ? css.popConfirmDanger : undefined}
           disabled={busy || draftInvalid === true}
           onClick={onConfirm}
         >
@@ -500,14 +515,14 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
    * while a probe is in flight keeps showing the new path's loading line. */
   const [removalPath, setRemovalPath] = useState<string | null>(null)
   const [removalFacts, setRemovalFacts] = useState<RemovalFacts>(undefined)
-  /** Toasts wait their turn instead of overwriting each other. One flow
-   * can raise two in a row — a worktree creation whose fetch warned, then
-   * the auto-prune's report — and a single-slot state made the second
-   * silently erase the first before anyone read it. Head renders, `onDone`
-   * shifts. */
+  /** Local fallback queue when `shell.overlay` toast host is absent (e.g. legacy/minimal shells). */
   const [toasts, setToasts] = useState<readonly { seq: number; text: string }[]>([])
   const toastSeq = useRef(0)
   const pushToast = useCallback((text: string) => {
+    if (hasGlobalToastHost()) {
+      emitToast(text)
+      return
+    }
     toastSeq.current += 1
     const seq = toastSeq.current
     setToasts(queue => [...queue, { seq, text }])
@@ -635,6 +650,11 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
 
   const showError = useCallback((message: string) => {
     if (showFetchError(message)) return
+    const gitFail = explainGitOpFailure(message)
+    if (gitFail !== null) {
+      pushToast(t(GIT_OP_FAIL[gitFail.kind], gitFail.branch === undefined ? undefined : { branch: gitFail.branch }))
+      return
+    }
     pushToast(t('errorGeneric', { message }))
   }, [pushToast, showFetchError, t])
 
@@ -883,6 +903,9 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     if (result.excludeWarning !== undefined) {
       pushToast(t('excludeWarning', { message: result.excludeWarning }))
     }
+    if (result.copyWarning !== undefined) {
+      pushToast(t('copyWarning', { message: result.copyWarning }))
+    }
     void pruneWorktrees?.(result.path).then((report) => {
       if (report === undefined) return
       if (report.removed.length > 0) {
@@ -1006,6 +1029,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       ? (confirm.kind === 'delete' ? t('deleteBranchBusy') : confirm.kind === 'remove-worktree' ? t('worktreeRemove.busy') : t('worktreeBusy'))
       : t(confirm.kind === 'remove-worktree' ? 'worktreeRemove.menu' : 'actionConfirm'),
     cancelLabel: t('actionCancel'),
+    ...(confirm.kind === 'delete' || confirm.kind === 'remove-worktree' ? { danger: true } : {}),
     busy,
     // The cutout dialog carries an EDITABLE new-branch name (typed by
     // hand): the menu-open flyout renders the input from these fields —

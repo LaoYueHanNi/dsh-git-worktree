@@ -1,5 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Button, IconBranchOutlineRegular, IconCloseOutlineRegular, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Button,
+  Checkbox,
+  IconBranchOutlineRegular,
+  IconChevronDownOutlineRegular,
+  IconCloseOutlineRegular,
+  IconRefreshOutlineRegular,
+  Menu,
+  Modal,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BranchEntry, PushBody, PushPlan, PushPreview } from '../wire.ts'
 import { branchNameIssue } from '../normalize.ts'
@@ -41,7 +50,7 @@ const FAILURE_KEYS = {
 } as const satisfies Record<PushFailureKind, string>
 
 function Chevron() {
-  return <svg aria-hidden="true" viewBox="0 0 16 16" className={css.chevron}><path d="m4 6 4 4 4-4" /></svg>
+  return <IconChevronDownOutlineRegular size={12} className={css.chevron ?? ''} />
 }
 
 /**
@@ -314,8 +323,13 @@ export function PushDialog({ repoPath, repoName, branch, branchInfo, busy, resum
     </div>
     <footer className={css.footer}>
       <div className={css.tagOptions}>
-        <label className={css.checkbox}><input type="checkbox" checked={tags} disabled={disabled}
-          onChange={event => { setTags(event.target.checked) }} />{t('pushTags')}</label>
+        <Checkbox
+          className={css.checkbox}
+          checked={tags}
+          disabled={disabled}
+          label={t('pushTags')}
+          onChange={setTags}
+        />
         <Menu open={menu === 'tags'} dense portal autoFocus side="top" selectedId={scope} onClose={() => { setMenu(null) }}
           items={[{ id: 'all', label: <span title={t('pushTagsAllHint')}>{t('pushTagsAll')}</span> },
             { id: 'follow', label: <span title={t('pushTagsFollowHint')}>{t('pushTagsFollow')}</span> }]}
@@ -326,7 +340,7 @@ export function PushDialog({ repoPath, repoName, branch, branchInfo, busy, resum
       </div>
       <div className={css.actions}>
         {(error !== null || plan !== null) && <button type="button" className={css.refresh} disabled={disabled || editing} title={t('pushRefresh')}
-          aria-label={t('pushRefresh')} onClick={refresh}>↻</button>}
+          aria-label={t('pushRefresh')} onClick={refresh}><IconRefreshOutlineRegular size={14} /></button>}
         <Button size="sm" variant="ghost" disabled={disabled} onClick={close}>{t('actionCancel')}</Button>
         <Menu open={menu === 'push'} dense portal autoFocus side="top" align="end" onClose={() => { setMenu(null) }}
           items={[{ id: 'force', label: <span title={t('pushForceHint')}>{t('pushForce')}</span>, disabled: !canPush }]}

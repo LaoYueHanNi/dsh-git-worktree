@@ -18,6 +18,8 @@ export type GitWorktreeKey =
   | 'graphCloseWindow'
   | 'graphToggleOpen'
   | 'graphToggleClose'
+  | 'graphShowBranches'
+  | 'graphHideBranches'
   | 'graphSearch'
   | 'graphSearchPlaceholder'
   | 'graphAuthorFilter'
@@ -161,6 +163,7 @@ export type GitWorktreeKey =
   | 'cardPostCreateCopyFilesLabel'
   | 'cardPostCreateCopyFilesPlaceholder'
   | 'cardPostCreateCopyFilesHint'
+  | 'cardPostCreateCopyFilesBad'
   | 'cardPruneHistoryLabel'
   | 'cardPruneHistoryEmpty'
   | 'cardPruneHistoryRun'
@@ -189,8 +192,19 @@ export type GitWorktreeKey =
   | 'worktreePurge.desc'
   | 'worktreePurge.busy'
   | 'manager.removeAria'
+  | 'manager.refresh'
+  | 'manager.openSession'
+  | 'manager.copyPath'
+  | 'manager.openFailed'
   | 'fetchWarning'
   | 'excludeWarning'
+  | 'copyWarning'
+  | 'gitFailSwitchDirty'
+  | 'gitFailSwitchMissing'
+  | 'gitFailDeleteUnmerged'
+  | 'gitFailDeleteCheckedOut'
+  | 'gitFailWorktreeOccupied'
+  | 'gitFailWorktreePathExists'
   | 'pruneDone'
   | 'pruneFailed'
   | 'worktreeRemove.menu'
@@ -230,6 +244,8 @@ export const en: Record<GitWorktreeKey, string> = {
   graphCloseWindow: 'Close popup',
   graphToggleOpen: 'Open graph',
   graphToggleClose: 'Close graph',
+  graphShowBranches: 'Show branches',
+  graphHideBranches: 'Hide branches',
   graphSearch: 'Search',
   graphSearchPlaceholder: 'Text or hash',
   graphAuthorFilter: 'Filter by author',
@@ -373,6 +389,7 @@ export const en: Record<GitWorktreeKey, string> = {
   cardPostCreateCopyFilesLabel: 'Inherit configuration files (global fallback)',
   cardPostCreateCopyFilesPlaceholder: 'e.g.:\n.env\nconfig/secrets.json',
   cardPostCreateCopyFilesHint: 'One relative path per line. Only used when .worktreeinclude is absent from repository root; if present, .worktreeinclude takes precedence.',
+  cardPostCreateCopyFilesBad: 'Use relative paths inside the repository; absolute paths and “..” are not allowed.',
   cardPruneHistoryLabel: 'Prune history',
   cardPruneHistoryEmpty: 'No prune runs yet',
   cardPruneHistoryRun: 'Removed {n}:',
@@ -401,8 +418,19 @@ export const en: Record<GitWorktreeKey, string> = {
   'worktreePurge.desc': 'This directory has no git record anymore. It will be deleted along with everything in it. This cannot be undone.',
   'worktreePurge.busy': 'Deleting folder…',
   'manager.removeAria': 'Remove the worktree “{path}”',
+  'manager.refresh': 'Refresh',
+  'manager.openSession': 'Open session in this worktree',
+  'manager.copyPath': 'Copy path',
+  'manager.openFailed': 'Could not open worktree: {message}',
   fetchWarning: 'Upstream sync failed; created from the local state: {message}',
   excludeWarning: 'The ignore rule for the repository could not be written; `.dsh/` will show as untracked: {message}',
+  copyWarning: 'Some configuration files could not be copied: {message}',
+  gitFailSwitchDirty: 'Uncommitted changes would be overwritten by switching branches. Commit or stash them, then try again.',
+  gitFailSwitchMissing: 'That branch no longer exists. Refresh the list and try again.',
+  gitFailDeleteUnmerged: 'Branch {branch} is not fully merged yet and was not deleted.',
+  gitFailDeleteCheckedOut: 'Branch {branch} is currently checked out and cannot be deleted.',
+  gitFailWorktreeOccupied: 'Branch {branch} is already checked out in another worktree.',
+  gitFailWorktreePathExists: 'The target worktree directory already exists and is not empty.',
   pruneDone: 'Auto-removed {n} stale worktree(s)',
   pruneFailed: '{n} worktree(s) could not be auto-removed',
   'worktreeRemove.menu': 'Remove worktree',
@@ -443,6 +471,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   graphCloseWindow: '关闭弹出的窗',
   graphToggleOpen: '打开图谱',
   graphToggleClose: '关闭图谱',
+  graphShowBranches: '显示分支列表',
+  graphHideBranches: '收起分支列表',
   graphSearch: '搜索',
   graphSearchPlaceholder: '文本或哈希',
   graphAuthorFilter: '作者筛选',
@@ -586,6 +616,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardPostCreateCopyFilesLabel: '新建工作树配置文件继承（全局后备）',
   cardPostCreateCopyFilesPlaceholder: '例如：\n.env\nconfig/secrets.json',
   cardPostCreateCopyFilesHint: '每行一个相对路径。仅在仓库根目录不存在 .worktreeinclude 时生效；若仓库存在 .worktreeinclude，则优先使用该文件。',
+  cardPostCreateCopyFilesBad: '请仅填写仓库内的相对路径，不允许绝对路径或包含“..”。',
   cardPruneHistoryLabel: '清理记录',
   cardPruneHistoryEmpty: '暂无清理记录',
   cardPruneHistoryRun: '清理了 {n} 个：',
@@ -614,8 +645,19 @@ export const zh: Record<GitWorktreeKey, string> = {
   'worktreePurge.desc': '该目录已无 git 记录，将连同全部内容一并删除，此操作不可恢复。',
   'worktreePurge.busy': '正在删除文件夹…',
   'manager.removeAria': '删除工作树“{path}”',
+  'manager.refresh': '刷新',
+  'manager.openSession': '在此工作树中打开会话',
+  'manager.copyPath': '复制路径',
+  'manager.openFailed': '无法打开工作树：{message}',
   fetchWarning: '上游同步失败，已按本地状态创建：{message}',
   excludeWarning: '仓库忽略规则写入失败，`.dsh/` 将显示为未跟踪目录：{message}',
+  copyWarning: '部分配置文件未能复制到新工作树：{message}',
+  gitFailSwitchDirty: '工作区有未提交的改动，切换分支会覆盖它们。请先提交或暂存后再试。',
+  gitFailSwitchMissing: '目标分支已不存在，请刷新分支列表后重试。',
+  gitFailDeleteUnmerged: '分支 {branch} 尚未完全合并，已拒绝安全删除。',
+  gitFailDeleteCheckedOut: '分支 {branch} 正在被当前或其他工作树检出，无法删除。',
+  gitFailWorktreeOccupied: '分支 {branch} 已被其他工作树占用，请直接跳转到该工作树或切出新分支。',
+  gitFailWorktreePathExists: '目标工作树目录已存在且非空，请清理后重试。',
   pruneDone: '已自动清理 {n} 个旧工作树',
   pruneFailed: '{n} 个工作树自动清理失败',
   'worktreeRemove.menu': '删除工作树',

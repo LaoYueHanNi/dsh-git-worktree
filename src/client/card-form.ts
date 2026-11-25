@@ -24,6 +24,19 @@ export const ROOT_FIELD = 'rootDir'
 export const KEEP_FIELD = 'keepWorktrees'
 export const COPY_FILES_FIELD = 'postCreateCopyFiles'
 
+/**
+ * Browser-safe relative-path check mirroring `src/copy-files.ts#isSafeRelativePath`.
+ * Rejects empty strings, POSIX/Windows absolute paths, and `..` traversal segments.
+ */
+export function isSafeCopyRelativePath(relPath: string): boolean {
+  const trimmed = relPath.trim()
+  if (trimmed === '') return false
+  if (trimmed.startsWith('/') || trimmed.startsWith('\\') || /^[a-zA-Z]:[\\/]/.test(trimmed)) {
+    return false
+  }
+  return !trimmed.split(/[\\/]/).some(segment => segment === '..')
+}
+
 /** The resolved user-facing section this card edits. */
 export interface SectionValue {
   /** Worktree storage root; absent selects `$DSH_HOME/gitworktree`. */
@@ -93,6 +106,8 @@ export interface CardState {
   switchFailed: SwitchField | null
   /** The post-create copy files field as MULTI-LINE TEXT (one relative path per line). */
   postCreateCopyFilesText: string
+  /** True when every non-empty line in `postCreateCopyFilesText` is a safe relative path. */
+  postCreateCopyFilesValid: boolean
 }
 
 /** The form actions the card's slot entry injects. */
@@ -246,6 +261,11 @@ export class CardForm {
       intendedKeep = this.parseKeep(this.keepDraft)
       if (intendedKeep === undefined || intendedKeep < 1) return
     }
+    let intendedCopyFiles: string[] | undefined
+    if (this.copyFilesDraft !== undefined) {
+      intendedCopyFiles = this.parseCopyFiles(this.copyFilesDraft)
+      if (!intendedCopyFiles.every(isSafeCopyRelativePath)) return
+    }
     this.saving = true
     this.failed = false
     this.publish()
@@ -257,9 +277,16 @@ export class CardForm {
           landed = false
         }
       }
-      if (this.copyFilesDraft !== undefined) {
-        const parsedList = this.parseCopyFiles(this.copyFilesDraft)
-        await this.scope.set(COPY_FILES_FIELD, parsedList)
+      if (intendedCopyFiles !== undefined) {
+        await this.scope.set(COPY_FILES_FIELD, intendedCopyFiles)
+        const stored = this.userLayer()?.[COPY_FILES_FIELD]
+        if (
+          !Array.isArray(stored)
+          || stored.length !== intendedCopyFiles.length
+          || stored.some((item, index) => item !== intendedCopyFiles[index])
+        ) {
+          landed = false
+        }
       }
     } catch (_settingsWriteFailure) {
       landed = false
@@ -296,6 +323,7 @@ export class CardForm {
     const keepText = this.effectiveKeepText()
     const keepParsed = this.parseKeep(keepText)
     const copyFilesText = this.effectiveCopyFilesText()
+    const copyFilesValid = this.parseCopyFiles(copyFilesText).every(isSafeCopyRelativePath)
     const keepDirty = this.keepDraft !== undefined && this.keepDraft !== String(this.scope.getSnapshot().value?.[KEEP_FIELD] ?? 30)
     const copyFilesDirty = this.copyFilesDraft !== undefined && this.copyFilesDraft !== this.storedCopyFilesText()
     return {
@@ -313,6 +341,7 @@ export class CardForm {
       keepWorktreesValid: keepParsed !== undefined && keepParsed >= 1,
       switchFailed: this.switchFailed,
       postCreateCopyFilesText: copyFilesText,
+      postCreateCopyFilesValid: copyFilesValid,
     }
   }
 
