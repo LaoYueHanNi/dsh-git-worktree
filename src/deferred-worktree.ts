@@ -74,6 +74,8 @@ interface DeferredSlot {
   state: DeferredWorktreeState
   holding: boolean
   decision: DeferredPromise<FailureDecision> | undefined
+  /** Worktree already created by an earlier attempt; a retry only repeats the directory switch. */
+  created: DeferredCreateOutcome | undefined
 }
 
 type SnapshotListener = (snapshot: DeferredWorktreeSnapshot) => void
@@ -123,7 +125,7 @@ export class DeferredWorktreeCoordinator {
       existing.decision = undefined
     }
     const state: DeferredWorktreeState = { kind: 'armed', spec }
-    this.slots.set(sessionId, { state, holding: false, decision: undefined })
+    this.slots.set(sessionId, { state, holding: false, decision: undefined, created: undefined })
     this.emit(sessionId, { state })
     return state
   }
@@ -286,11 +288,18 @@ export class DeferredWorktreeCoordinator {
       this.emit(sessionId, { state: slot.state })
     }
 
-    publishPhase('create', spec.cutout ? spec.name : spec.branch)
-    const created = await this.deps.createWorktree(spec, (phase, branch) => {
-      publishPhase(phase, branch)
-    })
-    signal.throwIfAborted()
+    // A retry after a failed switch reuses the worktree the earlier attempt
+    // created: creating again would orphan it (generated names) or fail on
+    // the existing branch (explicit names).
+    let created = slot.created
+    if (created === undefined) {
+      publishPhase('create', spec.cutout ? spec.name : spec.branch)
+      created = await this.deps.createWorktree(spec, (phase, branch) => {
+        publishPhase(phase, branch)
+      })
+      slot.created = created
+      signal.throwIfAborted()
+    }
 
     publishPhase('switch', created.branch)
     const committedPath = await this.deps.setWorkingDirectory(agent, created.path, signal)

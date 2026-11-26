@@ -216,7 +216,7 @@ interface HostAgentRegistryLike {
 }
 
 interface HostWorkingDirectoryLike {
-  set(agent: unknown, path: string): Promise<string>
+  set(agent: unknown, path: string, signal?: AbortSignal): Promise<string>
 }
 
 const isHostAgentRegistryLike = (value: unknown): value is HostAgentRegistryLike =>
@@ -281,7 +281,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       const coordinator = new DeferredWorktreeCoordinator({
         createWorktree: (spec, onPhase) => executeCreateWorktree(baseDeps(), spec, onPhase),
-        setWorkingDirectory: (agent, targetPath) => workingDirCandidate.set(agent, targetPath),
+        setWorkingDirectory: (agent, targetPath, signal) => workingDirCandidate.set(agent, targetPath, signal),
       })
       sessionDirectorySetter = setter
       deferredWorktrees = coordinator

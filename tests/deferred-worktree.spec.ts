@@ -138,6 +138,60 @@ describe('DeferredWorktreeCoordinator', () => {
     expect(setWorkingDirectory).toHaveBeenCalledWith(agent, createdPath, expect.any(AbortSignal))
   })
 
+  it('retries only the directory switch when the worktree was already created', async () => {
+    const createdPath = resolve('/repo/.dsh/gitworktree/main-1a2b')
+    const createWorktree = vi.fn(async (_spec, onPhase) => {
+      onPhase('create', 'main-1a2b')
+      return { path: createdPath, branch: 'main-1a2b', created: true }
+    })
+    let switchAttempt = 0
+    const setWorkingDirectory = vi.fn(async (_agent, path) => {
+      switchAttempt += 1
+      if (switchAttempt === 1) throw new Error('directory busy')
+      return path
+    })
+    const coordinator = new DeferredWorktreeCoordinator({ createWorktree, setWorkingDirectory })
+
+    let markFailed!: () => void
+    const failedReached = new Promise<void>((res) => { markFailed = res })
+    const snapshots: DeferredWorktreeSnapshot[] = []
+    coordinator.subscribe('s-6', (snap) => {
+      snapshots.push(snap)
+      if (snap.state?.kind === 'failed') markFailed()
+    })
+
+    coordinator.arm('s-6', { repoPath: resolve('/repo'), branch: 'main', cutout: true, random: true })
+
+    let maintenancePromise: Promise<void> | undefined
+    const agent: DeferredAgentLike = {
+      session: { id: 's-6' },
+      inbox: { nextTurn: [{ id: 'm-1' }] },
+      runMaintenance: (task) => {
+        maintenancePromise = task(new AbortController().signal)
+        return maintenancePromise
+      },
+    }
+
+    coordinator.onInboxInserted(agent, { id: 'm-1' })
+    await failedReached
+
+    expect(coordinator.get('s-6')).toMatchObject({
+      kind: 'failed',
+      phase: 'switch',
+      message: 'directory busy',
+      resolvedBranch: 'main-1a2b',
+    })
+    expect(coordinator.retry('s-6')).toBe(true)
+    await maintenancePromise
+
+    expect(createWorktree).toHaveBeenCalledTimes(1)
+    expect(setWorkingDirectory).toHaveBeenCalledTimes(2)
+    expect(snapshots[snapshots.length - 1]).toEqual({
+      state: null,
+      completed: { path: createdPath, branch: 'main-1a2b', created: true },
+    })
+  })
+
   it('allows withdrawing a failed creation so the waiting message proceeds without a worktree', async () => {
     const createWorktree = vi.fn(async () => { throw new Error('disk full') })
     const setWorkingDirectory = vi.fn()
