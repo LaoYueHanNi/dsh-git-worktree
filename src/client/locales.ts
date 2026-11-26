@@ -212,15 +212,82 @@ export type GitWorktreeKey =
   | 'manager.scopeBack'
   | 'manager.emptyScoped'
   | 'contextMenu.newWorktree'
+  | 'contextMenu.checkoutPr'
   | 'contextMenu.manageWorktrees'
   | 'contextMenu.removeWorktree'
   | 'contextMenu.removeDone'
+  | 'menuCheckoutPr'
+  | 'prModal.title'
+  | 'prModal.subtitle'
+  | 'prModal.loading'
+  | 'prModal.loadingRemote'
+  | 'prModal.loadFailed'
+  | 'prModal.inputPlaceholder'
+  | 'prModal.remoteLabel'
+  | 'prModal.providerLabel'
+  | 'prModal.providerGithub'
+  | 'prModal.providerGitlab'
+  | 'prModal.forgeUnauth'
+  | 'prModal.filterReviewRequested'
+  | 'prModal.filterAuthored'
+  | 'prModal.filterInvolved'
+  | 'prModal.noCandidates'
+  | 'prModal.tagDraft'
+  | 'prModal.tagWorktree'
+  | 'prModal.ciSuccess'
+  | 'prModal.ciPending'
+  | 'prModal.ciFailure'
+  | 'prModal.resolving'
+  | 'prModal.previewHeading'
+  | 'prModal.previewRef'
+  | 'prModal.previewBranch'
+  | 'prModal.previewPath'
+  | 'prModal.existingHeading'
+  | 'prModal.existingReuse'
+  | 'prModal.existingUpdate'
+  | 'prModal.divergedTitle'
+  | 'prModal.divergedDesc'
+  | 'prModal.divergedKeep'
+  | 'prModal.divergedReset'
+  | 'prModal.occupiedByMain'
+  | 'prModal.autoTrack'
+  | 'prModal.submitCreate'
+  | 'prModal.submitOpen'
+  | 'prModal.submitUpdate'
+  | 'prModal.stageFetch'
+  | 'prModal.stageWorktree'
+  | 'prModal.stageCopy'
+  | 'prModal.busy'
+  | 'prModal.busyOpen'
+  | 'prModal.busyUpdate'
+  | 'prModal.updatedToast'
+  | 'prModal.forceUpdatedToast'
+  | 'prModal.resetToast'
+  | 'prModal.upToDateToast'
+  | 'prModal.preservedLocalBranchToast'
+  | 'prModal.forkPushNote'
+  | 'prModal.noRemotes'
+  | 'prModal.errNoRemotes'
+  | 'prModal.errEmptyInput'
+  | 'prModal.errInvalidInput'
+  | 'prModal.errUnsupportedProvider'
+  | 'prModal.errUrlRepoMismatch'
+  | 'prModal.errRemoteNotFound'
+  | 'prModal.errProviderUndetected'
+  | 'prModal.errWorktreeDirty'
+  | 'prModal.errPrRefNotFound'
+  | 'prModal.errPrAuthFailed'
+  | 'forgeSlot.checkoutTooltip'
+  | 'forgeSlot.checkoutLabel'
+  | 'forgeSlot.syncTooltip'
+  | 'forgeSlot.syncLabel'
   | 'sidebar.worktreeBadge'
   | 'sidebar.worktreeBadgeWithBranch'
   | 'sidebar.worktreeHover'
   | 'sidebar.worktreeHoverWithBranch'
   | 'sidebar.worktreeHoverLabel'
   | 'sidebar.worktreeHoverFrom'
+  | 'sidebar.worktreeHoverPr'
   | 'createModal.title'
   | 'createModal.loading'
   | 'createModal.loadFailed'
@@ -490,15 +557,82 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.scopeBack': 'Only {repo}',
   'manager.emptyScoped': 'No worktrees found for {repo}.',
   'contextMenu.newWorktree': 'New worktree from branch…',
+  'contextMenu.checkoutPr': 'Checkout PR / MR…',
   'contextMenu.manageWorktrees': 'Manage worktrees…',
   'contextMenu.removeWorktree': 'Remove this worktree…',
   'contextMenu.removeDone': 'Worktree removed',
+  menuCheckoutPr: 'Checkout PR / MR',
+  'prModal.title': 'Checkout PR / MR to worktree · {repo}',
+  'prModal.subtitle': 'Fetches into an isolated worktree without touching the main checkout or uncommitted changes.',
+  'prModal.loading': 'Loading repository remotes…',
+  'prModal.loadingRemote': 'Loading PR/MR list for {remote}…',
+  'prModal.loadFailed': 'Could not load PR/MR context: {message}',
+  'prModal.inputPlaceholder': 'Enter PR/MR number (e.g. 42), paste URL, or filter list…',
+  'prModal.remoteLabel': 'Remote',
+  'prModal.providerLabel': 'Host type',
+  'prModal.providerGithub': 'GitHub PR',
+  'prModal.providerGitlab': 'GitLab MR',
+  'prModal.forgeUnauth': 'Code host sign-in needed for the PR list — you can still checkout by number or URL',
+  'prModal.filterReviewRequested': 'Review requested ({n})',
+  'prModal.filterAuthored': 'Created by me ({n})',
+  'prModal.filterInvolved': 'Involved ({n})',
+  'prModal.noCandidates': 'No matching PRs or MRs in this filter. You can still enter a number or URL above.',
+  'prModal.tagDraft': 'Draft',
+  'prModal.tagWorktree': 'Worktree exists',
+  'prModal.ciSuccess': 'Checks passed',
+  'prModal.ciPending': 'Checks running',
+  'prModal.ciFailure': 'Checks failed',
+  'prModal.resolving': 'Resolving target…',
+  'prModal.previewHeading': 'Isolated worktree preview',
+  'prModal.previewRef': 'Fetch ref: {ref}',
+  'prModal.previewBranch': 'Local branch: {branch}',
+  'prModal.previewPath': 'Worktree folder: {path}',
+  'prModal.existingHeading': 'Existing worktree found for {branch}',
+  'prModal.existingReuse': 'Open existing worktree (no Git writes)',
+  'prModal.existingUpdate': 'Fetch latest commits and sync (clean worktree; auto-syncs remote force-push)',
+  'prModal.divergedTitle': 'Local commits found on {branch}',
+  'prModal.divergedDesc': 'The remote PR/MR diverged from your local commits. Open as-is to keep them, or reset to the latest PR/MR commit (discards local-only commits on this branch).',
+  'prModal.divergedKeep': 'Keep local & open',
+  'prModal.divergedReset': 'Reset to latest PR/MR',
+  'prModal.occupiedByMain': 'Branch {branch} is currently checked out in the main repository. Switch the main checkout to another branch first.',
+  'prModal.autoTrack': 'Bind this PR/MR to the session’s change request panel',
+  'prModal.submitCreate': 'Checkout to worktree',
+  'prModal.submitOpen': 'Open worktree',
+  'prModal.submitUpdate': 'Update & open worktree',
+  'prModal.stageFetch': 'Fetching PR/MR ref…',
+  'prModal.stageWorktree': 'Creating isolated worktree…',
+  'prModal.stageCopy': 'Copying configuration files…',
+  'prModal.busy': 'Checking out…',
+  'prModal.busyOpen': 'Opening…',
+  'prModal.busyUpdate': 'Updating…',
+  'prModal.updatedToast': 'Updated {branch} to the latest PR/MR commit',
+  'prModal.forceUpdatedToast': 'Remote PR/MR was force-pushed; synced {branch} to the latest commit',
+  'prModal.resetToast': 'Reset {branch} to the latest PR/MR commit',
+  'prModal.upToDateToast': '{branch} is already up to date',
+  'prModal.preservedLocalBranchToast': 'Existing local branch {branch} had local commits and was kept intact',
+  'prModal.forkPushNote': 'Checked-out PR worktrees are intended for local review and testing; pushing depends on remote permissions.',
+  'prModal.noRemotes': 'This repository has no configured Git remotes.',
+  'prModal.errNoRemotes': 'This repository has no configured Git remotes.',
+  'prModal.errEmptyInput': 'Enter a PR/MR number or URL.',
+  'prModal.errInvalidInput': 'Enter a valid PR/MR number (e.g. 42) or a GitHub/GitLab PR/MR URL.',
+  'prModal.errUnsupportedProvider': 'Unsupported code host "{provider}". Only GitHub and GitLab are supported.',
+  'prModal.errUrlRepoMismatch': 'This URL points to {owner}/{repo} ({host}), which does not match any remote in this repository.',
+  'prModal.errRemoteNotFound': 'Remote "{remote}" was not found in this repository.',
+  'prModal.errProviderUndetected': 'Could not detect whether remote "{remote}" hosts GitHub PRs or GitLab MRs. Select a host type or paste the full URL.',
+  'prModal.errWorktreeDirty': 'The PR worktree has uncommitted changes. Commit or stash them before updating.',
+  'prModal.errPrRefNotFound': 'Could not find {ref} on remote "{remote}". Check the PR/MR number, remote, and host type.',
+  'prModal.errPrAuthFailed': 'Authentication failed when fetching from remote "{remote}". Check your Git credentials or SSH key.',
+  'forgeSlot.checkoutTooltip': 'Checkout PR/MR to isolated worktree',
+  'forgeSlot.checkoutLabel': 'Checkout to worktree',
+  'forgeSlot.syncTooltip': 'Sync this PR/MR worktree to latest',
+  'forgeSlot.syncLabel': 'Sync PR/MR worktree',
   'sidebar.worktreeBadge': 'Git worktree · {repo}',
   'sidebar.worktreeBadgeWithBranch': 'Git worktree · {repo} ({branch})',
   'sidebar.worktreeHover': 'Worktree · {repo}',
   'sidebar.worktreeHoverWithBranch': 'Worktree · {repo} / {branch}',
   'sidebar.worktreeHoverLabel': 'Worktree',
   'sidebar.worktreeHoverFrom': 'Worktree · from {base}',
+  'sidebar.worktreeHoverPr': 'Worktree · {label}',
   'createModal.title': 'New worktree · {repo}',
   'createModal.loading': 'Loading branches…',
   'createModal.loadFailed': 'Could not load branches: {message}',
@@ -769,15 +903,82 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.scopeBack': '仅看 {repo}',
   'manager.emptyScoped': '当前仓库 {repo} 暂无工作树。',
   'contextMenu.newWorktree': '从分支新建工作树…',
+  'contextMenu.checkoutPr': '检出 PR / MR…',
   'contextMenu.manageWorktrees': '管理工作树…',
   'contextMenu.removeWorktree': '删除此工作树…',
   'contextMenu.removeDone': '已删除工作树',
+  menuCheckoutPr: '检出 PR / MR',
+  'prModal.title': '检出 PR / MR 到隔离工作树 · {repo}',
+  'prModal.subtitle': '拉取到独立工作树分支，不改动主仓库当前分支与未提交修改。',
+  'prModal.loading': '正在读取仓库远程信息…',
+  'prModal.loadingRemote': '正在加载 {remote} 的候选列表…',
+  'prModal.loadFailed': '加载 PR / MR 上下文失败：{message}',
+  'prModal.inputPlaceholder': '输入 PR / MR 编号（如 42）、粘贴链接或筛选列表…',
+  'prModal.remoteLabel': 'Remote',
+  'prModal.providerLabel': '平台类型',
+  'prModal.providerGithub': 'GitHub PR',
+  'prModal.providerGitlab': 'GitLab MR',
+  'prModal.forgeUnauth': '代码托管平台未登录（暂不展示候选列表）— 仍可直接输入编号或链接检出',
+  'prModal.filterReviewRequested': '待我评审 ({n})',
+  'prModal.filterAuthored': '我创建的 ({n})',
+  'prModal.filterInvolved': '与我有关 ({n})',
+  'prModal.noCandidates': '当前筛选下没有匹配的 PR / MR，仍可直接在上方输入编号或链接检出。',
+  'prModal.tagDraft': '草稿',
+  'prModal.tagWorktree': '已有工作树',
+  'prModal.ciSuccess': '检查通过',
+  'prModal.ciPending': '检查进行中',
+  'prModal.ciFailure': '检查失败',
+  'prModal.resolving': '正在解析目标…',
+  'prModal.previewHeading': '隔离工作树落盘预览',
+  'prModal.previewRef': '拉取引用：{ref}',
+  'prModal.previewBranch': '本地分支：{branch}',
+  'prModal.previewPath': '工作树目录：{path}',
+  'prModal.existingHeading': '检测到 {branch} 已有本地工作树',
+  'prModal.existingReuse': '直接打开已有工作树（零 Git 写入）',
+  'prModal.existingUpdate': '拉取最新提交并同步更新（仅干净工作树；远端强制推送时自动同步）',
+  'prModal.divergedTitle': '分支 {branch} 包含未合并的本地提交',
+  'prModal.divergedDesc': '远端 PR / MR 与你的本地提交已分叉。可直接打开以保留本地提交，或重置到 PR / MR 最新提交（将丢弃该分支上的本地提交）。',
+  'prModal.divergedKeep': '保留本地直接打开',
+  'prModal.divergedReset': '重置到 PR / MR 最新',
+  'prModal.occupiedByMain': '主仓库当前正检出分支 {branch}，请先在主仓库切换其他分支后再检出此 PR / MR。',
+  'prModal.autoTrack': '检出后自动关联到会话的变更请求面板',
+  'prModal.submitCreate': '检出并进入工作树',
+  'prModal.submitOpen': '打开已有工作树',
+  'prModal.submitUpdate': '更新并打开工作树',
+  'prModal.stageFetch': '正在拉取 PR / MR 引用…',
+  'prModal.stageWorktree': '正在创建隔离工作树…',
+  'prModal.stageCopy': '正在复制配置文件…',
+  'prModal.busy': '正在检出…',
+  'prModal.busyOpen': '正在打开…',
+  'prModal.busyUpdate': '正在更新…',
+  'prModal.updatedToast': '已将 {branch} 更新到最新提交',
+  'prModal.forceUpdatedToast': '远端 PR / MR 已强制更新，已将 {branch} 同步到最新提交',
+  'prModal.resetToast': '已将 {branch} 重置到 PR / MR 最新提交',
+  'prModal.upToDateToast': '{branch} 已是最新提交',
+  'prModal.preservedLocalBranchToast': '本地分支 {branch} 包含未合并的本地提交，已原样保留',
+  'prModal.forkPushNote': '检出的 PR 工作树主要用于本地审阅与测试；直接推送受远端权限限制。',
+  'prModal.noRemotes': '当前仓库尚未配置任何 Git Remote。',
+  'prModal.errNoRemotes': '当前仓库尚未配置任何 Git Remote。',
+  'prModal.errEmptyInput': '请输入 PR / MR 编号或完整链接。',
+  'prModal.errInvalidInput': '请输入有效的 PR / MR 编号（如 42）或 GitHub / GitLab PR / MR 链接。',
+  'prModal.errUnsupportedProvider': '暂不支持代码托管平台“{provider}”，目前仅支持 GitHub 与 GitLab。',
+  'prModal.errUrlRepoMismatch': '该链接指向 {owner}/{repo}（{host}），与当前仓库配置的任何 Remote 均不匹配。',
+  'prModal.errRemoteNotFound': '当前仓库未找到名为“{remote}”的 Remote。',
+  'prModal.errProviderUndetected': '无法自动判断 Remote“{remote}”属于 GitHub 还是 GitLab，请手动选择平台类型或粘贴完整链接。',
+  'prModal.errWorktreeDirty': '该 PR 工作树存在未提交改动，请先提交或暂存后再更新。',
+  'prModal.errPrRefNotFound': '在 Remote“{remote}”上未找到引用 {ref}，请确认 PR / MR 编号、Remote 和平台类型是否正确。',
+  'prModal.errPrAuthFailed': '从 Remote“{remote}”拉取失败：认证未通过。请检查 Git 凭据或 SSH 密钥配置。',
+  'forgeSlot.checkoutTooltip': '检出 PR / MR 到隔离工作树',
+  'forgeSlot.checkoutLabel': '检出到工作树',
+  'forgeSlot.syncTooltip': '同步此 PR / MR 工作树到最新',
+  'forgeSlot.syncLabel': '同步 PR / MR 工作树',
   'sidebar.worktreeBadge': 'Git 工作树 · {repo}',
   'sidebar.worktreeBadgeWithBranch': 'Git 工作树 · {repo}（{branch}）',
   'sidebar.worktreeHover': '工作树 · {repo}',
   'sidebar.worktreeHoverWithBranch': '工作树 · {repo} / {branch}',
   'sidebar.worktreeHoverLabel': '工作树',
   'sidebar.worktreeHoverFrom': '工作树 · 基于 {base}',
+  'sidebar.worktreeHoverPr': '工作树 · {label}',
   'createModal.title': '新建工作树 · {repo}',
   'createModal.loading': '正在加载分支…',
   'createModal.loadFailed': '分支加载失败：{message}',

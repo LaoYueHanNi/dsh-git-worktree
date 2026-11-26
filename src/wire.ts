@@ -147,6 +147,15 @@ export const ROUTE_DEFERRED_ARM = `${ROUTE_PREFIX}/deferred/arm`
 /** POST ROUTE_PREFIX/deferred/action — cancel, retry, or withdraw a deferred worktree. */
 export const ROUTE_DEFERRED_ACTION = `${ROUTE_PREFIX}/deferred/action`
 
+/** POST ROUTE_PREFIX/pr-context — remotes, optional forge readiness, and open PR/MR candidates. */
+export const ROUTE_PR_CONTEXT = `${ROUTE_PREFIX}/pr-context`
+
+/** POST ROUTE_PREFIX/pr-resolve — resolve a PR/MR ID or URL to its fetch ref, branch, and path. */
+export const ROUTE_PR_RESOLVE = `${ROUTE_PREFIX}/pr-resolve`
+
+/** POST ROUTE_PREFIX/pr-checkout — stream PR/MR fetch + isolated worktree creation. */
+export const ROUTE_PR_CHECKOUT = `${ROUTE_PREFIX}/pr-checkout`
+
 /** One selectable branch row. */
 export interface BranchEntry {
   /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -419,6 +428,7 @@ export const NDJSON_TYPE = 'application/x-ndjson'
 export type SyncEvent =
   | { type: 'progress'; text: string; percent?: number; remote?: string }
   | { type: 'merge' }
+  | { type: 'stage'; stage: 'fetch' | 'worktree' | 'copy' }
 
 /**
  * One line of a streamed route response. The last line is always `done`,
@@ -430,6 +440,10 @@ export type SyncFrame = SyncEvent | { type: 'done'; status: number; body: unknow
 /** Error envelope every non-2xx response carries. */
 export interface RouteError {
   error: string
+  /** Optional machine-readable error code for localized client presentation. */
+  code?: string
+  /** Optional structured parameters accompanying `code`. */
+  params?: Record<string, string | number>
 }
 
 /** Git belonging facts of one workspace directory; null = not a git repository. */
@@ -674,4 +688,132 @@ export interface ArmDeferredWorktreeBody {
 export interface DeferredWorktreeActionBody {
   readonly sessionId: string
   readonly action: 'cancel' | 'retry' | 'withdraw'
+}
+
+/** Supported code-hosting provider kinds for PR/MR checkout. */
+export type PrProviderKind = 'github' | 'gitlab'
+
+/** Machine-readable error codes emitted by PR/MR routes for localized UI handling. */
+export type PrErrorCode =
+  | 'no_remotes'
+  | 'empty_input'
+  | 'invalid_input'
+  | 'unsupported_provider'
+  | 'url_repo_mismatch'
+  | 'remote_not_found'
+  | 'provider_undetected'
+  | 'occupied_by_main'
+  | 'worktree_dirty'
+  | 'worktree_diverged'
+  | 'pr_ref_not_found'
+  | 'pr_auth_failed'
+
+/** One Git remote classified for PR/MR resolution. */
+export interface PrRemoteInfo {
+  name: string
+  url: string
+  /** Classified provider kind (`github` or `gitlab`), or null when unrecognized. */
+  provider: PrProviderKind | null
+  host: string | null
+  owner: string | null
+  repo: string | null
+}
+
+/** One candidate PR/MR returned by optional host `ctx.forge` integration. */
+export interface PrCandidateItem {
+  provider: PrProviderKind
+  host: string
+  owner: string
+  repo: string
+  number: number
+  url: string
+  title: string
+  author: string | null
+  draft: boolean
+  checksRollup: 'none' | 'pending' | 'success' | 'failure'
+  reviewDecision: 'approved' | 'changes-requested' | 'review-required' | 'none'
+  filter: 'review-requested' | 'authored' | 'involved'
+  updatedAt: string
+  remote: string
+  localBranch: string
+  existingWorktreePath?: string
+}
+
+/** POST pr-context request body. */
+export interface PrContextBody {
+  repoPath: string
+  /** Optional explicit remote to scope optional Forge readiness & candidates. */
+  remote?: string
+}
+
+/** POST pr-context response body. */
+export interface PrContextResult {
+  repoRoot: string
+  repoName: string
+  remotes: PrRemoteInfo[]
+  defaultRemote: string | null
+  forge: {
+    available: boolean
+    readiness: 'ready' | 'unauthenticated' | 'unavailable' | 'unsupported'
+    signInCommand?: string
+    message?: string
+  }
+  candidates: PrCandidateItem[]
+}
+
+/** POST pr-resolve request body. */
+export interface PrResolveBody {
+  repoPath: string
+  /** Numeric ID (`42`, `#42`, `!42`) or full PR/MR web URL. */
+  input: string
+  remote?: string
+  provider?: PrProviderKind
+}
+
+/** POST pr-resolve response body. */
+export interface PrResolveResult {
+  provider: PrProviderKind
+  number: number
+  remote: string
+  refSpec: string
+  localBranch: string
+  targetPath: string
+  canonicalUrl: string | null
+  existingWorktreePath?: string
+  existingBranch?: boolean
+  /** True when the main checkout itself currently holds `localBranch` (blocks linked worktree creation). */
+  occupiedByMain?: boolean
+  meta?: {
+    title: string
+    author: string | null
+    state: 'open' | 'closed' | 'merged'
+    draft: boolean
+    headBranch: string
+    baseBranch: string
+  }
+}
+
+/** POST pr-checkout request body. */
+export interface PrCheckoutBody {
+  repoPath: string
+  input: string
+  remote?: string
+  provider?: PrProviderKind
+  /** When the PR's worktree already exists: reuse immediately, fast-forward/safe-sync when clean, or force-reset after confirmation. */
+  ifExists?: 'reuse' | 'update' | 'reset'
+}
+
+/** POST pr-checkout response body. */
+export interface PrCheckoutResult extends CreateWorktreeResult {
+  branch: string
+  provider: PrProviderKind
+  number: number
+  canonicalUrl: string | null
+  updated?: boolean
+  /** True when remote PR history was force-pushed and the clean local PR worktree had no local commits so it was safely synced. */
+  forceUpdated?: boolean
+  /** True when the user explicitly confirmed resetting a diverged local PR worktree to the latest remote PR tip. */
+  reset?: boolean
+  /** True when an existing local branch with diverged local commits was preserved as-is. */
+  preservedLocalBranch?: boolean
 }

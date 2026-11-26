@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/client/index.ts'
 import type { BranchChipInjected } from '../src/client/slots.ts'
-import { ROUTE_EXISTS, ROUTE_REMOVE } from '../src/wire.ts'
+import { ROUTE_DEFERRED_ACTION, ROUTE_EXISTS, ROUTE_REMOVE, ROUTE_SESSION_CWD } from '../src/wire.ts'
 
 /**
  * Scripted client context: only the faces `apply` touches. `slots.inject`
@@ -332,5 +332,119 @@ describe('client apply', () => {
     ])
     expect(ctx.slotNames).toContain('contextMenu.icon')
     expect(ctx.slotNames).not.toContain('sidebar.workspaces.session.menu.item')
+  })
+
+  it('never reads ctx.remote.forgePanel without inject and bridges remote.forgePanel lazily via ctx.inject', async () => {
+    const ctx = new FakeCtx()
+    // Simulate Cordis ReflectService throwing when accessing an un-injected sub-service.
+    Object.defineProperty(ctx.remote, 'forgePanel', {
+      configurable: true,
+      get() {
+        throw new Error('cannot get property "remote.forgePanel" without inject')
+      },
+    })
+    const trackCalls: Array<[string, string]> = []
+    const openedSessions: string[] = []
+    let forgeDispose: (() => void) | undefined
+    let activateForge: (() => void) | undefined
+    const hostCtx = Object.assign(ctx, {
+      uiWorkspace: {
+        ...ctx.uiWorkspace,
+        connectWorkspace: async (wsId: string) => `sess-${wsId}`,
+        openSession: (sessionId: string) => { openedSessions.push(sessionId) },
+      },
+      inject: (deps: readonly string[], cb: (scope: unknown) => void) => {
+        if (deps.includes('remote.forgePanel')) {
+          activateForge = () => {
+            const forgeScope = {
+              remote: {
+                forgePanel: {
+                  track: async (sessionId: string, url: string) => {
+                    trackCalls.push([sessionId, url])
+                  },
+                },
+              },
+              effect: (fn: () => (() => void) | void) => {
+                forgeDispose = fn() ?? undefined
+                return () => { forgeDispose?.() }
+              },
+            }
+            cb(forgeScope)
+          }
+        }
+      },
+    })
+
+    apply(hostCtx as never)
+
+    const actionHostReg = ctx.registered.find(r => r.options.name === 'shell.overlay' && r.options.id === 'git-worktree-actions')
+    expect(actionHostReg).toBeDefined()
+    // Running inject() must not throw against the strict remote proxy.
+    const injected = (actionHostReg!.options.inject as () => {
+      forgeTrackAvailable: () => boolean
+      adoptWorktree: (path: string, opts?: { trackPrUrl?: string | null }) => Promise<void>
+    })()
+    expect(injected.forgeTrackAvailable()).toBe(false)
+
+    // Activating optional remote.forgePanel enables tracking dynamically.
+    activateForge?.()
+    expect(injected.forgeTrackAvailable()).toBe(true)
+    await injected.adoptWorktree('/repo/.dsh/gitworktree/github-pr-12', {
+      trackPrUrl: 'https://github.com/org/repo/pull/12',
+    })
+    expect(openedSessions).toEqual(['sess-ws-1'])
+    expect(trackCalls).toEqual([['sess-ws-1', 'https://github.com/org/repo/pull/12']])
+
+    // Disposing the optional forge scope cleanly disables tracking again.
+    forgeDispose?.()
+    expect(injected.forgeTrackAvailable()).toBe(false)
+  })
+
+  it('reuses the current blank session in place and binds trackPrUrl when switchSessionDirectory is enabled', async () => {
+    const ctx = new FakeCtx()
+    ctx.workspaceItems = [{ path: '/repo', workspaceId: 'ws-main', sessionIds: ['blank-1'] }]
+    ctx.sessionSummaries = { 'blank-1': { running: false, blank: true, updatedAt: 1 } }
+    const trackCalls: Array<[string, string]> = []
+    const sessionCwdCalls: Array<{ sessionId: string; path: string }> = []
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }): Promise<Response> => {
+      if (url === ROUTE_SESSION_CWD) {
+        sessionCwdCalls.push(JSON.parse(init?.body ?? '{}') as { sessionId: string; path: string })
+        return new Response(JSON.stringify({ sessionId: 'blank-1', path: '/repo/.dsh/gitworktree/github-pr-42' }), { status: 200 })
+      }
+      if (url === ROUTE_DEFERRED_ACTION) {
+        return new Response(JSON.stringify({ state: null }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ facts: {} }), { status: 200 })
+    })
+    const hostCtx = Object.assign(ctx, {
+      inject: (deps: readonly string[], cb: (scope: unknown) => void) => {
+        if (deps.includes('remote.forgePanel')) {
+          cb({
+            remote: {
+              forgePanel: {
+                track: async (sessionId: string, url: string) => { trackCalls.push([sessionId, url]) },
+              },
+            },
+            effect: () => () => {},
+          })
+        }
+      },
+    })
+
+    apply(hostCtx as never, {
+      switchSessionDirectory: { get: () => true, subscribe: () => () => {} },
+    })
+
+    const options = ctx.registrationOf('conversation.input.left')
+    const face = (options.inject as () => BranchChipInjected)()
+    await face.adoptWorktree('/repo/.dsh/gitworktree/github-pr-42', {
+      reuseBlankSessionId: 'blank-1',
+      repoRoot: '/repo',
+      trackPrUrl: 'https://github.com/org/repo/pull/42',
+    })
+
+    expect(sessionCwdCalls).toEqual([{ sessionId: 'blank-1', path: '/repo/.dsh/gitworktree/github-pr-42' }])
+    expect(trackCalls).toEqual([['blank-1', 'https://github.com/org/repo/pull/42']])
+    expect(ctx.workspaces.created).toEqual([])
   })
 })

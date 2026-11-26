@@ -82,6 +82,7 @@ import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
 import { branchFactsStamp, repoHasRemotes } from './branch-tree.ts'
 import type { BranchChipInjected } from './slots.ts'
 import { cancelSyncJob, findSyncJob, recordPushFailure, runSyncJob, subscribeSyncJobs, takePushFailure, type PushFailure, type SyncJob } from './sync-job.ts'
+import { openCheckoutPr } from './action-bus.ts'
 import { explainGitOpFailure, type GitOpFailureKind } from './git-error.ts'
 import { emitToast, hasGlobalToastHost } from './toast-bus.ts'
 import { explainUpdateFailure, updateErrorText, type UpdateFailureKind } from './update-error.ts'
@@ -1174,6 +1175,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         onFetch={() => { void doFetch() }}
         fetchBusy={syncJob?.kind === 'fetch'}
         onUpdate={() => { void doUpdate() }}
+        onCheckoutPr={() => {
+          setConfirm(null)
+          setMenuOpen(false)
+          openCheckoutPr(facts.repoRoot, facts.repoName, {
+            reuseBlankSessionId: session.blank && facts.main ? sessionId : undefined,
+          })
+        }}
         hasRemotes={repoHasRemotes(facts.branches)}
         onPush={(branch) => {
           if (blocked()) return

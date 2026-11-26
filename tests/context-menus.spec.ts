@@ -72,17 +72,25 @@ describe('registerNativeContextMenus', () => {
     // Non-git directory: completely silent.
     expect(await wsContrib!.resolve({ workspaceId: 'ws-0', path: '/plain', displayTitle: 'plain' }, signal)).toEqual([])
 
-    // Main git workspace: create + manage (pre-scoped to this repository), no remove.
+    // Main git workspace: create + checkout-pr + manage (pre-scoped to this repository), no remove.
     const mainActions = await wsContrib!.resolve({ workspaceId: 'ws-1', path: '/code/app', displayTitle: 'app' }, signal)
-    expect(mainActions.map(a => a.id)).toEqual(['create', 'manage'])
+    expect(mainActions.map(a => a.id)).toEqual(['create', 'checkout-pr', 'manage'])
     expect(mainActions[0]?.separatorBefore).toBe(true)
     expect(mainActions[0]?.icon).toEqual({ key: CONTEXT_MENU_ICON_KEYS.create })
-    expect(mainActions[1]?.icon).toEqual({ key: CONTEXT_MENU_ICON_KEYS.manage })
+    expect(mainActions[1]?.icon).toEqual({ key: CONTEXT_MENU_ICON_KEYS.checkoutPr })
+    expect(mainActions[2]?.icon).toEqual({ key: CONTEXT_MENU_ICON_KEYS.manage })
 
-    await mainActions[1]?.run?.()
+    await mainActions[2]?.run?.()
     expect(getWorktreeAction()).toEqual({
       kind: 'manage',
       repoFilter: { repoRoot: '/code/app', repoName: 'app' },
+    })
+
+    await mainActions[1]?.run?.()
+    expect(getWorktreeAction()).toEqual({
+      kind: 'checkout-pr',
+      repoPath: '/code/app',
+      repoName: 'app',
     })
 
     await mainActions[0]?.run?.()

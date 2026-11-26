@@ -20,6 +20,7 @@ import type { BranchEntry, DeferredWorktreeSpec, RepoStatus } from '../wire.ts'
 import { branchNameIssue } from '../normalize.ts'
 import { closeWorktreeAction, getWorktreeAction, subscribeWorktreeAction } from './action-bus.ts'
 import { fetchStatus, requestInspectWorktree, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { CheckoutPrModal } from './CheckoutPrModal.tsx'
 import { explainGitOpFailure } from './git-error.ts'
 import type { AdoptWorktreeOptions } from './slots.ts'
 import { emitToast } from './toast-bus.ts'
@@ -37,6 +38,7 @@ export interface WorktreeActionHostInjected {
   readonly adoptWorktree: (path: string, options?: AdoptWorktreeOptions) => Promise<void>
   readonly isSwitchSessionDirectory?: (() => boolean) | undefined
   readonly armDeferredWorktree?: ((spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>) | undefined
+  readonly forgeTrackAvailable?: boolean | (() => boolean)
   readonly describeWorktreeRemoval: (path: string) => { running: boolean; archiveCount: number }
   readonly removeWorktree: (path: string, force: boolean) => Promise<void>
   readonly pruneWorktrees?: ((createdPath: string) => Promise<PruneSummaryLike | undefined>) | undefined
@@ -554,6 +556,7 @@ export function WorktreeActionHost({
   adoptWorktree,
   isSwitchSessionDirectory,
   armDeferredWorktree,
+  forgeTrackAvailable,
   describeWorktreeRemoval,
   removeWorktree,
   pruneWorktrees,
@@ -584,6 +587,26 @@ export function WorktreeActionHost({
         describeWorktreeRemoval={describeWorktreeRemoval}
         removeWorktree={removeWorktree}
         onRemoved={onWorktreeRemoved}
+        onClose={closeWorktreeAction}
+        t={t}
+      />
+    )
+  }
+
+  if (action.kind === 'checkout-pr') {
+    const canTrack = typeof forgeTrackAvailable === 'function' ? forgeTrackAvailable() : forgeTrackAvailable === true
+    return (
+      <CheckoutPrModal
+        key={`${action.repoPath}:${action.initialInput ?? ''}`}
+        repoPath={action.repoPath}
+        repoName={action.repoName}
+        {...(action.initialInput === undefined ? {} : { initialInput: action.initialInput })}
+        {...(action.reuseBlankSessionId === undefined ? {} : { reuseBlankSessionId: action.reuseBlankSessionId })}
+        {...(action.initialIfExists === undefined ? {} : { initialIfExists: action.initialIfExists })}
+        forgeTrackAvailable={canTrack}
+        adoptWorktree={adoptWorktree}
+        pruneWorktrees={pruneWorktrees}
+        onCreated={onWorktreeCreated}
         onClose={closeWorktreeAction}
         t={t}
       />

@@ -42,6 +42,11 @@ export interface AdoptWorktreeOptions {
    * parent repository Workspace in shared-workspace mode.
    */
   readonly repoRoot?: string | undefined
+  /**
+   * Optional canonical PR/MR URL to bind to the opened worktree session via
+   * host `remote.forgePanel.track` when available.
+   */
+  readonly trackPrUrl?: string | null | undefined
 }
 
 export interface BranchChipInjected {
@@ -50,7 +55,7 @@ export interface BranchChipInjected {
    * Workspace by default, or switches a blank session's working directory under
    * the parent repository Workspace when `switchSessionDirectory` is enabled.
    * @param path - absolute worktree directory.
-   * @param options - optional blank-session reuse and parent repo hint.
+   * @param options - optional blank-session reuse, parent repo hint, and PR/MR URL to track.
    */
   adoptWorktree: (path: string, options?: AdoptWorktreeOptions) => Promise<void>
   /**

@@ -45,8 +45,10 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { IconBranchOutlineRegular, IconFolderCloseRegular, IconTrashOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
+import { PrCheckoutGlyph } from './CheckoutPrModal.tsx'
 import { CONTEXT_MENU_ICON_KEYS, registerNativeContextMenus, type ContextMenusLike } from './context-menus.ts'
 import { DeferredWorktreeDock, notifyDeferredWorktreeState } from './DeferredWorktreeDock.tsx'
+import { ForgeCardCheckoutButton, ForgeDiffToolbarCheckoutButton } from './ForgeIntegration.tsx'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import { LegacySessionMenuItem } from './LegacySessionMenuItem.tsx'
 import { SidebarWorktreeHover, SidebarWorktreeTrailing } from './SidebarWorktreeBadge.tsx'
@@ -81,6 +83,22 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'contextMenu.icon': { kind: 'keyed'; scope: 'root'; inline: true; owner: { icon: { readonly key: string; readonly src?: string } } }
     /** Non-interactive icons after the session row's time label (DSH >= 0.2.2-rc.5). */
     'sidebar.session.row.trailing': { kind: 'list'; scope: 'root'; inline: true; owner: { readonly sessionId: SessionId } }
+    /** Optional action buttons on Forge change-request cards (`client-ui-forge`). */
+    'forge.change-request.card.actions': {
+      kind: 'list'
+      scope: 'session'
+      owner: { readonly url: string }
+    }
+    /** Optional toolbar entries on Forge changes views (`client-ui-forge`). */
+    'forge.changes.toolbar': {
+      kind: 'list'
+      scope: 'session'
+      owner: {
+        readonly target: { readonly sessionId: SessionId; readonly source: { readonly kind: 'local' } | { readonly kind: 'change'; readonly url: string } }
+        readonly form: 'bar' | 'menu'
+        readonly close: () => void
+      }
+    }
   }
 }
 
@@ -166,6 +184,16 @@ const hasContextMenus = (value: unknown): value is { readonly contextMenus: Cont
   && value !== null
   && typeof (value as { contextMenus?: { register?: unknown } }).contextMenus?.register === 'function'
 
+type ForgePanelTrackFn = (sessionId: SessionId, url: string) => Promise<unknown>
+
+const resolveForgePanelTrack = (remote: unknown): ForgePanelTrackFn | undefined => {
+  if (typeof remote !== 'object' || remote === null) return undefined
+  const forgePanel = (remote as { forgePanel?: unknown }).forgePanel
+  if (typeof forgePanel !== 'object' || forgePanel === null) return undefined
+  const track = (forgePanel as { track?: unknown }).track
+  return typeof track === 'function' ? (track as ForgePanelTrackFn).bind(forgePanel) : undefined
+}
+
 /** Required services: the slot ledger, session/workspace runtimes, the
  * workspace navigation/directory face, copy, and the config forms backing
  * the plugin configuration card. */
@@ -196,9 +224,10 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
   const gitCache = createWorkspaceGitCache()
   const armedDeferredSessions = new Set<string>()
 
-  // Optional bridge to official `remote.forgePanel.cancelWorktree` (strict
-  // Cordis `ctx.inject` so hosts without `forge-bundle` stay unaffected).
+  // Optional bridge to official `remote.forgePanel` (`cancelWorktree` & `track`),
+  // using strict Cordis `ctx.inject` so hosts without `forge-bundle` stay unaffected.
   let forgePanelCancelWorktree: ForgePanelCancelWorktreeFn | undefined
+  let forgePanelTrack: ForgePanelTrackFn | undefined
   if (typeof ctx.inject === 'function') {
     const injectOptional = ctx.inject.bind(ctx) as (
       deps: readonly string[],
@@ -206,11 +235,14 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     ) => unknown
     injectOptional(['remote.forgePanel'], (forgeCtx) => {
       const cancel = resolveForgePanelCancelWorktree(forgeCtx.remote)
-      if (cancel === undefined) return
-      forgePanelCancelWorktree = cancel
+      const track = resolveForgePanelTrack(forgeCtx.remote)
+      if (cancel === undefined && track === undefined) return
+      if (cancel !== undefined) forgePanelCancelWorktree = cancel
+      if (track !== undefined) forgePanelTrack = track
       forgeCtx.effect(() => () => {
-        if (forgePanelCancelWorktree === cancel) forgePanelCancelWorktree = undefined
-      }, 'git-worktree: optional forgePanel.cancelWorktree bridge')
+        if (cancel !== undefined && forgePanelCancelWorktree === cancel) forgePanelCancelWorktree = undefined
+        if (track !== undefined && forgePanelTrack === track) forgePanelTrack = undefined
+      }, 'git-worktree: optional forgePanel bridge')
     })
   }
   const cancelOfficialWorktree = (sessionId: SessionId): void => {
@@ -258,6 +290,32 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
   const adoptWorktree = async (path: string, options?: AdoptWorktreeOptions): Promise<void> => {
     const workspacesSnapshot = ctx.workspaces.list.getSnapshot()
     const targetKey = pathKey(path)
+    const trackUrl = options?.trackPrUrl ?? null
+    const forgeTrack = forgePanelTrack
+    const uiWs = ctx.uiWorkspace as typeof ctx.uiWorkspace & {
+      connectWorkspace?: (workspaceId: WorkspaceId) => Promise<SessionId>
+      openSession?: (sessionId: SessionId) => void
+    }
+    const bindPrIfRequested = (sessionId: SessionId): void => {
+      if (trackUrl !== null && forgeTrack !== undefined) {
+        // Best-effort PR binding: failure must not roll back the opened isolated worktree session.
+        void forgeTrack(sessionId, trackUrl).catch(() => {})
+      }
+    }
+    const openWorkspace = async (workspaceId: WorkspaceId): Promise<void> => {
+      if (
+        trackUrl !== null
+        && forgeTrack !== undefined
+        && typeof uiWs.connectWorkspace === 'function'
+        && typeof uiWs.openSession === 'function'
+      ) {
+        const sessionId = await uiWs.connectWorkspace(workspaceId)
+        uiWs.openSession(sessionId)
+        bindPrIfRequested(sessionId)
+        return
+      }
+      ctx.uiWorkspace.startSession(workspaceId)
+    }
 
     // Rule A: if a standalone Workspace already owns this directory (including
     // the main repository checkout itself), always open it directly instead of
@@ -265,7 +323,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     // redundantly calling `session-cwd` when hopping back to the main repo.
     const existingWorkspace = workspacesSnapshot.items.find(item => pathKey(item.path) === targetKey)
     if (existingWorkspace !== undefined) {
-      ctx.uiWorkspace.startSession(existingWorkspace.workspaceId)
+      await openWorkspace(existingWorkspace.workspaceId)
       return
     }
 
@@ -275,16 +333,13 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       // session-directory switching: register the repository workspace directly.
       if (repoRoot !== undefined && pathKey(repoRoot) === targetKey) {
         const workspace = await ctx.workspaces.create({ path })
-        ctx.uiWorkspace.startSession(workspace.workspaceId)
+        await openWorkspace(workspace.workspaceId)
         return
       }
 
       const sessionsApi = ctx.sessions as typeof ctx.sessions & {
         create?: (opts?: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId }) => Promise<SessionId>
         refreshProjections?: (sessionId: SessionId) => Promise<void>
-      }
-      const uiWs = ctx.uiWorkspace as typeof ctx.uiWorkspace & {
-        openSession?: (sessionId: SessionId) => void
       }
 
       if (options?.reuseBlankSessionId !== undefined && options.reuseBlankSessionId.length > 0) {
@@ -298,6 +353,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
         notifyDeferredWorktreeState(options.reuseBlankSessionId, null)
         const moved = await requestSetSessionDirectory(options.reuseBlankSessionId, path)
         if (!moved.ok) throw new Error(moved.error)
+        bindPrIfRequested(blankId)
         void sessionsApi.refreshProjections?.(blankId).catch(() => {})
         void gitCache.refresh([path])
         return
@@ -323,6 +379,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
               const reusableId = reusableBlank as SessionId
               cancelOfficialWorktree(reusableId)
               uiWs.openSession(reusableId)
+              bindPrIfRequested(reusableId)
               void gitCache.refresh([path])
               return
             }
@@ -333,6 +390,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
           const moved = await requestSetSessionDirectory(newSessionId as string, path)
           if (!moved.ok) throw new Error(moved.error)
           uiWs.openSession(newSessionId)
+          bindPrIfRequested(newSessionId)
           void sessionsApi.refreshProjections?.(newSessionId).catch(() => {})
           void gitCache.refresh([path])
           return
@@ -341,7 +399,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     }
 
     const workspace = await ctx.workspaces.create({ path })
-    ctx.uiWorkspace.startSession(workspace.workspaceId)
+    await openWorkspace(workspace.workspaceId)
   }
 
   const armDeferredWorktree = async (spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions): Promise<void> => {
@@ -796,6 +854,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
         adoptWorktree: chip.adoptWorktree,
         isSwitchSessionDirectory: chip.isSwitchSessionDirectory,
         armDeferredWorktree: chip.armDeferredWorktree,
+        forgeTrackAvailable: () => forgePanelTrack !== undefined,
         describeWorktreeRemoval: chip.describeWorktreeRemoval,
         removeWorktree: chip.removeWorktree,
         pruneWorktrees: chip.pruneWorktrees,
@@ -871,6 +930,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       unmountLegacySessionMenu()
       const icons = [
         [CONTEXT_MENU_ICON_KEYS.create, IconBranchOutlineRegular],
+        [CONTEXT_MENU_ICON_KEYS.checkoutPr, PrCheckoutGlyph],
         [CONTEXT_MENU_ICON_KEYS.manage, IconFolderCloseRegular],
         [CONTEXT_MENU_ICON_KEYS.remove, IconTrashOutlineRegular],
       ] as const
@@ -897,6 +957,27 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       }, 'git-worktree: native context menus')
     })
   }
+
+  // Optional Forge UI slot integrations (`client-ui-forge`). When the host does
+  // not load `client-ui-forge`, `ctx.slots.inject` simply waits with zero overhead.
+  const forgeSlotDeps = () => ({
+    gitCache,
+    resolveSessionPath: resolveSessionPathFromCtx,
+  })
+  ctx.slots.inject('forge.change-request.card.actions', () => ctx.slots.register({
+    name: 'forge.change-request.card.actions',
+    id: 'git-worktree-checkout-pr',
+    order: 20,
+    locale: NS,
+    inject: forgeSlotDeps,
+  }, ForgeCardCheckoutButton))
+  ctx.slots.inject('forge.changes.toolbar', () => ctx.slots.register({
+    name: 'forge.changes.toolbar',
+    id: 'git-worktree-checkout-pr',
+    order: 20,
+    locale: NS,
+    inject: forgeSlotDeps,
+  }, ForgeDiffToolbarCheckoutButton))
 
   const form = new CardForm(groupingForm)
   const store = form.bind()

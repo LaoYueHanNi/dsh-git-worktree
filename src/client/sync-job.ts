@@ -114,6 +114,7 @@ export async function runSyncJob<T>(cwd: string, kind: SyncKind, request: (live:
   const onEvent = (event: SyncEvent): void => {
     // After a cancel the card is on its way out; late lines must not repaint it.
     if (controller.signal.aborted) return
+    if (event.type === 'stage') return
     const before = jobs.find(job => job.id === id)
     if (before === undefined) return
     // A line that does not name the remote keeps the one already known (a

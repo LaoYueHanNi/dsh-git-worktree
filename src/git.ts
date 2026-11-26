@@ -5,6 +5,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
@@ -982,6 +983,9 @@ export async function probeWorkspaceGit(exec: Exec, path: string): Promise<Works
 /** Filename inside a linked worktree's gitdir storing the base branch it was created from. */
 const WORKTREE_BASE_FILE = 'dsh-worktree-base'
 
+/** Filename inside a linked PR/MR worktree's gitdir storing the last synced PR head commit SHA. */
+const WORKTREE_PR_SHA_FILE = 'dsh-worktree-pr-sha'
+
 /** Resolve the linked worktree's private gitdir from its `.git` pointer file. */
 async function resolveWorktreeGitDir(worktreePath: string): Promise<string | undefined> {
   try {
@@ -1019,6 +1023,35 @@ export async function readWorktreeBaseBranch(worktreePath: string): Promise<stri
   if (gitDir === undefined) return undefined
   try {
     const text = (await readFile(join(gitDir, WORKTREE_BASE_FILE), 'utf8')).trim()
+    return text === '' ? undefined : text
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Best-effort persistence of the last fetched PR/MR commit SHA inside
+ * `<worktreeGitDir>/dsh-worktree-pr-sha` so later updates can distinguish a
+ * remote force-push (clean, zero local commits) from diverged local commits.
+ */
+export async function writeWorktreePrSha(worktreePath: string, sha: string): Promise<void> {
+  const trimmed = sha.trim()
+  if (trimmed === '') return
+  const gitDir = await resolveWorktreeGitDir(worktreePath)
+  if (gitDir === undefined) return
+  try {
+    await writeFile(join(gitDir, WORKTREE_PR_SHA_FILE), `${trimmed}\n`, 'utf8')
+  } catch {
+    // Metadata persistence must never fail worktree creation or update.
+  }
+}
+
+/** Read the last synced PR/MR head SHA for a linked worktree, or undefined when absent. */
+export async function readWorktreePrSha(worktreePath: string): Promise<string | undefined> {
+  const gitDir = await resolveWorktreeGitDir(worktreePath)
+  if (gitDir === undefined) return undefined
+  try {
+    const text = (await readFile(join(gitDir, WORKTREE_PR_SHA_FILE), 'utf8')).trim()
     return text === '' ? undefined : text
   } catch {
     return undefined
@@ -1090,4 +1123,282 @@ export async function appendWorktreeExclude(seams: ExcludeSeams, repoRoot: strin
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
   }
+}
+
+/**
+ * List repository remotes with their fetch URL, preserving git order and deduplicating names.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ */
+export async function listRemotes(exec: Exec, repoRoot: string): Promise<Array<{ name: string; url: string }>> {
+  const out = await gitMaybe(exec, repoRoot, ['remote', '-v'])
+  if (out === undefined) return []
+  const byName = new Map<string, string>()
+  for (const line of out.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    const match = /^(\S+)\s+(\S+)(?:\s+\((fetch|push)\))?$/.exec(trimmed)
+    if (match === null) continue
+    const name = match[1]
+    const url = match[2]
+    const kind = match[3]
+    if (name === undefined || url === undefined) continue
+    if (kind === 'fetch' || !byName.has(name)) {
+      byName.set(name, url)
+    }
+  }
+  return [...byName.entries()].map(([name, url]) => ({ name, url }))
+}
+
+/**
+ * Fetch an explicit remote ref (e.g. `refs/pull/42/head`) into a unique temporary ref
+ * and return its commit SHA without touching `FETCH_HEAD`, any local branch, or the working tree.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param remote - target remote name.
+ * @param refSpec - remote ref to fetch.
+ * @param live - optional streaming progress and cancellation.
+ */
+export async function fetchRefToTip(
+  exec: Exec,
+  repoRoot: string,
+  remote: string,
+  refSpec: string,
+  live?: LiveRun,
+): Promise<string> {
+  const tmpRef = `refs/dsh-pr-tmp/${randomUUID()}`
+  const fetchSpec = `+${refSpec}:${tmpRef}`
+  try {
+    if (live === undefined) {
+      const res = await exec('git', ['fetch', '--no-tags', '--', remote, fetchSpec], { cwd: repoRoot, nonInteractive: true })
+      if (res.code !== 0) throw new GitError(['fetch', remote, refSpec], res.code, res.stderr)
+    } else {
+      live.onRemote?.(remote)
+      const res = await exec('git', ['fetch', '--no-tags', '--progress', '--', remote, fetchSpec], {
+        cwd: repoRoot,
+        nonInteractive: true,
+        ...liveExecOptions(live),
+      })
+      if (res.cancelled) throw new CancelledError()
+      if (res.code !== 0) throw new GitError(['fetch', remote, refSpec], res.code, stripProgress(res.stderr))
+    }
+    const sha = (await git(exec, repoRoot, ['rev-parse', '--verify', tmpRef])).trim()
+    if (sha === '') throw new GitError(['rev-parse', tmpRef], 1, 'fetched ref is empty')
+    return sha
+  } finally {
+    await exec('git', ['update-ref', '-d', tmpRef], { cwd: repoRoot, nonInteractive: true }).catch(() => undefined)
+  }
+}
+
+/**
+ * Create (or reuse) a linked worktree for `branch` pointing at `commitSha`.
+ * - If a live worktree already holds `branch`, returns it unchanged (`created: false`).
+ * - If `branch` does not exist yet, creates it at `commitSha` via `git worktree add <path> -b <branch> <sha>`.
+ * - If `branch` already exists locally without a worktree: fast-forwards it when it is an ancestor of
+ *   `commitSha`, or preserves the local branch untouched (`preservedLocalBranch: true`) when it has local-only commits.
+ */
+export async function addWorktreeAtCommit(
+  exec: Exec,
+  repoRoot: string,
+  branch: string,
+  commitSha: string,
+  targetPath: string,
+  dirExists: DirExists = fsDirExists,
+): Promise<{ path: string; created: boolean; preservedLocalBranch?: boolean }> {
+  let worktrees = await listWorktrees(exec, repoRoot)
+  const mainHolder = worktrees.find(w => w.main && w.branch === branch)
+  if (mainHolder !== undefined) {
+    throw new GitError(
+      ['worktree', 'add', targetPath, branch],
+      1,
+      `branch "${branch}" is already checked out in the main worktree`,
+    )
+  }
+  const existing = worktrees.find(w => !w.main && w.branch === branch)
+  if (existing !== undefined && dirExists(existing.path)) {
+    return { path: existing.path, created: false }
+  }
+  if (existing !== undefined) {
+    await git(exec, repoRoot, ['worktree', 'prune'])
+    worktrees = await listWorktrees(exec, repoRoot)
+    const afterPrune = worktrees.find(w => !w.main && w.branch === branch)
+    if (afterPrune !== undefined && dirExists(afterPrune.path)) {
+      return { path: afterPrune.path, created: false }
+    }
+  }
+  const hasBranch = (await exec('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: repoRoot })).code === 0
+  if (!hasBranch) {
+    await git(exec, repoRoot, ['worktree', 'add', targetPath, '-b', branch, commitSha])
+    return { path: targetPath, created: true }
+  }
+  const canFastForward = (await exec('git', ['merge-base', '--is-ancestor', `refs/heads/${branch}`, commitSha], { cwd: repoRoot })).code === 0
+  if (canFastForward) {
+    await git(exec, repoRoot, ['branch', '-f', branch, commitSha])
+    await git(exec, repoRoot, ['worktree', 'add', targetPath, branch])
+    return { path: targetPath, created: true }
+  }
+  await git(exec, repoRoot, ['worktree', 'add', targetPath, branch])
+  return { path: targetPath, created: true, preservedLocalBranch: true }
+}
+
+/**
+ * Return whether a worktree contains tracked or staged uncommitted changes
+ * (`--untracked-files=no`), ignoring pure untracked files such as copied
+ * `.worktreeinclude` config files (e.g. `.env.local`).
+ */
+export async function hasTrackedChanges(exec: Exec, worktreePath: string): Promise<boolean> {
+  const status = await git(exec, worktreePath, ['status', '--porcelain', '--untracked-files=no'])
+  return status.split('\n').some(line => line.trim() !== '')
+}
+
+function normalizeGitPathForCollision(filePath: string): string {
+  const unified = filePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? unified.toLowerCase()
+    : unified
+}
+
+function addPathAncestors(target: Set<string>, normalizedPath: string): void {
+  let slash = normalizedPath.lastIndexOf('/')
+  while (slash > 0) {
+    target.add(normalizedPath.slice(0, slash))
+    slash = normalizedPath.lastIndexOf('/', slash - 1)
+  }
+}
+
+function checkFileCollision(
+  file: string,
+  targetFiles: ReadonlySet<string>,
+  targetDirs: ReadonlySet<string>,
+  commitSha: string,
+): void {
+  const norm = normalizeGitPathForCollision(file)
+  if (targetFiles.has(norm) || targetDirs.has(norm)) {
+    throw new GitError(
+      ['update', commitSha],
+      1,
+      `untracked working tree file "${file}" would be overwritten by update; move or remove it before updating`,
+    )
+  }
+  let slash = norm.lastIndexOf('/')
+  while (slash > 0) {
+    if (targetFiles.has(norm.slice(0, slash))) {
+      throw new GitError(
+        ['update', commitSha],
+        1,
+        `untracked working tree file "${file}" would be overwritten by update; move or remove it before updating`,
+      )
+    }
+    slash = norm.lastIndexOf('/', slash - 1)
+  }
+}
+
+/**
+ * Guard PR worktree updates (`merge --ff-only` and `reset --hard`) against silently
+ * overwriting untracked or `.gitignore`-ignored local files (such as `.worktreeinclude`
+ * copies like `.env.local`) when `commitSha` introduces a tracked file at the same path
+ * or a colliding file/directory prefix.
+ */
+async function assertNoUntrackedOrIgnoredOverwriteCollision(
+  exec: Exec,
+  worktreePath: string,
+  commitSha: string,
+): Promise<void> {
+  const untrackedRaw = await git(exec, worktreePath, ['ls-files', '--others', '--exclude-standard', '-z'])
+  const untracked = untrackedRaw.split('\0').filter(Boolean)
+  const ignoredRaw = await git(exec, worktreePath, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'])
+  const ignoredEntries = ignoredRaw.split('\0').filter(Boolean)
+  if (untracked.length === 0 && ignoredEntries.length === 0) return
+
+  const treeRaw = await git(exec, worktreePath, ['ls-tree', '-r', '--name-only', '-z', commitSha])
+  const targetFiles = new Set<string>()
+  const targetDirs = new Set<string>()
+  for (const entry of treeRaw.split('\0')) {
+    if (entry === '') continue
+    const norm = normalizeGitPathForCollision(entry)
+    targetFiles.add(norm)
+    addPathAncestors(targetDirs, norm)
+  }
+
+  for (const file of untracked) {
+    checkFileCollision(file, targetFiles, targetDirs, commitSha)
+  }
+
+  for (const entry of ignoredEntries) {
+    if (!entry.endsWith('/')) {
+      checkFileCollision(entry, targetFiles, targetDirs, commitSha)
+      continue
+    }
+    const dirPath = entry.slice(0, -1)
+    const dirNorm = normalizeGitPathForCollision(dirPath)
+    if (targetFiles.has(dirNorm)) {
+      throw new GitError(
+        ['update', commitSha],
+        1,
+        `untracked working tree file "${dirPath}" would be overwritten by update; move or remove it before updating`,
+      )
+    }
+    let slash = dirNorm.lastIndexOf('/')
+    while (slash > 0) {
+      if (targetFiles.has(dirNorm.slice(0, slash))) {
+        throw new GitError(
+          ['update', commitSha],
+          1,
+          `untracked working tree file "${dirPath}" would be overwritten by update; move or remove it before updating`,
+        )
+      }
+      slash = dirNorm.lastIndexOf('/', slash - 1)
+    }
+    if (targetDirs.has(dirNorm)) {
+      // Only descend into ignored directories that overlap with paths in commitSha
+      // (avoids scanning unrelated heavy directories like node_modules/).
+      const nestedRaw = await git(exec, worktreePath, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', dirPath])
+      for (const nestedFile of nestedRaw.split('\0').filter(Boolean)) {
+        checkFileCollision(nestedFile, targetFiles, targetDirs, commitSha)
+      }
+    }
+  }
+}
+
+/**
+ * Sync an existing clean linked PR/MR worktree to `commitSha`:
+ * - refuses immediately if tracked/staged uncommitted changes exist (pure untracked or ignored
+ *   files such as `.worktreeinclude` copies do not block syncing unless they collide with `commitSha`);
+ * - returns `up-to-date` when HEAD already equals `commitSha`;
+ * - fast-forwards when HEAD is an ancestor of `commitSha`;
+ * - when histories diverged (e.g. PR author rebased & force-pushed): safely resets via
+ *   `git reset --hard <sha>` if `HEAD === lastKnownPrSha` (proving zero local-only commits),
+ *   or if `forceReset: true` (after explicit user confirmation);
+ * - refuses to overwrite colliding untracked or `.gitignore`-ignored local files on all update paths;
+ * - otherwise refuses with a clear GitError so local commits are never silently discarded.
+ */
+export async function updateCleanWorktreeToCommit(
+  exec: Exec,
+  worktreePath: string,
+  commitSha: string,
+  options?: { readonly forceReset?: boolean; readonly lastKnownPrSha?: string | undefined },
+): Promise<{ updated: boolean; mode: 'up-to-date' | 'ff' | 'force-updated' | 'reset' }> {
+  if (await hasTrackedChanges(exec, worktreePath)) {
+    throw new GitError(['merge', '--ff-only'], 1, 'worktree has uncommitted changes; commit or stash them before updating')
+  }
+  const before = (await git(exec, worktreePath, ['rev-parse', 'HEAD'])).trim()
+  if (before === commitSha) return { updated: false, mode: 'up-to-date' }
+  if (options?.forceReset === true) {
+    await assertNoUntrackedOrIgnoredOverwriteCollision(exec, worktreePath, commitSha)
+    await git(exec, worktreePath, ['reset', '--hard', commitSha])
+    return { updated: true, mode: 'reset' }
+  }
+  const canFastForward = (await exec('git', ['merge-base', '--is-ancestor', before, commitSha], { cwd: worktreePath })).code === 0
+  if (canFastForward) {
+    await assertNoUntrackedOrIgnoredOverwriteCollision(exec, worktreePath, commitSha)
+    await git(exec, worktreePath, ['merge', '--ff-only', commitSha])
+    const after = (await git(exec, worktreePath, ['rev-parse', 'HEAD'])).trim()
+    return { updated: before !== after, mode: before !== after ? 'ff' : 'up-to-date' }
+  }
+  if (options?.lastKnownPrSha !== undefined && before === options.lastKnownPrSha) {
+    await assertNoUntrackedOrIgnoredOverwriteCollision(exec, worktreePath, commitSha)
+    await git(exec, worktreePath, ['reset', '--hard', commitSha])
+    return { updated: true, mode: 'force-updated' }
+  }
+  throw new GitError(['merge', '--ff-only'], 1, 'PR worktree has diverged local commits')
 }
