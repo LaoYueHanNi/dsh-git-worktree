@@ -6,6 +6,8 @@
  * ui-session merges onto session-scoped slots.
  */
 
+import type { DeferredWorktreeSpec } from '../wire.ts'
+
 /** Outcome of one lazy auto-prune run, summarized for the caller's toast. */
 export interface PruneReport {
   /** Directories fully removed (git half + archives + unregistration). */
@@ -27,15 +29,30 @@ export interface PruneTarget {
   readonly archiveSessionIds?: readonly string[]
 }
 
+/** Context passed when adopting a created/reused worktree directory. */
+export interface AdoptWorktreeOptions {
+  /**
+   * When present and shared-workspace mode (`switchSessionDirectory`) is enabled,
+   * switch this blank session's working directory in place instead of spawning
+   * another blank session.
+   */
+  readonly reuseBlankSessionId?: string | undefined
+  /**
+   * Main repository root owning the worktree, used to locate or register the
+   * parent repository Workspace in shared-workspace mode.
+   */
+  readonly repoRoot?: string | undefined
+}
+
 export interface BranchChipInjected {
   /**
-   * Register a created/reused worktree directory as a real Workspace and hop
-   * to its blank session (draft carried by the framework's connect flow).
-   * The workspace title defaults to the folder basename, which the host side
-   * already names `<repoName>-<branch>` — belonging needs no extra rename.
+   * Open a created/reused worktree directory: registers it as a standalone
+   * Workspace by default, or switches a blank session's working directory under
+   * the parent repository Workspace when `switchSessionDirectory` is enabled.
    * @param path - absolute worktree directory.
+   * @param options - optional blank-session reuse and parent repo hint.
    */
-  adoptWorktree: (path: string) => Promise<void>
+  adoptWorktree: (path: string, options?: AdoptWorktreeOptions) => Promise<void>
   /**
    * The DSH-side facts of one worktree removal, read from the live snapshots:
    * whether any session in the directory's workspace is RUNNING (the removal
@@ -67,4 +84,16 @@ export interface BranchChipInjected {
    * Read live from the settings snapshot; absent or unready means off.
    */
   openGraphByDefault: () => boolean
+  /**
+   * Whether shared-workspace directory switching (`switchSessionDirectory`) is
+   * currently enabled. When true, new worktree creations are armed lazily until
+   * the session's first user message arrives.
+   */
+  isSwitchSessionDirectory?: () => boolean
+  /**
+   * Arm a deferred worktree creation on a blank session (reusing the current
+   * blank session or spawning a fresh blank session under the parent repo
+   * Workspace). Nothing is written to disk until the first message is sent.
+   */
+  armDeferredWorktree?: (spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>
 }

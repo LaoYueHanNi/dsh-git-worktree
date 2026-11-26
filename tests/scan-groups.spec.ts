@@ -26,4 +26,19 @@ describe('scan-groups repository scoping', () => {
     const scoped = filterScanEntriesByRepo(entries, { repoRoot: '/code/app', repoName: 'app' })
     expect(scoped).toEqual([entries[0]])
   })
+
+  it('orders groups as project -> official -> legacy -> orphans', () => {
+    const entries: WorktreeScanEntry[] = [
+      { path: '/legacy/orphan', repoName: null, branch: null, source: 'legacy' },
+      { path: '/legacy/app-old', repoRoot: '/code/app', repoName: 'app', branch: 'old', source: 'legacy' },
+      { path: '/code/app/.agents/worktrees/dsh-1', repoRoot: '/code/app', repoName: 'app', branch: 'dsh-1', source: 'official' },
+      { path: '/code/app/.dsh/gitworktree/feat-1', repoRoot: '/code/app', repoName: 'app', branch: 'feat-1', source: 'project' },
+    ]
+    expect(groupScanEntries(entries).map(group => group.source)).toEqual([
+      'project',
+      'official',
+      'legacy',
+      'orphans',
+    ])
+  })
 })

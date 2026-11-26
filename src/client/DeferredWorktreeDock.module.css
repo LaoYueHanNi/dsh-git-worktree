@@ -1,0 +1,218 @@
+/* Deferred worktree card docked above the composer (`conversation.input.dock`),
+   aligned with the native composer dock width and panel elevation tokens. */
+.dock {
+  box-sizing: border-box;
+  width: calc(
+    100% -
+    var(--dsh-composer-side-clearance, 0px) -
+    var(--dsh-composer-side-clearance, 0px) -
+    var(--dsh-composer-dock-inset, 0px) -
+    var(--dsh-composer-dock-inset, 0px) -
+    var(--dsh-composer-dock-inset, 0px) -
+    var(--dsh-composer-dock-inset, 0px)
+  );
+  margin: 0 auto;
+}
+
+.card {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: calc(var(--dsh-composer-card-max-width, 760px) - 4 * var(--dsh-composer-dock-inset, 0px));
+  margin: 0 auto;
+  padding: 10px 10px 8px 12px;
+  border: 0;
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md, 12px);
+  box-shadow: var(--dsw-elevation-panel, var(--dsw-shadow-lv2));
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.card::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2));
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  content: '';
+  pointer-events: none;
+}
+
+.armedCard {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 12px;
+}
+
+.armedInfo {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.glyph {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.glyphFailed {
+  flex: none;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.title {
+  flex: none;
+  font-weight: 500;
+}
+
+.branch,
+.code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 22px;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.step[data-state='running'] {
+  color: var(--dsw-alias-label-primary);
+}
+
+.step[data-state='failed'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.stepMark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.done {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.failed {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.runningDot {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 25%, transparent);
+  border-top-color: var(--dsw-alias-state-business-primary);
+  border-radius: 50%;
+  animation: deferredSpin 0.85s linear infinite;
+}
+
+.waitingRing {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--dsw-alias-label-dimmed, var(--dsw-alias-label-tertiary));
+  border-radius: 50%;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 2px 0 0 22px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.details dt {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.details dd {
+  margin: 0;
+}
+
+.message {
+  max-height: 120px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.note {
+  margin: 0 0 0 22px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+
+@keyframes deferredSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runningDot {
+    animation: none;
+    border-color: var(--dsw-alias-state-business-primary);
+  }
+}

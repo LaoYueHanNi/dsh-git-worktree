@@ -131,6 +131,22 @@ export const ROUTE_WORKTREES_ALL = `${ROUTE_PREFIX}/worktrees-all`
  * the storage root (an orphaned leftover whose .git is already gone). */
 export const ROUTE_PURGE = `${ROUTE_PREFIX}/purge`
 
+/** POST ROUTE_PREFIX/session-cwd — move an active blank session's working
+ * directory to a worktree directory via the host `workingDirectory` service. */
+export const ROUTE_SESSION_CWD = `${ROUTE_PREFIX}/session-cwd`
+
+/** GET ROUTE_PREFIX/deferred?sessionId=<id> — read a session's deferred worktree state. */
+export const ROUTE_DEFERRED = `${ROUTE_PREFIX}/deferred`
+
+/** GET ROUTE_PREFIX/deferred/events?sessionId=<id> — SSE stream of deferred worktree updates. */
+export const ROUTE_DEFERRED_EVENTS = `${ROUTE_PREFIX}/deferred/events`
+
+/** POST ROUTE_PREFIX/deferred/arm — arm a deferred worktree creation for a blank session. */
+export const ROUTE_DEFERRED_ARM = `${ROUTE_PREFIX}/deferred/arm`
+
+/** POST ROUTE_PREFIX/deferred/action — cancel, retry, or withdraw a deferred worktree. */
+export const ROUTE_DEFERRED_ACTION = `${ROUTE_PREFIX}/deferred/action`
+
 /** One selectable branch row. */
 export interface BranchEntry {
   /** Display name: a bare local name (`main`) or `<remote>/<name>`. */
@@ -257,8 +273,12 @@ export interface CreateWorktreeBody {
    * worktree. The storage folder is named after the new branch. */
   cutout?: boolean
   /** Cutout only: explicit name for the NEW branch. Default (absent):
-   * derived `<branch>-wt`, suffixing past taken names. */
+   * derived `<branch>-wt`, suffixing past taken names (or random `<stem>-<4hex>`
+   * when `random` is true). */
   name?: string
+  /** Cutout only (when `name` is omitted): generate a random `<stem>-<4hex>`
+   * branch name instead of the sequential `<branch>-wt` suffix. */
+  random?: boolean
 }
 
 /** POST worktree response body. */
@@ -422,6 +442,8 @@ export interface WorkspaceGitFacts {
   branch: string | null
   /** True when this directory IS the main worktree (holds the shared .git). */
   main: boolean
+  /** Optional base branch recorded when this linked worktree was created from another branch. */
+  baseBranch?: string
 }
 
 /** POST group request body. */
@@ -529,8 +551,10 @@ export interface WorktreeScanEntry {
   branch: string | null
   /** Where the directory lives: `project` = inside `<repo>/.dsh/gitworktree`
    * (the current layout, auto-nested under its repository by the workspace
-   * tree), `legacy` = inside the historical central storage root. */
-  source: 'legacy' | 'project'
+   * tree), `official` = inside `<repo>/.agents/worktrees` (when official
+   * worktree management is enabled), `legacy` = inside the historical central
+   * storage root. */
+  source: 'legacy' | 'project' | 'official'
 }
 
 /** POST worktrees-all response body — one entry per DIRECT child of each
@@ -564,4 +588,90 @@ export interface PurgeDirectoryResult {
   /** Always true on 200 — the directory (contents included) is gone. */
   path: string
   removed: boolean
+}
+
+/** POST session-cwd request body. */
+export interface SetSessionDirectoryBody {
+  /** Target session id whose working directory should move. */
+  sessionId: string
+  /** Existing absolute directory path (typically a created or reused worktree). */
+  path: string
+}
+
+/** POST session-cwd response body. */
+export interface SetSessionDirectoryResult {
+  /** Target session id. */
+  sessionId: string
+  /** Canonical absolute directory committed by the host workingDirectory service. */
+  path: string
+}
+
+/** Phases reported while a deferred worktree creation runs on the first user turn. */
+export type DeferredWorktreePhase = 'fetch' | 'create' | 'copy' | 'switch'
+
+/** Specification of a deferred worktree creation armed on a blank session. */
+export interface DeferredWorktreeSpec {
+  /** Main repository path (or any path inside the repository). */
+  readonly repoPath: string
+  /** Target branch or base branch (for cutout). */
+  readonly branch: string
+  /** Whether to cut a new branch out of `branch`. */
+  readonly cutout: boolean
+  /** Explicit new branch name (cutout only); absent when auto/random. */
+  readonly name?: string
+  /** Generate a random `<stem>-<4hex>` branch name when `cutout` is true and `name` is absent. */
+  readonly random?: boolean
+}
+
+/** Live state of a deferred worktree for one session. */
+export type DeferredWorktreeState =
+  | {
+      readonly kind: 'armed'
+      readonly spec: DeferredWorktreeSpec
+    }
+  | {
+      readonly kind: 'running'
+      readonly spec: DeferredWorktreeSpec
+      readonly phase: DeferredWorktreePhase
+      /** Resolved branch name once known. */
+      readonly resolvedBranch?: string
+    }
+  | {
+      readonly kind: 'failed'
+      readonly spec: DeferredWorktreeSpec
+      readonly phase: DeferredWorktreePhase
+      readonly message: string
+      readonly resolvedBranch?: string
+    }
+
+/** One-shot completion notification emitted when a deferred creation succeeds. */
+export interface DeferredWorktreeCompleted {
+  readonly path: string
+  readonly branch: string
+  readonly created: boolean
+  readonly fetchWarning?: string
+  readonly excludeWarning?: string
+  readonly copyWarning?: string
+}
+
+/** Snapshot / SSE payload pushed for a session's deferred worktree. */
+export interface DeferredWorktreeSnapshot {
+  readonly state: DeferredWorktreeState | null
+  readonly completed?: DeferredWorktreeCompleted
+}
+
+/** POST deferred/arm request body. */
+export interface ArmDeferredWorktreeBody {
+  readonly sessionId: string
+  readonly repoPath: string
+  readonly branch: string
+  readonly cutout?: boolean
+  readonly name?: string
+  readonly random?: boolean
+}
+
+/** POST deferred/action request body. */
+export interface DeferredWorktreeActionBody {
+  readonly sessionId: string
+  readonly action: 'cancel' | 'retry' | 'withdraw'
 }

@@ -43,17 +43,23 @@ export function filterScanEntriesByRepo(
  * group, where rows may come from either location). */
 export interface ScanGroup {
   readonly repoName: string | null
-  readonly source: 'legacy' | 'project' | 'orphans'
+  readonly source: 'legacy' | 'project' | 'official' | 'orphans'
   readonly entries: readonly WorktreeScanEntry[]
 }
 
-/** Group the scan for display: project groups before legacy groups (same
- * repo can appear under both), repositories alphabetical within a source,
+const SOURCE_ORDER: Record<'project' | 'official' | 'legacy', number> = {
+  project: 0,
+  official: 1,
+  legacy: 2,
+}
+
+/** Group the scan for display: project groups first, official worktree groups
+ * next, legacy groups behind them, repositories alphabetical within a source,
  * rows within a group by branch name, all numeric-aware so `feat/v2` sorts
  * past `feat/v10`. Grouping is display-order only — the removal flows
  * address rows by path. */
 export function groupScanEntries(entries: readonly WorktreeScanEntry[]): ScanGroup[] {
-  const byKey = new Map<string, { source: 'legacy' | 'project'; repoName: string; list: WorktreeScanEntry[] }>()
+  const byKey = new Map<string, { source: 'legacy' | 'project' | 'official'; repoName: string; list: WorktreeScanEntry[] }>()
   const orphans: WorktreeScanEntry[] = []
   for (const entry of entries) {
     if (entry.repoName === null) {
@@ -69,7 +75,7 @@ export function groupScanEntries(entries: readonly WorktreeScanEntry[]): ScanGro
   const groups = [...byKey.values()]
     .sort((a, b) => a.source === b.source
       ? cmp(a.repoName, b.repoName)
-      : a.source === 'project' ? -1 : 1)
+      : SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source])
     .map(({ source, repoName, list }) => ({
       repoName,
       source,

@@ -19,9 +19,9 @@ export const fetchHistory = (body: HistoryBody, signal: AbortSignal): Promise<Ca
 export const fetchAuthors = (body: AuthorsBody, signal: AbortSignal): Promise<Call<AuthorList>> => graphRead(ROUTE_AUTHORS, body, signal)
 export const fetchCommit = (repoPath: string, oid: string, signal: AbortSignal): Promise<Call<CommitDetail>> => graphRead(ROUTE_COMMIT, { repoPath, oid }, signal)
 import type {
-  CreateBranchResult, CreateWorktreeResult, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SwitchResult, UpdateResult, WorktreesAllResult,
+  ArmDeferredWorktreeBody, CreateBranchResult, CreateWorktreeResult, DeferredWorktreeActionBody, DeferredWorktreeSnapshot, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SetSessionDirectoryResult, SwitchResult, UpdateResult, WorktreesAllResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_DEFERRED, ROUTE_DEFERRED_ACTION, ROUTE_DEFERRED_ARM, ROUTE_DEFERRED_EVENTS, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_SESSION_CWD, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
 
 /** One route call outcome: the parsed body, or the error envelope text. */
 type Call<T> = (T & { ok: true }) | { ok: false; error: string }
@@ -178,8 +178,57 @@ export function requestWorktree(repoPath: string, branch: string): Promise<Call<
  * @param name - explicit name for the new branch; omitted, the host
  * derives `<branch>-wt`, suffixing past taken names.
  */
-export function requestWorktreeCutout(repoPath: string, branch: string, name?: string): Promise<Call<CreateWorktreeResult>> {
-  return post<CreateWorktreeResult>(ROUTE_WORKTREE, { repoPath, branch, cutout: true, ...(name === undefined ? {} : { name }) })
+export function requestWorktreeCutout(
+  repoPath: string,
+  branch: string,
+  name?: string,
+  options?: { readonly random?: boolean },
+): Promise<Call<CreateWorktreeResult>> {
+  const trimmed = name?.trim()
+  return post<CreateWorktreeResult>(ROUTE_WORKTREE, {
+    repoPath,
+    branch,
+    cutout: true,
+    ...(trimmed !== undefined && trimmed !== '' ? { name: trimmed } : {}),
+    ...(options?.random === true ? { random: true } : {}),
+  })
+}
+
+/**
+ * Move a session's working directory to `path` via the host `workingDirectory` service.
+ * @param sessionId - target session id.
+ * @param path - absolute target directory (existing worktree).
+ */
+export function requestSetSessionDirectory(sessionId: string, path: string): Promise<Call<SetSessionDirectoryResult>> {
+  return post<SetSessionDirectoryResult>(ROUTE_SESSION_CWD, { sessionId, path })
+}
+
+/** Build the SSE stream URL for one session's deferred worktree state. */
+export function deferredWorktreeEventsUrl(sessionId: string): string {
+  return `${ROUTE_DEFERRED_EVENTS}?sessionId=${encodeURIComponent(sessionId)}`
+}
+
+/** Read one session's current deferred worktree snapshot. */
+export async function fetchDeferredWorktree(sessionId: string): Promise<Call<DeferredWorktreeSnapshot>> {
+  try {
+    const response = await fetch(`${ROUTE_DEFERRED}?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' })
+    return await readEnvelope<DeferredWorktreeSnapshot>(response)
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/** Arm a deferred worktree creation for a blank session. */
+export function requestArmDeferredWorktree(body: ArmDeferredWorktreeBody): Promise<Call<DeferredWorktreeSnapshot>> {
+  return post<DeferredWorktreeSnapshot>(ROUTE_DEFERRED_ARM, body)
+}
+
+/** Cancel, retry, or withdraw a deferred worktree on a session. */
+export function requestDeferredWorktreeAction(
+  sessionId: string,
+  action: DeferredWorktreeActionBody['action'],
+): Promise<Call<DeferredWorktreeSnapshot>> {
+  return post<DeferredWorktreeSnapshot>(ROUTE_DEFERRED_ACTION, { sessionId, action })
 }
 
 /**

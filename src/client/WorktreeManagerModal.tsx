@@ -48,8 +48,20 @@ export interface WorktreeManagerFace {
   readonly purgeDirectory: (path: string) => Promise<void>
   readonly archiveSession: (sessionId: string) => Promise<unknown>
   readonly deleteWorkspace: (workspaceId: string) => Promise<unknown>
-  /** Register the directory as a workspace and open a session in it. */
-  readonly openWorktree?: (path: string) => Promise<void>
+  /**
+   * Optional dual-mode ownership resolver (standalone workspace + shared
+   * session-directory mode). When provided, running checks, activity timestamps,
+   * archive sets, and workspace deletion all ride this unified resolver.
+   */
+  readonly describeWorktreeOwnership?: (path: string) => {
+    readonly running: boolean
+    readonly workspaceId?: string | undefined
+    readonly archiveIds: readonly string[]
+    readonly activity: number
+    readonly mode?: 'standalone' | 'session' | 'none' | undefined
+  }
+  /** Register the directory as a workspace (or switch session cwd in shared mode) and open a session in it. */
+  readonly openWorktree?: (path: string, repoRoot?: string) => Promise<void>
   /** Optional notification after a worktree or orphan folder is removed. */
   readonly onWorktreeRemoved?: (path: string) => void
 }
@@ -124,11 +136,17 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
         if (scanGenRef.current !== gen) return
         setScan({ status: 'ready', entries, truncated: truncated === true })
         const valid = entries.filter(entry => entry.repoName !== null)
-        const workspaces = face.workspaces()
         const running = new Set<string>()
-        for (const workspace of workspaces) {
-          for (const sessionId of workspace.sessionIds) {
-            if (face.sessionById(sessionId)?.running === true) running.add(pathKey(workspace.path))
+        if (face.describeWorktreeOwnership !== undefined) {
+          for (const entry of entries) {
+            if (face.describeWorktreeOwnership(entry.path).running) running.add(pathKey(entry.path))
+          }
+        } else {
+          const workspaces = face.workspaces()
+          for (const workspace of workspaces) {
+            for (const sessionId of workspace.sessionIds) {
+              if (face.sessionById(sessionId)?.running === true) running.add(pathKey(workspace.path))
+            }
           }
         }
         setRunningPaths(running)
@@ -170,10 +188,10 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
     setRemoveError(null)
   }
 
-  const handleOpenWorktree = (path: string): void => {
+  const handleOpenWorktree = (path: string, repoRoot?: string): void => {
     if (face.openWorktree === undefined || openingPath !== null) return
     setOpeningPath(path)
-    void face.openWorktree(path).then(
+    void face.openWorktree(path, repoRoot).then(
       () => {
         setOpeningPath(null)
         onClose()
@@ -197,17 +215,22 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
     const target = removeTarget
     setRemoving(true)
     setRemoveError(null)
+    const ownership = face.describeWorktreeOwnership?.(target.path)
     const workspace = workspaceAt(target.path)
+    const targetWorkspaceId = ownership !== undefined ? ownership.workspaceId : workspace?.workspaceId
+    const targetArchiveIds = ownership !== undefined
+      ? [...ownership.archiveIds]
+      : (workspace === undefined ? [] : archiveIdsFor(face, workspace.sessionIds))
     const work = target.kind === 'orphan'
       ? (async () => {
           await face.purgeDirectory(target.path)
-          if (workspace !== undefined) {
-            for (const sessionId of archiveIdsFor(face, workspace.sessionIds)) {
-              await face.archiveSession(sessionId).catch((reason: unknown) => {
-                console.warn('session archive rejected during folder purge:', reason)
-              })
-            }
-            await face.deleteWorkspace(workspace.workspaceId)
+          for (const sessionId of targetArchiveIds) {
+            await face.archiveSession(sessionId).catch((reason: unknown) => {
+              console.warn('session archive rejected during folder purge:', reason)
+            })
+          }
+          if (targetWorkspaceId !== undefined) {
+            await face.deleteWorkspace(targetWorkspaceId)
           }
         })()
       : removeWorktreeFully(
@@ -220,8 +243,8 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
           {
             path: target.path,
             force: (inspects[target.path]?.dirty ?? 0) > 0,
-            ...(workspace === undefined ? {} : { workspaceId: workspace.workspaceId }),
-            archiveSessionIds: workspace === undefined ? [] : archiveIdsFor(face, workspace.sessionIds),
+            ...(targetWorkspaceId === undefined ? {} : { workspaceId: targetWorkspaceId }),
+            archiveSessionIds: targetArchiveIds,
           },
         )
     void work.then(
@@ -240,6 +263,9 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
   }
 
   const activityOf = (path: string): number => {
+    if (face.describeWorktreeOwnership !== undefined) {
+      return face.describeWorktreeOwnership(path).activity
+    }
     const workspace = workspaceAt(path)
     if (workspace === undefined) return 0
     return freshestUpdatedAt(workspace.sessionIds.map(id => face.sessionById(id)))
@@ -342,7 +368,13 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
                     <span className={css.groupName}>{group.repoName ?? t('manager.orphans')}</span>
                     {group.repoName !== null && (
                       <Tag tone="neutral">
-                        {t(group.source === 'legacy' ? 'manager.sourceLegacy' : 'manager.sourceProject')}
+                        {t(
+                          group.source === 'legacy'
+                            ? 'manager.sourceLegacy'
+                            : group.source === 'official'
+                              ? 'manager.sourceOfficial'
+                              : 'manager.sourceProject',
+                        )}
                       </Tag>
                     )}
                     {group.repoName !== null && (
@@ -351,7 +383,11 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
                   </div>
                   {group.entries.map((entry) => {
                     const unknown = entry.repoName === null
-                    const activity = unknown ? 0 : activityOf(entry.path)
+                    const ownership = unknown ? undefined : face.describeWorktreeOwnership?.(entry.path)
+                    const activity = unknown ? 0 : (ownership !== undefined ? ownership.activity : activityOf(entry.path))
+                    const bindingMode = unknown
+                      ? 'none'
+                      : (ownership?.mode ?? (workspaceAt(entry.path) !== undefined ? 'standalone' : 'none'))
                     const running = !unknown && runningPaths.has(pathKey(entry.path))
                     const dirty = inspects[entry.path]?.dirty ?? 0
                     return (
@@ -359,6 +395,12 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
                         <div className={css.rowMain}>
                           <div className={css.rowHead}>
                             <span className={css.rowBranch}>{entry.branch ?? '—'}</span>
+                            {bindingMode === 'standalone' && (
+                              <Tag tone="neutral">{t('manager.modeStandalone')}</Tag>
+                            )}
+                            {bindingMode === 'session' && (
+                              <Tag tone="neutral">{t('manager.modeSession')}</Tag>
+                            )}
                             {!unknown && dirty > 0 && (
                               <span className={css.rowDirty} role="status">
                                 {t(dirty === 1 ? 'manager.dirty.one' : 'manager.dirty.other', { n: dirty })}
@@ -380,7 +422,7 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
                               disabled={openingPath !== null}
                               title={t('manager.openSession')}
                               aria-label={t('manager.openSession')}
-                              onClick={() => { handleOpenWorktree(entry.path) }}
+                              onClick={() => { handleOpenWorktree(entry.path, entry.repoRoot) }}
                             >
                               <IconRightUpOutlineRegular size={14} />
                             </button>
@@ -468,9 +510,12 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
               <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: inspects[removeTarget.path]?.ahead ?? 0 })}</div>
             )}
             {removeTarget !== null && (() => {
-              const workspace = workspaceAt(removeTarget.path)
-              if (workspace === undefined) return null
-              const ids = archiveIdsFor(face, workspace.sessionIds)
+              const ids = face.describeWorktreeOwnership !== undefined
+                ? face.describeWorktreeOwnership(removeTarget.path).archiveIds
+                : (() => {
+                    const workspace = workspaceAt(removeTarget.path)
+                    return workspace === undefined ? [] : archiveIdsFor(face, workspace.sessionIds)
+                  })()
               if (ids.length === 0) return null
               return <div className={css.removeFact}>{t(ids.length === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: ids.length })}</div>
             })()}

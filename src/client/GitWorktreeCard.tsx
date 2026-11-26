@@ -128,6 +128,51 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
           />
         </span>
       </div>
+      <div className={`${css.field} ${css.toggleRow}`}>
+        <span className={css.toggleText}>
+          <span className={css.toggleLabel}>{t('cardHideOfficialWorktreeLabel')}</span>
+          <span className={css.toggleHint}>{t('cardHideOfficialWorktreeHint')}</span>
+          {state.switchFailed === 'hideOfficialWorktreeEntry' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
+        </span>
+        <span className={css.toggleControl}>
+          <Switch
+            label={t('cardHideOfficialWorktreeLabel')}
+            disabled={lockInput}
+            checked={state.hideOfficialWorktreeEntry}
+            onChange={props.setHideOfficialWorktreeEntry}
+          />
+        </span>
+      </div>
+      <div className={`${css.field} ${css.toggleRow}`}>
+        <span className={css.toggleText}>
+          <span className={css.toggleLabel}>{t('cardSwitchSessionDirLabel')}</span>
+          <span className={css.toggleHint}>{t('cardSwitchSessionDirHint')}</span>
+          {state.switchFailed === 'switchSessionDirectory' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
+        </span>
+        <span className={css.toggleControl}>
+          <Switch
+            label={t('cardSwitchSessionDirLabel')}
+            disabled={lockInput}
+            checked={state.switchSessionDirectory}
+            onChange={props.setSwitchSessionDirectory}
+          />
+        </span>
+      </div>
+      <div className={`${css.field} ${css.toggleRow}`}>
+        <span className={css.toggleText}>
+          <span className={css.toggleLabel}>{t('cardManageOfficialWorktreesLabel')}</span>
+          <span className={css.toggleHint}>{t('cardManageOfficialWorktreesHint')}</span>
+          {state.switchFailed === 'manageOfficialWorktrees' && <span className={css.switchBad} role="alert">{t('cardSwitchFailed')}</span>}
+        </span>
+        <span className={css.toggleControl}>
+          <Switch
+            label={t('cardManageOfficialWorktreesLabel')}
+            disabled={lockInput}
+            checked={state.manageOfficialWorktrees}
+            onChange={props.setManageOfficialWorktrees}
+          />
+        </span>
+      </div>
       <div className={`${css.field} ${css.manageRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardManageWorktrees')}</span>

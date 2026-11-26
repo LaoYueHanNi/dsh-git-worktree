@@ -11,59 +11,86 @@ import { useSyncExternalStore } from 'react'
 import { IconBranchOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceGitFacts } from '../wire.ts'
-import { isLinkedWorktreeFacts, type WorkspaceGitCache } from './workspace-git-cache.ts'
+import { isLinkedWorktreeFacts, type SnapshotObservable, type WorkspaceGitCache } from './workspace-git-cache.ts'
 import css from './SidebarWorktreeBadge.module.css'
 
 export interface SidebarWorktreeBadgeInjected {
   readonly gitCache: WorkspaceGitCache
   readonly resolveSessionPath: (sessionId: string) => string | undefined
+  /**
+   * Optional reactive sessions observable so session-level decorations
+   * immediately re-evaluate when `workingDirectory` or official `forgeWorktree`
+   * projections arrive after the first turn.
+   */
+  readonly sessionsObservable?: SnapshotObservable<unknown> | undefined
+  /**
+   * Optional scope filter returning true only when session-level worktree
+   * decoration applies (e.g. shared-workspace sessions whose directory moved
+   * into a linked worktree, excluding sessions under standalone worktree
+   * Workspaces and sessions already decorated by official `forgeWorktree`).
+   */
+  readonly shouldDecorateSession?: (sessionId: string, effectivePath: string) => boolean
 }
 
 export type SidebarWorktreeBadgeProps = SidebarWorktreeBadgeInjected & PropsLocale<'git-worktree'> & {
   readonly sessionId: string
 }
 
+const NOOP_SUBSCRIBE = () => () => {}
+const NOOP_SNAPSHOT = () => undefined
+
 function useLinkedWorktreeFacts(
   sessionId: string,
   gitCache: WorkspaceGitCache,
   resolvePath: (id: string) => string | undefined,
+  sessionsObservable?: SnapshotObservable<unknown>,
+  shouldDecorateSession?: (sessionId: string, effectivePath: string) => boolean,
 ): WorkspaceGitFacts | null {
   const snapshot = useSyncExternalStore(gitCache.subscribe, gitCache.getSnapshot, gitCache.getSnapshot)
+  const sessionsSnapshot = useSyncExternalStore(
+    sessionsObservable?.subscribe ?? NOOP_SUBSCRIBE,
+    sessionsObservable?.getSnapshot ?? NOOP_SNAPSHOT,
+    sessionsObservable?.getSnapshot ?? NOOP_SNAPSHOT,
+  )
+  void snapshot
+  void sessionsSnapshot
   const cwd = resolvePath(sessionId)
   if (cwd === undefined) return null
-  // Read through `gitCache.get` after subscribing to `snapshot` so path normalization stays in one place.
-  void snapshot
+  if (shouldDecorateSession !== undefined && !shouldDecorateSession(sessionId, cwd)) return null
   const facts = gitCache.get(cwd)
   return isLinkedWorktreeFacts(facts) ? facts : null
 }
 
 /** Subtle non-interactive branch marker shown in `sidebar.session.row.trailing` for worktree sessions. */
-export function SidebarWorktreeTrailing({ sessionId, gitCache, resolveSessionPath, t }: SidebarWorktreeBadgeProps) {
-  const facts = useLinkedWorktreeFacts(sessionId, gitCache, resolveSessionPath)
+export function SidebarWorktreeTrailing({ sessionId, gitCache, resolveSessionPath, sessionsObservable, shouldDecorateSession, t }: SidebarWorktreeBadgeProps) {
+  const facts = useLinkedWorktreeFacts(sessionId, gitCache, resolveSessionPath, sessionsObservable, shouldDecorateSession)
   if (facts === null) return null
   const label = facts.branch !== null
     ? t('sidebar.worktreeBadgeWithBranch', { repo: facts.repoName, branch: facts.branch })
     : t('sidebar.worktreeBadge', { repo: facts.repoName })
   return (
     <span className={css.trailingBadge} role="img" aria-label={label} title={label}>
-      <IconBranchOutlineRegular size={12} />
+      <IconBranchOutlineRegular size={13} />
     </span>
   )
 }
 
-/** Worktree repository and branch detail shown inside `sidebar.session.row.hover` (mounted only while hovered). */
-export function SidebarWorktreeHover({ sessionId, gitCache, resolveSessionPath, t }: SidebarWorktreeBadgeProps) {
-  const facts = useLinkedWorktreeFacts(sessionId, gitCache, resolveSessionPath)
+/** Worktree branch and base-branch detail shown inside `sidebar.session.row.hover` (mounted only while hovered). */
+export function SidebarWorktreeHover({ sessionId, gitCache, resolveSessionPath, sessionsObservable, shouldDecorateSession, t }: SidebarWorktreeBadgeProps) {
+  const facts = useLinkedWorktreeFacts(sessionId, gitCache, resolveSessionPath, sessionsObservable, shouldDecorateSession)
   if (facts === null) return null
-  const label = facts.branch !== null
-    ? t('sidebar.worktreeHoverWithBranch', { repo: facts.repoName, branch: facts.branch })
-    : t('sidebar.worktreeHover', { repo: facts.repoName })
+  const note = facts.baseBranch !== undefined && facts.baseBranch !== ''
+    ? t('sidebar.worktreeHoverFrom', { base: facts.baseBranch })
+    : t('sidebar.worktreeHoverLabel')
   return (
-    <div className={css.hoverRow}>
+    <div className={css.hoverItem}>
       <span className={css.hoverIcon} aria-hidden="true">
-        <IconBranchOutlineRegular size={13} />
+        <IconBranchOutlineRegular size={12} />
       </span>
-      <span className={css.hoverLabel}>{label}</span>
+      <span className={css.hoverBody}>
+        {facts.branch !== null && <span className={css.hoverBranch}>{facts.branch}</span>}
+        <span className={css.hoverNote}>{note}</span>
+      </span>
     </div>
   )
 }
