@@ -18,6 +18,8 @@ import {
   selectSessionDirectory,
 } from '../src/client/session-directory.ts'
 import type { BranchChipInjected } from '../src/client/slots.ts'
+import { en, zh, type GitWorktreeKey } from '../src/client/locales.ts'
+import { openWorktreeTooltip } from '../src/client/WorktreeManagerModal.tsx'
 
 describe('generateRandomBranchName', () => {
   it('appends a 4-hex suffix to normal and slash branches', () => {
@@ -526,6 +528,47 @@ describe('client apply: official entry override & shared-workspace mode', () => 
     expect(h.archiveCalls).toEqual(['s-wt'])
     expect(h.deletedWorkspaces).toEqual([])
   })
+
+  it('decorates both standalone-workspace and session-switched worktree sessions while yielding to official forgeWorktree', () => {
+    const h = makeClientCtx()
+    h.workspaceItems.push(
+      { workspaceId: 'ws-main', path: '/repo', sessionIds: ['s-shared-wt', 's-official'] },
+      { workspaceId: 'ws-standalone', path: '/repo/.dsh/gitworktree/feat-a', sessionIds: ['s-standalone'] },
+    )
+    h.sessionSummaries['s-shared-wt'] = {
+      cwd: '/repo',
+      running: false,
+      blank: false,
+      updatedAt: 10,
+      projectionValues: { workingDirectory: '/repo/.dsh/gitworktree/feat-b' },
+    }
+    h.sessionSummaries['s-standalone'] = {
+      cwd: '/repo/.dsh/gitworktree/feat-a',
+      running: false,
+      blank: false,
+      updatedAt: 20,
+    }
+    h.sessionSummaries['s-official'] = {
+      cwd: '/repo',
+      running: false,
+      blank: false,
+      updatedAt: 30,
+      projectionValues: {
+        workingDirectory: '/repo/.agents/worktrees/dsh-1',
+        forgeWorktree: { path: '/repo/.agents/worktrees/dsh-1' },
+      },
+    }
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ facts: {} }), { status: 200 }))
+    apply(h.ctx as never)
+    const trailingEntry = h.registered.find(r => r.options.name === 'sidebar.session.row.trailing')!
+    const badgeFace = (trailingEntry.options.inject as () => {
+      shouldDecorateSession: (sessionId: string, effectivePath: string) => boolean
+    })()
+
+    expect(badgeFace.shouldDecorateSession('s-standalone', '/repo/.dsh/gitworktree/feat-a')).toBe(true)
+    expect(badgeFace.shouldDecorateSession('s-shared-wt', '/repo/.dsh/gitworktree/feat-b')).toBe(true)
+    expect(badgeFace.shouldDecorateSession('s-official', '/repo/.agents/worktrees/dsh-1')).toBe(false)
+  })
 })
 
 describe('worktree base branch metadata', () => {
@@ -665,5 +708,17 @@ describe('official worktree manager toggle, binding mode badges, and Rule A adop
 
     expect(started).toEqual(['ws-old', 'ws-main'])
     expect(fetchUrls).not.toContain(ROUTE_SESSION_CWD)
+  })
+
+  it('adds a second tooltip line for official DSH worktrees when opening a session', () => {
+    const tZh = ((key: GitWorktreeKey) => zh[key]) as never
+    const tEn = ((key: GitWorktreeKey) => en[key]) as never
+
+    expect(openWorktreeTooltip('project', tZh)).toBe('在此工作树中打开会话')
+    expect(openWorktreeTooltip('legacy', tZh)).toBe('在此工作树中打开会话')
+    expect(openWorktreeTooltip('official', tZh)).toBe('在此工作树中打开会话\n复用 DSH 原生工作树目录继续对话')
+    expect(openWorktreeTooltip('official', tEn)).toBe(
+      'Open session in this worktree\nReuse the native DSH worktree directory to continue the conversation',
+    )
   })
 })

@@ -36,7 +36,7 @@ DSH 官方 `forge-bundle` 在空白会话右上角提供了默认的新建工作
    - 新增 `src/client/session-directory.ts`，按 DSH 官方优先级（live projection face → `projectionsBySession` → `byId.projectionValues.workingDirectory` → `byId.cwd` → 所属 Workspace 目录）解析会话真实目录，并计算每个工作树的接入形态（`standalone` 独立工作区 / `session` 会话目录 / `none` 无会话）。
    - 工作树总管（`WorktreeManagerModal`）在每行分支旁展示「独立工作区 / 会话目录」形态标签，并新增 `.volatile()` 开关 `manageOfficialWorktrees`（默认关闭）：开启后一并扫描 `<repo>/.agents/worktrees` 并以「DSH 官方」分组展示，支持查看、打开与手动删除，但始终排除在自动清理（`autoPruneWorktrees`）范围之外。
    - `BranchChip`、`WorkspaceGitCache` 同步源、原生右键菜单、工作树总管和自动清理统一消费真实会话目录，使两种模式与官方创建的工作树会话无缝共存。
-   - 侧边栏工作树提示严格按归属层级区分：`sidebar.session.row.trailing` 与 `sidebar.session.row.hover` 仅在「父仓库工作区 + 会话内切换工作目录」的会话上展示（且让位给官方 `forgeWorktree` 投影），hover 复用官方两行样式（分支名 + `工作树 · 基于 {base}`，基分支持久化于 `<worktreeGitDir>/dsh-worktree-base`）；独立工作树工作区下的会话不再重复挂工作树提示（注：DSH 宿主当前仅开放会话行槽位，尚未在 `WorkspaceHoverContent` 暴露工作区级 hover 槽位）。
+   - 侧边栏工作树提示与工作区图标占位：因 DSH 宿主当前仅开放会话行槽位，尚未在 `ProjectRow` / `WorkspaceHoverContent` 暴露工作区级插槽，`sidebar.session.row.trailing` 与 `sidebar.session.row.hover` 对独立工作树工作区下的会话和「父仓库工作区 + 会话内切换工作目录」的会话统一展示（仍让位给官方 `forgeWorktree` 投影），hover 复用官方两行样式（分支名 + `工作树 · 基于 {base}`，基分支持久化于 `<worktreeGitDir>/dsh-worktree-base`）。待未来宿主开放工作区行插槽后，再把独立工作区标识收敛回工作区文件夹行。
    - 删除工作树与自动清理时，按会话真实目录归属统计运行中状态、活跃时间与待归档会话；仅当存在 `workspace.path === worktreePath` 的独立 Workspace 时才删除该 Workspace，严禁误删主仓库 Workspace。
 
 ## Alternatives considered

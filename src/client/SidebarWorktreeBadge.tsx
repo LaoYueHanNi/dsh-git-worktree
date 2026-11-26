@@ -24,10 +24,9 @@ export interface SidebarWorktreeBadgeInjected {
    */
   readonly sessionsObservable?: SnapshotObservable<unknown> | undefined
   /**
-   * Optional scope filter returning true only when session-level worktree
-   * decoration applies (e.g. shared-workspace sessions whose directory moved
-   * into a linked worktree, excluding sessions under standalone worktree
-   * Workspaces and sessions already decorated by official `forgeWorktree`).
+   * Optional scope filter returning true when session-level worktree
+   * decoration applies (for example, yielding to sessions already decorated by
+   * official `forgeWorktree`).
    */
   readonly shouldDecorateSession?: (sessionId: string, effectivePath: string) => boolean
 }

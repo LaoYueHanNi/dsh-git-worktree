@@ -204,6 +204,7 @@ export type GitWorktreeKey =
   | 'manager.removeAria'
   | 'manager.refresh'
   | 'manager.openSession'
+  | 'manager.openSessionOfficialHint'
   | 'manager.copyPath'
   | 'manager.openFailed'
   | 'manager.scopeRepo'
@@ -482,6 +483,7 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.removeAria': 'Remove the worktree “{path}”',
   'manager.refresh': 'Refresh',
   'manager.openSession': 'Open session in this worktree',
+  'manager.openSessionOfficialHint': 'Reuse the native DSH worktree directory to continue the conversation',
   'manager.copyPath': 'Copy path',
   'manager.openFailed': 'Could not open worktree: {message}',
   'manager.scopeRepo': 'Current repository',
@@ -761,6 +763,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.removeAria': '删除工作树“{path}”',
   'manager.refresh': '刷新',
   'manager.openSession': '在此工作树中打开会话',
+  'manager.openSessionOfficialHint': '复用 DSH 原生工作树目录继续对话',
   'manager.copyPath': '复制路径',
   'manager.openFailed': '无法打开工作树：{message}',
   'manager.scopeRepo': '当前仓库',

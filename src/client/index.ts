@@ -57,8 +57,8 @@ import { fetchDeferredWorktree, requestArmDeferredWorktree, requestDeferredWorkt
 import { en, zh, type GitWorktreeKey } from './locales.ts'
 import { WorktreeToastHost } from './ToastHost.tsx'
 import { emitToast } from './toast-bus.ts'
-import { collectWorktreeOwnership, findReusableBlankSessionInWorktree, hasForgeManagedWorktree, isSessionSwitchedWorktree, resolveEffectiveSessionPath, selectSessionDirectory, type SessionListSnapshotLike, type SessionsDirectorySourceLike } from './session-directory.ts'
-import { createWorkspaceGitCache, isLinkedWorktreeFacts, type SnapshotObservable } from './workspace-git-cache.ts'
+import { collectWorktreeOwnership, findReusableBlankSessionInWorktree, hasForgeManagedWorktree, resolveEffectiveSessionPath, selectSessionDirectory, type SessionListSnapshotLike, type SessionsDirectorySourceLike } from './session-directory.ts'
+import { createWorkspaceGitCache, type SnapshotObservable } from './workspace-git-cache.ts'
 import { pathKey, planPrune, runAutoPrune } from './worktree-prune.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { recordPruneRun } from './prune-history.ts'
@@ -794,11 +794,10 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
 
   // Native sidebar decorations for linked worktree sessions (DSH 0.2.2-rc.5+):
   // trailing branch badge and hover card repository/branch identity.
-  // Scoped strictly to session-switched worktrees under a parent repository
-  // Workspace (standalone worktree Workspaces already carry the folder
-  // identity on the Workspace row itself, so repeating it on every child
-  // session is redundant). Also yields when official `forgeWorktree` owns the
-  // session decoration.
+  // Covers both standalone worktree Workspaces and shared-workspace sessions
+  // switched into a worktree (since the host exposes session-row slots rather
+  // than a workspace-row trailing slot), while yielding when official
+  // `forgeWorktree` already owns the session decoration.
   const sessionMenuInjected = () => ({
     gitCache,
     resolveSessionPath: resolveSessionPathFromCtx,
@@ -807,20 +806,9 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     gitCache,
     resolveSessionPath: resolveSessionPathFromCtx,
     sessionsObservable: isObservable(ctx.sessions.list) ? ctx.sessions.list : undefined,
-    shouldDecorateSession: (sessionId: string, effectivePath: string): boolean => {
+    shouldDecorateSession: (sessionId: string): boolean => {
       const sessions = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
-      if (hasForgeManagedWorktree(sessions, sessionId)) return false
-      const workspaces = ctx.workspaces.list.getSnapshot().items.map(item => ({
-        workspaceId: item.workspaceId as string,
-        path: item.path,
-        sessionIds: item.sessionIds as readonly string[],
-      }))
-      return isSessionSwitchedWorktree(
-        sessionId,
-        effectivePath,
-        workspaces,
-        candidate => isLinkedWorktreeFacts(gitCache.get(candidate)),
-      )
+      return !hasForgeManagedWorktree(sessions, sessionId)
     },
   })
   ctx.slots.inject('sidebar.session.row.trailing', () => ctx.slots.register({

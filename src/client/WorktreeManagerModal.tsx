@@ -105,6 +105,15 @@ function archiveIdsFor(face: WorktreeManagerFace, sessionIds: readonly string[])
   return ids
 }
 
+/** Build the hover tooltip for the open-session action button on a manager row. */
+export function openWorktreeTooltip(
+  source: WorktreeScanEntry['source'],
+  t: PropsLocale<'git-worktree'>['t'],
+): string {
+  const base = t('manager.openSession')
+  return source === 'official' ? `${base}\n${t('manager.openSessionOfficialHint')}` : base
+}
+
 export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter }: WorktreeManagerModalProps) {
   const [scan, setScan] = useState<ScanState>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
@@ -420,7 +429,7 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
                               type="button"
                               className={css.rowAction}
                               disabled={openingPath !== null}
-                              title={t('manager.openSession')}
+                              title={openWorktreeTooltip(entry.source, t)}
                               aria-label={t('manager.openSession')}
                               onClick={() => { handleOpenWorktree(entry.path, entry.repoRoot) }}
                             >
