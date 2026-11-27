@@ -137,7 +137,7 @@ Existing worktree folders and plugin settings carry over untouched.
 - **Official worktree management** (setting "Manage official worktrees", off by default): the manager also lists `<repo>/.agents/worktrees` under a "DSH official" group, which can be opened and removed manually but is never auto-pruned.
 
 > [!NOTE]
-> - **Native sidebar untouched**: worktrees are ordinary registered workspaces, and the workspace tree nests per-repository layouts under their repository automatically (legacy centrally-stored worktrees keep their old location). Session directory mode adds no workspace; sessions that switched into a worktree show a worktree badge on their row.
+> - **Native sidebar untouched**: worktrees are ordinary registered workspaces, and the workspace tree nests per-repository layouts under their repository automatically (legacy centrally-stored worktrees keep their old location). Session directory mode adds no workspace; worktree sessions in both modes show a worktree badge on their row.
 > - A pending worktree in session directory mode lives only in the dsh server's memory: restarting dsh or reloading the plugin drops the pending bar, and the worktree must be chosen again.
 > - **`git clean -xdff` (double `-f`)** deletes in-repository worktree directories (a single `-f` skips nested repos); `git worktree prune` restores registrations afterwards, but uncommitted work inside them is lost.
 > - If every workspace of a repository is deregistered, its worktrees no longer appear in the manager or auto-prune; re-register any directory of that repository to bring them back.

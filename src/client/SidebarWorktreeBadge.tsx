@@ -78,7 +78,7 @@ export function SidebarWorktreeTrailing({ sessionId, gitCache, resolveSessionPat
 export function SidebarWorktreeHover({ sessionId, gitCache, resolveSessionPath, sessionsObservable, shouldDecorateSession, t }: SidebarWorktreeBadgeProps) {
   const facts = useLinkedWorktreeFacts(sessionId, gitCache, resolveSessionPath, sessionsObservable, shouldDecorateSession)
   if (facts === null) return null
-  const note = facts.baseBranch !== undefined && facts.baseBranch !== ''
+  const note = facts.baseBranch !== undefined && facts.baseBranch !== '' && facts.baseBranch !== facts.branch
     ? t('sidebar.worktreeHoverFrom', { base: facts.baseBranch })
     : t('sidebar.worktreeHoverLabel')
   return (

@@ -106,6 +106,7 @@ export function createWorkspaceGitCache(
           && prev.repoName === value.repoName
           && prev.branch === value.branch
           && prev.main === value.main
+          && prev.baseBranch === value.baseBranch
         )
         if (!same || !next.has(key)) {
           next.set(key, value)

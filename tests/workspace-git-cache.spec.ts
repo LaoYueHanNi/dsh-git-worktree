@@ -72,6 +72,27 @@ describe('workspace-git-cache', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
+  it('notifies subscribers when refresh updates baseBranch metadata on a cached worktree', async () => {
+    let withBase = false
+    const cache = createWorkspaceGitCache(async () => ({
+      ok: true as const,
+      facts: {
+        '/code/wt-a': withBase ? { ...WT_FACTS, baseBranch: 'main' } : WT_FACTS,
+      },
+    }))
+    const listener = vi.fn()
+    cache.subscribe(listener)
+
+    await cache.syncPaths(['/code/wt-a'])
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(cache.get('/code/wt-a')?.baseBranch).toBeUndefined()
+
+    withBase = true
+    await cache.refresh(['/code/wt-a'])
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(cache.get('/code/wt-a')?.baseBranch).toBe('main')
+  })
+
   it('swallows transient fetch errors so subsequent syncs can retry', async () => {
     let attempt = 0
     const cache = createWorkspaceGitCache(async (paths) => {

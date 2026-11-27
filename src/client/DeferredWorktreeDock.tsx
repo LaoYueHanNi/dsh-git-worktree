@@ -26,7 +26,32 @@ import css from './DeferredWorktreeDock.module.css'
 
 export interface DeferredWorktreeDockInjected {
   readonly sessionId?: string
+  /** Whether this dock should probe the host for an existing deferred state on mount. */
+  readonly shouldProbeDeferred?: (sessionId: string) => boolean
   readonly onDeferredCompleted?: (sessionId: string, completed: DeferredWorktreeCompleted) => void
+}
+
+type LocalDeferredListener = (state: DeferredWorktreeState | null) => void
+const localDeferredListeners = new Map<string, Set<LocalDeferredListener>>()
+
+/** Push a locally armed/cancelled deferred state to any mounted dock for `sessionId`. */
+export function notifyDeferredWorktreeState(sessionId: string, state: DeferredWorktreeState | null): void {
+  const listeners = localDeferredListeners.get(sessionId)
+  if (listeners === undefined) return
+  for (const listener of [...listeners]) listener(state)
+}
+
+function subscribeLocalDeferred(sessionId: string, listener: LocalDeferredListener): () => void {
+  let set = localDeferredListeners.get(sessionId)
+  if (set === undefined) {
+    set = new Set()
+    localDeferredListeners.set(sessionId, set)
+  }
+  set.add(listener)
+  return () => {
+    set.delete(listener)
+    if (set.size === 0) localDeferredListeners.delete(sessionId)
+  }
 }
 
 export type DeferredWorktreeDockProps = DeferredWorktreeDockInjected & PropsLocale<'git-worktree'>
@@ -82,12 +107,14 @@ const PHASE_LABEL_KEY = {
 } as const satisfies Record<DeferredWorktreePhase, Parameters<PropsLocale<'git-worktree'>['t']>[0]>
 
 /** Composer-top deferred worktree status & progress dock card. */
-export function DeferredWorktreeDock({ sessionId, onDeferredCompleted, t }: DeferredWorktreeDockProps): ReactNode {
+export function DeferredWorktreeDock({ sessionId, shouldProbeDeferred, onDeferredCompleted, t }: DeferredWorktreeDockProps): ReactNode {
   const [state, setState] = useState<DeferredWorktreeState | null>(null)
   const [acting, setActing] = useState(false)
   const [sawFetch, setSawFetch] = useState(false)
   const completedCallbackRef = useRef(onDeferredCompleted)
   completedCallbackRef.current = onDeferredCompleted
+  const shouldProbeRef = useRef(shouldProbeDeferred)
+  shouldProbeRef.current = shouldProbeDeferred
 
   const applySnapshot = useCallback((snapshot: DeferredWorktreeSnapshot, sid: string): void => {
     setState(snapshot.state)
@@ -101,6 +128,8 @@ export function DeferredWorktreeDock({ sessionId, onDeferredCompleted, t }: Defe
     }
   }, [])
 
+  // Subscribe to local arm/cancel updates and run a one-shot GET probe on mount
+  // only when deferred worktrees could be active (never holding an idle SSE).
   useEffect(() => {
     setState(null)
     setActing(false)
@@ -108,34 +137,52 @@ export function DeferredWorktreeDock({ sessionId, onDeferredCompleted, t }: Defe
     if (sessionId === undefined || sessionId === '') return
 
     let active = true
-    if (typeof EventSource === 'function') {
-      const source = new EventSource(deferredWorktreeEventsUrl(sessionId))
-      source.onmessage = (event) => {
-        if (!active) return
-        try {
-          const parsed = JSON.parse(event.data as string) as DeferredWorktreeSnapshot
-          applySnapshot(parsed, sessionId)
-        } catch {
-          // Ignore malformed keepalive or partial frames.
-        }
-      }
-      source.onerror = () => {
-        // EventSource automatically reconnects; fetch once to avoid stale UI on brief drops.
-        void fetchDeferredWorktree(sessionId).then((res) => {
-          if (active && res.ok) applySnapshot({ state: res.state }, sessionId)
-        })
-      }
-      return () => {
-        active = false
-        source.close()
-      }
+    const unsubLocal = subscribeLocalDeferred(sessionId, (nextState) => {
+      if (!active) return
+      applySnapshot({ state: nextState }, sessionId)
+    })
+
+    if (shouldProbeRef.current?.(sessionId) ?? true) {
+      void fetchDeferredWorktree(sessionId).then((res) => {
+        if (active && res.ok && res.state !== null) applySnapshot({ state: res.state }, sessionId)
+      })
     }
 
-    void fetchDeferredWorktree(sessionId).then((res) => {
-      if (active && res.ok) applySnapshot({ state: res.state }, sessionId)
-    })
-    return () => { active = false }
+    return () => {
+      active = false
+      unsubLocal()
+    }
   }, [sessionId, applySnapshot])
+
+  // Open an EventSource stream ONLY while this session has an active deferred
+  // state (`armed`, `running`, or `failed`), and close it immediately once idle.
+  const needsStream = state !== null
+  useEffect(() => {
+    if (!needsStream || sessionId === undefined || sessionId === '') return
+    if (typeof EventSource !== 'function') return
+
+    let active = true
+    const source = new EventSource(deferredWorktreeEventsUrl(sessionId))
+    source.onmessage = (event) => {
+      if (!active) return
+      try {
+        const parsed = JSON.parse(event.data as string) as DeferredWorktreeSnapshot
+        applySnapshot(parsed, sessionId)
+      } catch {
+        // Ignore malformed keepalive or partial frames.
+      }
+    }
+    source.onerror = () => {
+      // EventSource automatically reconnects; fetch once to avoid stale UI on brief drops.
+      void fetchDeferredWorktree(sessionId).then((res) => {
+        if (active && res.ok) applySnapshot({ state: res.state }, sessionId)
+      })
+    }
+    return () => {
+      active = false
+      source.close()
+    }
+  }, [needsStream, sessionId, applySnapshot])
 
   const sendAction = useCallback((action: 'cancel' | 'retry' | 'withdraw'): void => {
     if (sessionId === undefined || acting) return

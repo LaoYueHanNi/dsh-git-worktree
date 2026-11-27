@@ -113,16 +113,12 @@ export class DeferredWorktreeCoordinator {
 
   /**
    * Arm (or replace) a deferred worktree creation on a blank session.
-   * Rejects while a creation is already running on that session.
+   * Rejects while a creation is already running or holding a waiting first turn.
    */
   arm(sessionId: string, spec: DeferredWorktreeSpec): DeferredWorktreeState {
     const existing = this.slots.get(sessionId)
-    if (existing !== undefined && existing.state.kind === 'running') {
+    if (existing !== undefined && (existing.state.kind === 'running' || existing.holding)) {
       throw Object.assign(new Error('Worktree creation is already in progress for this session'), { httpStatus: 409 })
-    }
-    if (existing?.decision !== undefined) {
-      existing.decision.resolve('withdraw')
-      existing.decision = undefined
     }
     const state: DeferredWorktreeState = { kind: 'armed', spec }
     this.slots.set(sessionId, { state, holding: false, decision: undefined, created: undefined })
@@ -205,14 +201,21 @@ export class DeferredWorktreeCoordinator {
    * Fallback for `agent/pre-step` (step === 1): if a message somehow bypassed
    * `agent/inbox/inserted` while an armed request is still pending, create and
    * enter the worktree right before the first model call.
+   * @returns true when this call actually created and switched the worktree.
    */
-  async onPreStep(agent: DeferredAgentLike, step: number, signal?: AbortSignal): Promise<void> {
-    if (step !== 1 || this.lifetime.signal.aborted) return
+  async onPreStep(agent: DeferredAgentLike, step: number, signal?: AbortSignal): Promise<boolean> {
+    if (step !== 1 || this.lifetime.signal.aborted) return false
     const sessionId = agent.session.id
     const slot = this.slots.get(sessionId)
-    if (slot === undefined || slot.state.kind !== 'armed' || slot.holding) return
+    if (slot === undefined || slot.state.kind !== 'armed' || slot.holding) return false
     const combined = signal === undefined ? this.lifetime.signal : AbortSignal.any([signal, this.lifetime.signal])
-    await this.executeOnce(sessionId, agent, slot, combined)
+    try {
+      await this.executeOnce(sessionId, agent, slot, combined)
+      return true
+    } catch (error) {
+      this.clearSlot(sessionId, slot)
+      throw error
+    }
   }
 
   /** Release any waiting maintenance holds when the plugin unloads. */

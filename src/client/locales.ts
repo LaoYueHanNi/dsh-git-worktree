@@ -225,8 +225,7 @@ export type GitWorktreeKey =
   | 'createModal.loading'
   | 'createModal.loadFailed'
   | 'createModal.searchPlaceholder'
-  | 'createModal.cutNewBranch'
-  | 'createModal.cutRandomBranch'
+  | 'createModal.cutFromBranch'
   | 'createModal.noMatches'
   | 'createModal.tagCurrent'
   | 'createModal.tagWorktree'
@@ -503,9 +502,8 @@ export const en: Record<GitWorktreeKey, string> = {
   'createModal.title': 'New worktree · {repo}',
   'createModal.loading': 'Loading branches…',
   'createModal.loadFailed': 'Could not load branches: {message}',
-  'createModal.searchPlaceholder': 'Search branches, type a new name, or leave blank for random',
-  'createModal.cutNewBranch': 'Create branch “{name}” from {base} in a new worktree',
-  'createModal.cutRandomBranch': 'Quick-create worktree with a random branch from {base}',
+  'createModal.searchPlaceholder': 'Search existing branches',
+  'createModal.cutFromBranch': 'New branch and worktree from {base}…',
   'createModal.noMatches': 'No matching branches',
   'createModal.tagCurrent': 'current',
   'createModal.tagWorktree': 'worktree',
@@ -783,9 +781,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   'createModal.title': '新建工作树 · {repo}',
   'createModal.loading': '正在加载分支…',
   'createModal.loadFailed': '分支加载失败：{message}',
-  'createModal.searchPlaceholder': '搜索已有分支、输入新分支名，或留空快速生成随机分支',
-  'createModal.cutNewBranch': '从 {base} 切出新分支“{name}”并新建工作树',
-  'createModal.cutRandomBranch': '从 {base} 快速创建随机分支工作树',
+  'createModal.searchPlaceholder': '搜索已有分支',
+  'createModal.cutFromBranch': '从 {base} 新建分支并创建工作树…',
   'createModal.noMatches': '没有匹配的分支',
   'createModal.tagCurrent': '当前',
   'createModal.tagWorktree': '已有工作树',

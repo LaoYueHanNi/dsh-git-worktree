@@ -22,11 +22,11 @@ DSH 官方 `forge-bundle` 在空白会话右上角提供了默认的新建工作
 
 2. **留空即随机的切出分支交互**
    - `CreateWorktreeBody` 新增可选标志 `random?: boolean`，与 `cutout: true` 组合且未指定 `name` 时，Host 通过 `randomCutoutBranchName` 生成 `<baseLocal>-<4位随机十六进制>`（避开现有本地分支与已有工作树目录冲突），保留未传 `random` 时 `<base>-wt` 的兼容行为。
-   - 在左下角分支菜单切出弹层中，输入框允许留空直接提交（留空即以随机分支名创建），占位文案直接说明留空自动随机，不增加多余的随机生成按钮；在侧边栏右键「新建工作树…」弹窗中，输入框为空时提供基于当前分支一键创建随机分支工作树的快捷行。
+   - 在左下角分支菜单切出弹层中，输入框允许留空直接提交（留空即以随机分支名创建），占位文案直接说明留空自动随机，不增加多余的随机生成按钮；在侧边栏右键「新建工作树…」弹窗中，顶部搜索框仅用于搜索已有分支，点击「从 `<当前分支>` 新建分支并创建工作树…」或主仓库占用的当前分支后弹出新分支名输入框，留空同样自动生成随机分支。
 
 3. **会话内切换工作树目录模式（`switchSessionDirectory`，默认 `false`）与首消息延迟创建**
    - 在插件配置中新增 `.volatile()` 开关 `switchSessionDirectory`（默认关闭，确保升级后不强行改变老用户的独立工作区习惯）。
-   - Host 侧通过可选注入 `ctx.inject(['agents', 'workingDirectory'], ...)` 桥接宿主服务，提供 `POST /plugin/git-worktree/session-cwd`（即时切目录）及延迟创建路由组（`GET /deferred`、`GET /deferred/events` SSE、`POST /deferred/arm`、`POST /deferred/action`），并在内存维护 `DeferredWorktreeCoordinator` 状态机监听 `agent/inbox/inserted`（通过 `agent.runMaintenance` 挂起首条消息执行完整建树管线并实时推送 `fetch`/`create`/`copy`/`switch` 阶段状态，失败支持 `retry` 重试或 `withdraw` 放行继续）与 `agent/pre-step`（`step === 1` 兜底并合并 `working-directory` 通知）。
+   - Host 侧通过可选注入 `ctx.inject(['agents', 'workingDirectory'], ...)` 桥接宿主服务，提供 `POST /plugin/git-worktree/session-cwd`（即时切目录）及延迟创建路由组（`GET /deferred`、`GET /deferred/events` SSE、`POST /deferred/arm`、`POST /deferred/action`），并在内存维护 `DeferredWorktreeCoordinator` 状态机监听 `agent/inbox/inserted`（通过 `agent.runMaintenance` 挂起首条消息执行完整建树管线并实时推送 `fetch`/`create`/`copy`/`switch` 阶段状态，失败支持 `retry` 重试或 `withdraw` 放行继续）与 `agent/pre-step`（`step === 1` 兜底，仅实际执行了兜底建树时才合并 `working-directory` 通知，失败时清理槽位不遗留死锁）。客户端 `DeferredWorktreeDock` 仅在开启会话目录模式或会话存在本地武装记录时做一次轻量 `GET /deferred` 探测，且仅在存在活跃延迟状态（`armed`/`running`/`failed`）期间按需建立 SSE 并在回归空闲后立刻断开，服务端卸载时主动关闭所有活跃 SSE 流与心跳定时器。
    - 开启 `switchSessionDirectory` 后，客户端不再为工作树注册独立 Workspace，且按“新建延迟、复用即时”区分：
      - **新建/切出工作树（延迟创建）**：空白会话左下角触发时在当前空白会话就地武装，侧边栏主仓库右键触发时先在所属主仓库 Workspace 下通过 `ctx.sessions.create({ workspaceId })` 新建空白会话再武装并打开；未发首条消息前不创建分支也不写入磁盘，输入框上方 `conversation.input.dock` 展示待建条并支持随时取消；用户发送首条消息时才执行建树、展示进度卡片，完成后刷新 `workingDirectory` 投影与缓存并触发自动清理。
      - **复用/跳到已有工作树（即时切换与独立工作区优先归位）**：若目标目录已经存在独立 Workspace（含跳回主仓库本身），直接调用 `uiWorkspace.startSession` 打开该 Workspace（既不把同一工作树的会话拆散到侧边栏两个位置，也不在跳回主仓库时多余触发 `session-cwd`）；否则在 `switchSessionDirectory` 开启时切换当前空白会话目录，或在所属主仓库 Workspace 下优先复用已指向目标工作树的未归档空白会话，不存在时再新建空白会话并切换目录；侧边栏右键新建延迟工作树时，若主视图正停留在所属主仓库的未武装空白会话上，同样就地复用武装；切目录前自动撤销残留的官方请求与延迟武装。

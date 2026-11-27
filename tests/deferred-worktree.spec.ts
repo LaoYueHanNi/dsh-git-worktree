@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { DeferredWorktreeCoordinator, type DeferredAgentLike } from '../src/deferred-worktree.ts'
 import {
+  executeCreateWorktree,
   handleArmDeferredWorktree,
   handleDeferredWorktreeAction,
   handleGetDeferredWorktree,
@@ -233,18 +234,94 @@ describe('DeferredWorktreeCoordinator', () => {
     const agent: DeferredAgentLike = { session: { id: 's-4' } }
 
     // Step > 1 is ignored.
-    await coordinator.onPreStep(agent, 2)
+    expect(await coordinator.onPreStep(agent, 2)).toBe(false)
     expect(createWorktree).not.toHaveBeenCalled()
 
-    await coordinator.onPreStep(agent, 1)
+    expect(await coordinator.onPreStep(agent, 1)).toBe(true)
     expect(createWorktree).toHaveBeenCalledTimes(1)
     expect(setWorkingDirectory).toHaveBeenCalledWith(agent, createdPath, expect.any(AbortSignal))
     expect(coordinator.get('s-4')).toBeNull()
+
+    // Unarmed session returns false so pre-step listener does not touch inbox notices.
+    expect(await coordinator.onPreStep(agent, 1)).toBe(false)
 
     // Dispose clears any remaining armed slots.
     coordinator.arm('s-5', { repoPath: resolve('/repo'), branch: 'main', cutout: true })
     await coordinator.dispose()
     expect(coordinator.get('s-5')).toBeNull()
+  })
+
+  it('clears the slot when pre-step fallback fails and rejects re-arming while a failed hold waits for decision', async () => {
+    const createWorktree = vi.fn(async () => { throw new Error('git boom') })
+    const setWorkingDirectory = vi.fn()
+    const coordinator = new DeferredWorktreeCoordinator({ createWorktree, setWorkingDirectory })
+
+    // 1. Pre-step fallback failure must not leave the session stuck in `running`.
+    coordinator.arm('s-pre-fail', { repoPath: resolve('/repo'), branch: 'main', cutout: false })
+    await expect(coordinator.onPreStep({ session: { id: 's-pre-fail' } }, 1)).rejects.toThrow('git boom')
+    expect(coordinator.get('s-pre-fail')).toBeNull()
+    expect(() => coordinator.arm('s-pre-fail', { repoPath: resolve('/repo'), branch: 'main', cutout: false })).not.toThrow()
+
+    // 2. While holding a failed first turn in maintenance, re-arming is rejected with 409.
+    let markFailed!: () => void
+    const failedReached = new Promise<void>((res) => { markFailed = res })
+    coordinator.subscribe('s-hold', (snap) => {
+      if (snap.state?.kind === 'failed') markFailed()
+    })
+    coordinator.arm('s-hold', { repoPath: resolve('/repo'), branch: 'main', cutout: false })
+    let maintenancePromise: Promise<void> | undefined
+    const agent: DeferredAgentLike = {
+      session: { id: 's-hold' },
+      inbox: { nextTurn: [{ id: 'm-1' }] },
+      runMaintenance: (task) => {
+        maintenancePromise = task(new AbortController().signal)
+        return maintenancePromise
+      },
+    }
+    coordinator.onInboxInserted(agent, { id: 'm-1' })
+    await failedReached
+    expect(() => coordinator.arm('s-hold', { repoPath: resolve('/repo'), branch: 'other', cutout: false })).toThrow(/already in progress/)
+    expect(coordinator.withdraw('s-hold')).toBe(true)
+    await maintenancePromise
+  })
+
+  it('preserves full local slash branch names in executeCreateWorktree without mistaking them for remotes', async () => {
+    const repoRoot = resolve('/repo')
+    const phases: Array<{ phase: string; branch: string | undefined }> = []
+    const deps: RouteDeps = {
+      exec: async (_cwd, args) => {
+        const joined = args.join(' ')
+        if (joined.startsWith('rev-parse --show-toplevel')) {
+          return { code: 0, stdout: `${repoRoot}\n${resolve(repoRoot, '.git')}\nmain\n`, stderr: '' }
+        }
+        if (joined.startsWith('for-each-ref refs/heads')) return { code: 0, stdout: 'main\nfeature/worktree-remove\n', stderr: '' }
+        if (joined.startsWith('for-each-ref refs/remotes')) return { code: 0, stdout: '', stderr: '' }
+        if (joined === 'worktree list --porcelain') {
+          return { code: 0, stdout: `worktree ${repoRoot}\nbranch refs/heads/main\n\n`, stderr: '' }
+        }
+        if (joined.startsWith('worktree add ')) return { code: 0, stdout: '', stderr: '' }
+        return { code: 0, stdout: '', stderr: '' }
+      },
+      dirExists: () => false,
+      sectionRootDir: () => undefined,
+      sectionFetchBeforeCreate: () => false,
+      home: () => '/home/u',
+      envHome: () => undefined,
+      mkdirRecursive: async () => {},
+      excludeSeams: {
+        readFile: async () => '/.dsh/gitworktree/\n',
+        mkdir: async () => {},
+        appendFile: async () => {},
+      },
+    }
+    const outcome = await executeCreateWorktree(
+      deps,
+      { repoPath: repoRoot, branch: 'feature/worktree-remove', cutout: false },
+      (phase, branch) => { phases.push({ phase, branch }) },
+    )
+    expect(outcome.branch).toBe('feature/worktree-remove')
+    expect(phases).toContainEqual({ phase: 'create', branch: 'feature/worktree-remove' })
+    expect(phases).toContainEqual({ phase: 'copy', branch: 'feature/worktree-remove' })
   })
 })
 

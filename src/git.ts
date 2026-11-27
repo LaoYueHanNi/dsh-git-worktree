@@ -967,11 +967,13 @@ export async function probeWorkspaceGit(exec: Exec, path: string): Promise<Works
   // path so consumers can compare against join()-built ones.
   const gitDir = normalize(resolve(path, commonDir))
   const main = isMainWorktree(toplevel, gitDir)
-  const baseBranch = main ? undefined : await readWorktreeBaseBranch(toplevel)
+  const branch = branchName === '' || branchName === 'HEAD' ? null : branchName
+  const rawBaseBranch = main ? undefined : await readWorktreeBaseBranch(toplevel)
+  const baseBranch = rawBaseBranch !== undefined && rawBaseBranch !== branch ? rawBaseBranch : undefined
   return {
     repoRoot: dirname(gitDir),
     repoName: basename(dirname(gitDir)),
-    branch: branchName === '' || branchName === 'HEAD' ? null : branchName,
+    branch,
     main,
     ...(baseBranch === undefined ? {} : { baseBranch }),
   }

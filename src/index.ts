@@ -297,7 +297,8 @@ export function apply(ctx: Context, config: Config = {}): void {
         const record = payload as { readonly agent?: DeferredAgentLike; readonly step?: number; readonly signal?: AbortSignal } | undefined
         const callNext = typeof next === 'function' ? next as () => Promise<unknown> : async () => undefined
         if (record?.agent !== undefined && typeof record.step === 'number') {
-          await coordinator.onPreStep(record.agent, record.step, record.signal)
+          const created = await coordinator.onPreStep(record.agent, record.step, record.signal)
+          if (!created) return await callNext()
           const decision = await callNext() as { readonly kind?: string; readonly messages?: readonly unknown[] } | undefined
           if (decision !== undefined && decision.kind !== 'reject' && Array.isArray(decision.messages) && decision.messages.length > 0) {
             const nextStep = record.agent.inbox?.nextStep ?? []
@@ -435,12 +436,23 @@ export function apply(ctx: Context, config: Config = {}): void {
       send(res, await handleGetDeferredWorktree(deps(), query.get('sessionId') ?? undefined))
     } }), 'git-worktree: deferred-get route')
 
+    const activeDeferredStreams = new Set<() => void>()
+    webCtx.effect(() => () => {
+      for (const close of [...activeDeferredStreams]) close()
+      activeDeferredStreams.clear()
+    }, 'git-worktree: deferred-events stream teardown')
+
     webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_DEFERRED_EVENTS, handler: (req: IncomingMessage, res: ServerResponse) => {
       /* v8 ignore next -- node:http always sets url on server requests. */
       const query = new URL(req.url ?? '/', 'http://x').searchParams
       const sessionId = query.get('sessionId')?.trim() ?? ''
       if (sessionId === '') {
         send(res, { status: 400, body: { error: 'query parameter "sessionId" must be non-empty' } })
+        return
+      }
+      const coordinator = deferredWorktrees
+      if (coordinator === undefined) {
+        send(res, { status: 501, body: { error: 'Deferred worktree creation is not supported by this host' } })
         return
       }
       res.writeHead(200, {
@@ -451,17 +463,24 @@ export function apply(ctx: Context, config: Config = {}): void {
       const writeFrame = (payload: unknown): void => {
         if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`)
       }
-      const coordinator = deferredWorktrees
-      writeFrame({ state: coordinator?.get(sessionId) ?? null })
-      const unsubscribe = coordinator?.subscribe(sessionId, writeFrame)
+      writeFrame({ state: coordinator.get(sessionId) })
+      const unsubscribe = coordinator.subscribe(sessionId, writeFrame)
       const heartbeat = setInterval(() => {
         if (!res.writableEnded) res.write(': keepalive\n\n')
       }, 25_000)
-      req.on('close', () => {
+      heartbeat.unref?.()
+      let closed = false
+      const cleanup = (): void => {
+        if (closed) return
+        closed = true
+        activeDeferredStreams.delete(cleanup)
         clearInterval(heartbeat)
-        unsubscribe?.()
+        unsubscribe()
         if (!res.writableEnded) res.end()
-      })
+      }
+      activeDeferredStreams.add(cleanup)
+      req.on('close', cleanup)
+      res.on('close', cleanup)
     } }), 'git-worktree: deferred-events route')
 
     postRoute(ROUTE_DEFERRED_ARM, 'deferred-arm', handleArmDeferredWorktree)

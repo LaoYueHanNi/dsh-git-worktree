@@ -11,7 +11,7 @@ import { readCheckedOutBranch } from './head.js'
 import { invalidateAuthorCache, readAuthors, readHistory, readCommit } from './history.js'
 import type { AuthorList, AuthorsBody, HistoryBody, CommitBody, CommitHistory, CommitDetail } from './wire.js'
 import { openPush, previewPush, pushBranch } from './push.js'
-import { isAbsoluteConfigPath, localBranchName, sanitizeBranchDir } from './normalize.js'
+import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { createProgressReader } from './progress.js'
 import { resolveRootDir } from './settings.js'
 import type {
@@ -509,9 +509,12 @@ export async function executeCreateWorktree(
   const excludeWarning = await appendWorktreeExclude(deps.excludeSeams ?? fsExcludeSeams, facts.repoRoot)
   const layoutRoot = join(facts.repoRoot, PROJECT_LAYOUT_DIR)
   let fetchWarning: string | undefined
+  let resolvedBranch: { local: string; remote: string | undefined } | undefined
+  let branchResolved = false
   if (deps.sectionFetchBeforeCreate() === true) {
-    const resolved = await resolveBranch(deps.exec, facts.repoRoot, branch)
-    if (resolved?.remote !== undefined) {
+    resolvedBranch = await resolveBranch(deps.exec, facts.repoRoot, branch)
+    branchResolved = true
+    if (resolvedBranch?.remote !== undefined) {
       onPhase?.('fetch')
       try {
         await fetchAll(deps.exec, facts.repoRoot)
@@ -566,14 +569,18 @@ export async function executeCreateWorktree(
       ...(copyWarning === undefined ? {} : { copyWarning }),
     }
   }
-  const localName = localBranchName(branch)
+  if (!branchResolved) {
+    resolvedBranch = await resolveBranch(deps.exec, facts.repoRoot, branch)
+  }
+  const isRemote = resolvedBranch?.remote !== undefined
+  const localName = resolvedBranch?.local ?? branch
   onPhase?.('create', localName)
   const target = join(layoutRoot, sanitizeBranchDir(branch))
   await mkdirSlot(deps, layoutRoot)
   const result = await addWorktree(deps.exec, facts.repoRoot, branch, target, deps.dirExists)
   let copyWarning: string | undefined
   if (result.created) {
-    if (branch !== localName) await writeWorktreeBaseBranch(result.path, branch)
+    if (isRemote) await writeWorktreeBaseBranch(result.path, branch)
     onPhase?.('copy', localName)
     copyWarning = await runPostCreateCopy(deps, facts.repoRoot, result.path)
   }

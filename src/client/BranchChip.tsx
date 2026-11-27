@@ -895,9 +895,12 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     if (cwd === undefined) return 'no session directory'
     const customName = name?.trim()
     if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
+      const targetBranch = repo.facts?.branches.find(entry => entry.name === branch)?.kind === 'remote'
+        ? localBranchName(branch)
+        : branch
       const existing = cutout
         ? undefined
-        : repo.facts?.worktrees.find(w => !w.main && w.branch === localBranchName(branch))
+        : repo.facts?.worktrees.find(w => !w.main && w.branch === targetBranch)
       if (existing !== undefined) {
         try {
           await adoptWorktree(existing.path, adoptOptions())
@@ -983,7 +986,9 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   // Non-repo and still-loading directories render nothing at all.
   if (facts === null) return null
 
-  const confirmLocalName = confirm === null ? '' : localBranchName(confirm.branch)
+  const confirmLocalName = confirm === null
+    ? ''
+    : confirm.remote === true ? localBranchName(confirm.branch) : confirm.branch
   // The cutout dialog carries an optional new-branch name: leaving it blank
   // automatically generates a random branch name on the host; any non-blank
   // input is validated against git ref-name rules and local duplicates.

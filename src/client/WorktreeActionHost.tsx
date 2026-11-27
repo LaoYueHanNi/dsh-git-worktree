@@ -189,6 +189,20 @@ interface CreateModalProps {
   readonly t: PropsLocale<'git-worktree'>['t']
 }
 
+/**
+ * Validate an optional new branch name typed in the cutout-from-branch dialog.
+ * Blank input is valid and triggers host-side random `<base>-<4hex>` naming.
+ */
+export function validateCutoutBranchDraft(
+  draft: string,
+  existingLocals: ReadonlySet<string>,
+): 'duplicate' | 'invalid' | null {
+  if (draft.trim() === '') return null
+  if (branchNameIssue(draft) !== null) return 'invalid'
+  if (existingLocals.has(draft)) return 'duplicate'
+  return null
+}
+
 function CreateWorktreeModal({
   repoPath,
   repoName,
@@ -203,15 +217,20 @@ function CreateWorktreeModal({
   const [status, setStatus] = useState<RepoReady | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [cutoutBase, setCutoutBase] = useState<string | null>(null)
+  const [cutoutDraft, setCutoutDraft] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const cutoutInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let active = true
     setStatus(null)
     setLoadError(null)
     setCreateError(null)
+    setCutoutBase(null)
+    setCutoutDraft('')
     setQuery('')
     void fetchStatus(repoPath).then((result) => {
       if (!active) return
@@ -229,8 +248,12 @@ function CreateWorktreeModal({
   }, [repoPath, t])
 
   useEffect(() => {
-    if (status !== null) inputRef.current?.focus()
-  }, [status])
+    if (status !== null && cutoutBase === null) inputRef.current?.focus()
+  }, [status, cutoutBase])
+
+  useEffect(() => {
+    if (cutoutBase !== null) cutoutInputRef.current?.focus()
+  }, [cutoutBase])
 
   const trimmed = query.trim()
   const lower = trimmed.toLowerCase()
@@ -244,15 +267,27 @@ function CreateWorktreeModal({
     return map
   }, [status])
 
+  const localBranchSet = useMemo(() => {
+    const set = new Set<string>()
+    if (status === null) return set
+    for (const entry of status.branches) {
+      if (entry.kind === 'local') set.add(entry.name)
+    }
+    return set
+  }, [status])
+
   const filteredBranches = useMemo<readonly BranchEntry[]>(() => {
     if (status === null) return []
     if (lower === '') return status.branches
     return status.branches.filter(entry => entry.name.toLowerCase().includes(lower))
   }, [status, lower])
 
-  const exactBranchExists = status !== null && status.branches.some(entry => entry.name === trimmed)
-  const newBranchError = trimmed.length > 0 && !exactBranchExists ? branchNameIssue(trimmed) : undefined
-  const canCutNewBranch = status !== null && trimmed.length > 0 && !exactBranchExists && newBranchError === undefined
+  const cutoutDraftError = cutoutBase === null ? null : validateCutoutBranchDraft(cutoutDraft, localBranchSet)
+  const cutoutDraftHint = cutoutDraftError === 'duplicate'
+    ? t('menuNewBranchExists')
+    : cutoutDraftError === 'invalid'
+      ? t('menuNewBranchBad')
+      : undefined
 
   const finishWorktree = async (targetPath: string, warnings?: { fetchWarning?: string; excludeWarning?: string; copyWarning?: string }): Promise<void> => {
     onCreated(targetPath)
@@ -284,48 +319,41 @@ function CreateWorktreeModal({
     )
   }
 
-  const createWithRandomBranch = (): void => {
-    if (creating || status === null) return
-    setCreating(true)
+  const openCutoutPrompt = (base: string): void => {
+    if (creating) return
     setCreateError(null)
-    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
-      armDeferred({ repoPath, branch: status.currentBranch, cutout: true, random: true })
-      return
-    }
-    void requestWorktreeCutout(repoPath, status.currentBranch, undefined, { random: true }).then(
-      async (result) => {
-        if (!result.ok) {
-          setCreating(false)
-          setCreateError(describeWorktreeError(result.error, status.currentBranch, t))
-          return
-        }
-        try {
-          await finishWorktree(result.path, result)
-        } catch (reason: unknown) {
-          setCreating(false)
-          setCreateError(reason instanceof Error ? reason.message : String(reason))
-        }
-      },
-      (reason: unknown) => {
-        setCreating(false)
-        setCreateError(reason instanceof Error ? reason.message : String(reason))
-      },
-    )
+    setCutoutDraft('')
+    setCutoutBase(base)
   }
 
-  const createFromNewBranch = (): void => {
-    if (!canCutNewBranch || creating || status === null) return
+  const closeCutoutPrompt = (): void => {
+    if (creating) return
+    setCreateError(null)
+    setCutoutBase(null)
+    setCutoutDraft('')
+  }
+
+  const submitCutout = (): void => {
+    if (creating || status === null || cutoutBase === null || cutoutDraftError !== null) return
+    const custom = cutoutDraft.trim()
     setCreating(true)
     setCreateError(null)
     if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
-      armDeferred({ repoPath, branch: status.currentBranch, cutout: true, name: trimmed })
+      armDeferred(
+        custom === ''
+          ? { repoPath, branch: cutoutBase, cutout: true, random: true }
+          : { repoPath, branch: cutoutBase, cutout: true, name: custom },
+      )
       return
     }
-    void requestWorktreeCutout(repoPath, status.currentBranch, trimmed).then(
+    const call = custom === ''
+      ? requestWorktreeCutout(repoPath, cutoutBase, undefined, { random: true })
+      : requestWorktreeCutout(repoPath, cutoutBase, custom)
+    void call.then(
       async (result) => {
         if (!result.ok) {
           setCreating(false)
-          setCreateError(describeWorktreeError(result.error, trimmed, t))
+          setCreateError(describeWorktreeError(result.error, custom === '' ? cutoutBase : custom, t))
           return
         }
         try {
@@ -344,10 +372,10 @@ function CreateWorktreeModal({
 
   const pickBranch = (entry: BranchEntry): void => {
     if (creating || status === null) return
-    setCreating(true)
     setCreateError(null)
     const existingWt = worktreeByBranch.get(entry.name)
     if (existingWt !== undefined) {
+      setCreating(true)
       void finishWorktree(existingWt).catch((reason: unknown) => {
         setCreating(false)
         setCreateError(reason instanceof Error ? reason.message : String(reason))
@@ -356,18 +384,16 @@ function CreateWorktreeModal({
     }
     const isMainOccupied = entry.kind === 'local'
       && status.worktrees.some(wt => wt.main && wt.branch === entry.name)
-    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
-      armDeferred(
-        isMainOccupied
-          ? { repoPath, branch: entry.name, cutout: true, random: true }
-          : { repoPath, branch: entry.name, cutout: false },
-      )
+    if (isMainOccupied) {
+      openCutoutPrompt(entry.name)
       return
     }
-    const call = isMainOccupied
-      ? requestWorktreeCutout(repoPath, entry.name, undefined, { random: true })
-      : requestWorktree(repoPath, entry.name)
-    void call.then(
+    setCreating(true)
+    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
+      armDeferred({ repoPath, branch: entry.name, cutout: false })
+      return
+    }
+    void requestWorktree(repoPath, entry.name).then(
       async (result) => {
         if (!result.ok) {
           setCreating(false)
@@ -394,110 +420,131 @@ function CreateWorktreeModal({
   }
 
   return (
-    <Modal
-      open
-      onClose={handleClose}
-      closeLabel={t('close')}
-      title={t('createModal.title', { repo: repoName })}
-      className={css.createDialog ?? ''}
-    >
-      <div className={css.body}>
-        {status === null && loadError === null && (
-          <div className={css.status} role="status">{t('createModal.loading')}</div>
-        )}
-        {loadError !== null && (
-          <div className={css.error} role="alert">{t('createModal.loadFailed', { message: loadError })}</div>
-        )}
-        {status !== null && (
-          <>
+    <>
+      <Modal
+        open
+        onClose={handleClose}
+        closeLabel={t('close')}
+        title={t('createModal.title', { repo: repoName })}
+        className={css.createDialog ?? ''}
+      >
+        <div className={css.body}>
+          {status === null && loadError === null && (
+            <div className={css.status} role="status">{t('createModal.loading')}</div>
+          )}
+          {loadError !== null && (
+            <div className={css.error} role="alert">{t('createModal.loadFailed', { message: loadError })}</div>
+          )}
+          {status !== null && (
+            <>
+              <input
+                ref={inputRef}
+                type="text"
+                className={css.searchInput}
+                value={query}
+                disabled={creating}
+                placeholder={t('createModal.searchPlaceholder')}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setCreateError(null)
+                }}
+              />
+              {creating && cutoutBase === null && <div className={css.status} role="status">{t('createModal.creating')}</div>}
+              {createError !== null && cutoutBase === null && <div className={css.error} role="alert">{createError}</div>}
+              <div className={css.list} role="listbox">
+                {trimmed === '' && (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    className={`${css.branchRow} ${css.cutoutRow}`}
+                    disabled={creating}
+                    onClick={() => { openCutoutPrompt(status.currentBranch) }}
+                  >
+                    <span className={css.branchIcon} aria-hidden="true"><IconPlusOutlineRegular size={14} /></span>
+                    <span className={css.branchName}>
+                      {t('createModal.cutFromBranch', { base: status.currentBranch })}
+                    </span>
+                  </button>
+                )}
+                {filteredBranches.map((entry) => {
+                  const hasWorktree = worktreeByBranch.has(entry.name)
+                  const isCurrent = entry.kind === 'local' && entry.name === status.currentBranch
+                  return (
+                    <button
+                      key={`${entry.kind}:${entry.name}`}
+                      type="button"
+                      role="option"
+                      aria-selected={false}
+                      className={css.branchRow}
+                      disabled={creating}
+                      onClick={() => { pickBranch(entry) }}
+                    >
+                      <span className={css.branchIcon} aria-hidden="true"><IconBranchOutlineRegular size={14} /></span>
+                      <span className={css.branchName}>{entry.name}</span>
+                      {isCurrent && <Tag tone="neutral">{t('createModal.tagCurrent')}</Tag>}
+                      {hasWorktree && <Tag tone="neutral">{t('createModal.tagWorktree')}</Tag>}
+                      {entry.kind === 'remote' && <Tag tone="neutral">{t('createModal.tagRemote')}</Tag>}
+                    </button>
+                  )
+                })}
+                {filteredBranches.length === 0 && (
+                  <div className={css.empty}>{t('createModal.noMatches')}</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+      {cutoutBase !== null && (
+        <Modal
+          open
+          onClose={closeCutoutPrompt}
+          closeLabel={t('close')}
+          title={t('cutoutFlyAsk', { branch: cutoutBase })}
+          footer={(
+            <>
+              <Button variant="outline" disabled={creating} onClick={closeCutoutPrompt}>{t('cancel')}</Button>
+              <Button
+                variant="primary"
+                disabled={creating || cutoutDraftError !== null}
+                onClick={submitCutout}
+              >
+                {creating ? t('worktreeBusy') : t('actionConfirm')}
+              </Button>
+            </>
+          )}
+        >
+          <div className={css.body}>
             <input
-              ref={inputRef}
+              ref={cutoutInputRef}
               type="text"
               className={css.searchInput}
-              value={query}
+              value={cutoutDraft}
               disabled={creating}
-              placeholder={t('createModal.searchPlaceholder')}
+              placeholder={t('cutoutNewBranchPlaceholder')}
+              aria-invalid={cutoutDraftError !== null}
               onChange={(event) => {
-                setQuery(event.target.value)
+                setCutoutDraft(event.target.value)
                 setCreateError(null)
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
-                  if (canCutNewBranch) {
-                    event.preventDefault()
-                    createFromNewBranch()
-                  } else if (trimmed === '') {
-                    event.preventDefault()
-                    createWithRandomBranch()
-                  }
+                  event.preventDefault()
+                  submitCutout()
                 }
               }}
             />
-            {newBranchError !== undefined && (
-              <div className={css.error} role="status">{t('menuNewBranchBad')}</div>
+            {cutoutDraftHint !== undefined && (
+              <div className={css.error} role="status">{cutoutDraftHint}</div>
             )}
-            {creating && <div className={css.status} role="status">{t('createModal.creating')}</div>}
-            {createError !== null && <div className={css.error} role="alert">{createError}</div>}
-            <div className={css.list} role="listbox">
-              {trimmed === '' && (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={false}
-                  className={`${css.branchRow} ${css.cutoutRow}`}
-                  disabled={creating}
-                  onClick={createWithRandomBranch}
-                >
-                  <span className={css.branchIcon} aria-hidden="true"><IconPlusOutlineRegular size={14} /></span>
-                  <span className={css.branchName}>
-                    {t('createModal.cutRandomBranch', { base: status.currentBranch })}
-                  </span>
-                </button>
-              )}
-              {canCutNewBranch && (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={false}
-                  className={`${css.branchRow} ${css.cutoutRow}`}
-                  disabled={creating}
-                  onClick={createFromNewBranch}
-                >
-                  <span className={css.branchIcon} aria-hidden="true"><IconPlusOutlineRegular size={14} /></span>
-                  <span className={css.branchName}>
-                    {t('createModal.cutNewBranch', { base: status.currentBranch, name: trimmed })}
-                  </span>
-                </button>
-              )}
-              {filteredBranches.map((entry) => {
-                const hasWorktree = worktreeByBranch.has(entry.name)
-                const isCurrent = entry.kind === 'local' && entry.name === status.currentBranch
-                return (
-                  <button
-                    key={`${entry.kind}:${entry.name}`}
-                    type="button"
-                    role="option"
-                    aria-selected={false}
-                    className={css.branchRow}
-                    disabled={creating}
-                    onClick={() => { pickBranch(entry) }}
-                  >
-                    <span className={css.branchIcon} aria-hidden="true"><IconBranchOutlineRegular size={14} /></span>
-                    <span className={css.branchName}>{entry.name}</span>
-                    {isCurrent && <Tag tone="neutral">{t('createModal.tagCurrent')}</Tag>}
-                    {hasWorktree && <Tag tone="neutral">{t('createModal.tagWorktree')}</Tag>}
-                    {entry.kind === 'remote' && <Tag tone="neutral">{t('createModal.tagRemote')}</Tag>}
-                  </button>
-                )
-              })}
-              {!canCutNewBranch && filteredBranches.length === 0 && (
-                <div className={css.empty}>{t('createModal.noMatches')}</div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </Modal>
+            {createError !== null && (
+              <div className={css.error} role="alert">{createError}</div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
   )
 }
 

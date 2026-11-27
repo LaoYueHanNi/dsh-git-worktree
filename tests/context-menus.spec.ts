@@ -11,6 +11,7 @@ import {
   type GitWorktreeContextMenuTargetMap,
 } from '../src/client/context-menus.ts'
 import { createWorkspaceGitCache } from '../src/client/workspace-git-cache.ts'
+import { validateCutoutBranchDraft } from '../src/client/WorktreeActionHost.tsx'
 
 const t = ((key: string) => key) as PropsLocale<'git-worktree'>['t']
 
@@ -188,5 +189,20 @@ describe('registerNativeContextMenus', () => {
     await Promise.resolve()
     const afterProbe = sessionContrib.resolve({ sessionId: 's-1', displayTitle: 'New' }, new AbortController().signal)
     expect(afterProbe).toHaveLength(1)
+  })
+})
+
+describe('validateCutoutBranchDraft', () => {
+  it('allows blank (random), accepts valid new names, and rejects duplicates or illegal git names', () => {
+    const locals = new Set(['main', 'feature/worktree-remove'])
+    expect(validateCutoutBranchDraft('', locals)).toBeNull()
+    expect(validateCutoutBranchDraft('   ', locals)).toBeNull()
+    expect(validateCutoutBranchDraft('main-345', locals)).toBeNull()
+    expect(validateCutoutBranchDraft('feat/new-branch', locals)).toBeNull()
+    expect(validateCutoutBranchDraft('main', locals)).toBe('duplicate')
+    expect(validateCutoutBranchDraft('feature/worktree-remove', locals)).toBe('duplicate')
+    expect(validateCutoutBranchDraft('-bad', locals)).toBe('invalid')
+    expect(validateCutoutBranchDraft('bad name', locals)).toBe('invalid')
+    expect(validateCutoutBranchDraft('a..b', locals)).toBe('invalid')
   })
 })

@@ -31,7 +31,7 @@ Status: implemented
 
 - 新增 `src/client/action-bus.ts` 与 `src/client/WorktreeActionHost.tsx`，挂载于 `shell.overlay`（`id: 'git-worktree-actions'`），独立于任何会话输入栏 `BranchChip` 生命周期承载三类弹窗：
   - **管理工作树**：复用 `WorktreeManagerModal`；后端 `WorktreeScanEntry` 新增可选 `repoRoot` 字段，前端新增 `filterScanEntriesByRepo` 与 `initialRepoFilter` prop，从工作区右键打开时默认仅展示当前仓库的工作树，并可一键切换为查看全部仓库。
-  - **从分支新建工作树**：支持搜索本地/远程分支、一键复用已有工作树、或直接输入新分支名通过 `cutout` 切出隔离工作树，沿用 `adoptWorktree`、告警 Toast 与后台自动清理链路。
+  - **从分支新建工作树**：顶部搜索框仅负责检索本地/远程已有分支，点选已有工作树一键复用，点选空闲分支直接创建；点击「从 `<当前分支>` 新建分支并创建工作树…」或主仓库当前占用分支后弹出新分支名输入框（留空即自动生成随机分支，填写即按指定名称 `cutout`），沿用 `adoptWorktree`、告警 Toast 与后台自动清理链路。
   - **删除此工作树**：复用 `requestInspectWorktree`、`describeWorktreeRemoval` 与 `removeWorktreeFully` 安全删除流，有运行中会话时禁用确认按钮，完成后刷新缓存并通过全局 Toast 反馈。
 
 ### 4. 侧边栏工作树视觉标记

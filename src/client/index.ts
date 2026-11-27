@@ -46,7 +46,7 @@ import { IconBranchOutlineRegular, IconFolderCloseRegular, IconTrashOutlineRegul
 import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
 import { CONTEXT_MENU_ICON_KEYS, registerNativeContextMenus, type ContextMenusLike } from './context-menus.ts'
-import { DeferredWorktreeDock } from './DeferredWorktreeDock.tsx'
+import { DeferredWorktreeDock, notifyDeferredWorktreeState } from './DeferredWorktreeDock.tsx'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import { LegacySessionMenuItem } from './LegacySessionMenuItem.tsx'
 import { SidebarWorktreeHover, SidebarWorktreeTrailing } from './SidebarWorktreeBadge.tsx'
@@ -194,6 +194,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
   }
 
   const gitCache = createWorkspaceGitCache()
+  const armedDeferredSessions = new Set<string>()
 
   // Optional bridge to official `remote.forgePanel.cancelWorktree` (strict
   // Cordis `ctx.inject` so hosts without `forge-bundle` stay unaffected).
@@ -292,7 +293,9 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
         // this reused blank session so sending the first message never creates
         // another worktree inside the directory we are switching into.
         cancelOfficialWorktree(blankId)
-        void requestDeferredWorktreeAction(options.reuseBlankSessionId, 'cancel')
+        await requestDeferredWorktreeAction(options.reuseBlankSessionId, 'cancel').catch(() => {})
+        armedDeferredSessions.delete(options.reuseBlankSessionId)
+        notifyDeferredWorktreeState(options.reuseBlankSessionId, null)
         const moved = await requestSetSessionDirectory(options.reuseBlankSessionId, path)
         if (!moved.ok) throw new Error(moved.error)
         void sessionsApi.refreshProjections?.(blankId).catch(() => {})
@@ -361,6 +364,8 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
         ...(spec.random === undefined ? {} : { random: spec.random }),
       })
       if (!armed.ok) throw new Error(armed.error)
+      armedDeferredSessions.add(options.reuseBlankSessionId)
+      notifyDeferredWorktreeState(options.reuseBlankSessionId, armed.state)
       return
     }
 
@@ -411,6 +416,8 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
               ...(spec.random === undefined ? {} : { random: spec.random }),
             })
             if (!armed.ok) throw new Error(armed.error)
+            armedDeferredSessions.add(activeMainId)
+            notifyDeferredWorktreeState(activeMainId, armed.state)
             return
           }
         }
@@ -429,6 +436,8 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       ...(spec.random === undefined ? {} : { random: spec.random }),
     })
     if (!armed.ok) throw new Error(armed.error)
+    armedDeferredSessions.add(newSessionId as string)
+    notifyDeferredWorktreeState(newSessionId as string, armed.state)
     uiWs.openSession(newSessionId)
   }
 
@@ -591,6 +600,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
   // recovery (Retry / Continue without worktree).
   const handledCompletions = new Set<string>()
   const onDeferredCompleted = (sessionId: string, completed: DeferredWorktreeCompleted): void => {
+    armedDeferredSessions.delete(sessionId)
     const key = `${sessionId}\0${pathKey(completed.path)}`
     if (handledCompletions.has(key)) return
     handledCompletions.add(key)
@@ -617,7 +627,10 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     id: 'git-worktree-deferred',
     order: 5,
     locale: NS,
-    inject: () => ({ onDeferredCompleted }),
+    inject: () => ({
+      shouldProbeDeferred: (sessionId: string) => readSwitchSessionDirectory() || armedDeferredSessions.has(sessionId),
+      onDeferredCompleted,
+    }),
   }, DeferredWorktreeDock))
 
   // Shadow official top-right `forge-panel.worktree` in blank sessions when
