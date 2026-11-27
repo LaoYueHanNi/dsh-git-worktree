@@ -8,6 +8,7 @@
  * framework's uiWorkspace navigation.
  */
 
+import { useEffect } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: the branded Session id host 0.1.2 publishes on the session types
 // subpath (the dead dsh-client-runtime used to carry it).
@@ -45,21 +46,25 @@ import { IconBranchOutlineRegular, IconFolderCloseRegular, IconTrashOutlineRegul
 import { BranchChipDock } from './BranchChip.tsx'
 import { CardForm, type SectionValue } from './card-form.ts'
 import { CONTEXT_MENU_ICON_KEYS, registerNativeContextMenus, type ContextMenusLike } from './context-menus.ts'
+import { DeferredWorktreeDock } from './DeferredWorktreeDock.tsx'
 import { GitWorktreeCard } from './GitWorktreeCard.tsx'
 import { LegacySessionMenuItem } from './LegacySessionMenuItem.tsx'
 import { SidebarWorktreeHover, SidebarWorktreeTrailing } from './SidebarWorktreeBadge.tsx'
 import { WorktreeActionHost } from './WorktreeActionHost.tsx'
 import type { WorktreeManagerFace } from './WorktreeManagerModal.tsx'
-import { requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestWorktreesAll } from './api.ts'
+import type { DeferredWorktreeCompleted, DeferredWorktreeSpec } from '../wire.ts'
+import { fetchDeferredWorktree, requestArmDeferredWorktree, requestDeferredWorktreeAction, requestGroupWorktrees, requestInspectWorktree, requestPathExists, requestPurgeDirectory, requestRemoveWorktree, requestSetSessionDirectory, requestWorktreesAll } from './api.ts'
 import { en, zh, type GitWorktreeKey } from './locales.ts'
 import { WorktreeToastHost } from './ToastHost.tsx'
-import { createWorkspaceGitCache, resolveSessionPath, type SnapshotObservable } from './workspace-git-cache.ts'
-import { pathKey, freshestUpdatedAt, planPrune, runAutoPrune } from './worktree-prune.ts'
+import { emitToast } from './toast-bus.ts'
+import { collectWorktreeOwnership, findReusableBlankSessionInWorktree, hasForgeManagedWorktree, resolveEffectiveSessionPath, selectSessionDirectory, type SessionListSnapshotLike, type SessionsDirectorySourceLike } from './session-directory.ts'
+import { createWorkspaceGitCache, type SnapshotObservable } from './workspace-git-cache.ts'
+import { pathKey, planPrune, runAutoPrune } from './worktree-prune.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { recordPruneRun } from './prune-history.ts'
-import type { BranchChipInjected } from './slots.ts'
+import type { AdoptWorktreeOptions, BranchChipInjected } from './slots.ts'
 
-export type { BranchChipInjected } from './slots.ts'
+export type { AdoptWorktreeOptions, BranchChipInjected } from './slots.ts'
 export type { GitWorktreeKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -70,12 +75,46 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** Application-level overlay slot owned by ui-layout (DSH >= 0.2.0-rc.1). */
     'shell.overlay': { kind: 'list'; scope: 'root' }
+    /** New-session top-right hero options owned by ui-conversation (`forge-panel.worktree` sits here at priority 0). */
+    'conversation.hero.options': { kind: 'list'; scope: 'session' }
     /** Context-menu icon renderer keyed by action icon key (DSH >= 0.2.2-rc.5). */
     'contextMenu.icon': { kind: 'keyed'; scope: 'root'; inline: true; owner: { icon: { readonly key: string; readonly src?: string } } }
     /** Non-interactive icons after the session row's time label (DSH >= 0.2.2-rc.5). */
     'sidebar.session.row.trailing': { kind: 'list'; scope: 'root'; inline: true; owner: { readonly sessionId: SessionId } }
   }
 }
+
+type ForgePanelCancelWorktreeFn = (sessionId: SessionId) => Promise<unknown>
+
+const resolveForgePanelCancelWorktree = (remote: unknown): ForgePanelCancelWorktreeFn | undefined => {
+  if (typeof remote !== 'object' || remote === null) return undefined
+  const forgePanel = (remote as { forgePanel?: unknown }).forgePanel
+  if (typeof forgePanel !== 'object' || forgePanel === null) return undefined
+  const cancel = (forgePanel as { cancelWorktree?: unknown }).cancelWorktree
+  return typeof cancel === 'function' ? (cancel as ForgePanelCancelWorktreeFn).bind(forgePanel) : undefined
+}
+
+/**
+ * Null renderer used to shadow official `forge-panel.worktree` at higher
+ * precedence (priority -10). While mounted on a blank session, it also cancels
+ * any leftover official `forgeWorktree` request that may have been persisted on
+ * that reused blank session before this plugin hid the toggle, preventing
+ * silent nested `.agents/worktrees/...` creation on the first user turn.
+ */
+function HiddenOfficialWorktreeEntry(props?: {
+  readonly sessionId?: SessionId
+  readonly cancelOfficialWorktree?: (sessionId: SessionId) => void
+}): null {
+  const sessionId = props?.sessionId
+  const cancel = props?.cancelOfficialWorktree
+  useEffect(() => {
+    if (sessionId !== undefined && cancel !== undefined) cancel(sessionId)
+  }, [sessionId, cancel])
+  return null
+}
+
+/** Official forge-panel worktree toggle slot entry id. */
+const OFFICIAL_WORKTREE_SLOT_ID = 'forge-panel.worktree'
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'git-worktree'
@@ -108,6 +147,9 @@ export interface SyncedConfigLike {
   readonly openGraphByDefault?: SyncedConfigRefLike<boolean | undefined>
   readonly autoPruneWorktrees?: SyncedConfigRefLike<boolean | undefined>
   readonly keepWorktrees?: SyncedConfigRefLike<number | undefined>
+  readonly hideOfficialWorktreeEntry?: SyncedConfigRefLike<boolean | undefined>
+  readonly switchSessionDirectory?: SyncedConfigRefLike<boolean | undefined>
+  readonly manageOfficialWorktrees?: SyncedConfigRefLike<boolean | undefined>
 }
 
 const hasSyncedRef = <T>(ref: SyncedConfigRefLike<T> | undefined): ref is SyncedConfigRefLike<T> =>
@@ -136,44 +178,273 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
   const openGraphRef = hasSyncedRef(config?.openGraphByDefault) ? config.openGraphByDefault : undefined
   const autoPruneRef = hasSyncedRef(config?.autoPruneWorktrees) ? config.autoPruneWorktrees : undefined
   const keepWorktreesRef = hasSyncedRef(config?.keepWorktrees) ? config.keepWorktrees : undefined
+  const hideOfficialRef = hasSyncedRef(config?.hideOfficialWorktreeEntry) ? config.hideOfficialWorktreeEntry : undefined
+  const switchSessionDirRef = hasSyncedRef(config?.switchSessionDirectory) ? config.switchSessionDirectory : undefined
 
-  /** The DSH half of one worktree removal, read from the live snapshots: the
-   * workspace registration sitting on the directory, whether any of its
-   * sessions is running (the verb withholds), and the archive set —
-   * everything visible: not archived, not blank, not a subagent row, the
-   * same qualification the manager dialog and the lazy prune share. */
-  const removalFacts = (path: string): { running: boolean; workspaceId: string | undefined; archiveIds: string[] } => {
+  const readHideOfficialEntry = (): boolean => {
+    if (hideOfficialRef !== undefined) return hideOfficialRef.get() ?? true
+    const section = groupingForm.getSnapshot()
+    return section.status === 'ready' ? (section.value?.hideOfficialWorktreeEntry ?? true) : true
+  }
+
+  const readSwitchSessionDirectory = (): boolean => {
+    if (switchSessionDirRef !== undefined) return switchSessionDirRef.get() === true
+    const section = groupingForm.getSnapshot()
+    return section.status === 'ready' && section.value?.switchSessionDirectory === true
+  }
+
+  const gitCache = createWorkspaceGitCache()
+
+  // Optional bridge to official `remote.forgePanel.cancelWorktree` (strict
+  // Cordis `ctx.inject` so hosts without `forge-bundle` stay unaffected).
+  let forgePanelCancelWorktree: ForgePanelCancelWorktreeFn | undefined
+  if (typeof ctx.inject === 'function') {
+    const injectOptional = ctx.inject.bind(ctx) as (
+      deps: readonly string[],
+      callback: (scope: ClientContext) => void,
+    ) => unknown
+    injectOptional(['remote.forgePanel'], (forgeCtx) => {
+      const cancel = resolveForgePanelCancelWorktree(forgeCtx.remote)
+      if (cancel === undefined) return
+      forgePanelCancelWorktree = cancel
+      forgeCtx.effect(() => () => {
+        if (forgePanelCancelWorktree === cancel) forgePanelCancelWorktree = undefined
+      }, 'git-worktree: optional forgePanel.cancelWorktree bridge')
+    })
+  }
+  const cancelOfficialWorktree = (sessionId: SessionId): void => {
+    const cancel = forgePanelCancelWorktree
+    if (cancel === undefined) return
+    void cancel(sessionId).catch(() => {
+      // Idempotent best-effort cleanup: already started or no open request is harmless.
+    })
+  }
+
+  /**
+   * Dual-mode worktree ownership facts read from live snapshots:
+   * - `workspaceId` is present ONLY for a standalone workspace on `path`
+   *   (never a parent repository workspace in shared-directory mode);
+   * - `running`, `archiveIds`, and `activity` include every session whose
+   *   effective `workingDirectory` sits inside `path`.
+   */
+  const ownershipFacts = (path: string) => {
     const workspaces = ctx.workspaces.list.getSnapshot()
-    const workspace = workspaces.items.find(item => pathKey(item.path) === pathKey(path))
-    if (workspace === undefined) return { running: false, workspaceId: undefined, archiveIds: [] }
-    const sessions = ctx.sessions.list.getSnapshot()
-    const archived = new Set(workspaces.archivedSessionIds)
-    let running = false
-    const archiveIds: string[] = []
-    for (const sessionId of workspace.sessionIds) {
-      const summary = sessions.byId[sessionId as SessionId]
-      if (summary === undefined) continue
-      if (summary.running) running = true
-      if (summary.blank || summary.origin === 'subagent') continue
-      if (!archived.has(sessionId)) archiveIds.push(sessionId)
+    const sessions = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+    return collectWorktreeOwnership(
+      path,
+      workspaces.items.map(item => ({
+        workspaceId: item.workspaceId as string,
+        path: item.path,
+        sessionIds: item.sessionIds as readonly string[],
+      })),
+      sessions,
+      workspaces.archivedSessionIds as readonly string[],
+    )
+  }
+
+  const resolveRepoRootForWorktree = async (targetPath: string, hint?: string): Promise<string | undefined> => {
+    if (hint !== undefined && hint.length > 0) return hint
+    const cached = gitCache.get(targetPath)
+    if (cached !== undefined && cached !== null) return cached.repoRoot
+    const probed = await requestGroupWorktrees([targetPath])
+    if (probed.ok) {
+      const facts = probed.facts[targetPath]
+      if (facts !== undefined && facts !== null) return facts.repoRoot
     }
-    return { running, workspaceId: workspace.workspaceId as string, archiveIds }
+    return undefined
+  }
+
+  const adoptWorktree = async (path: string, options?: AdoptWorktreeOptions): Promise<void> => {
+    const workspacesSnapshot = ctx.workspaces.list.getSnapshot()
+    const targetKey = pathKey(path)
+
+    // Rule A: if a standalone Workspace already owns this directory (including
+    // the main repository checkout itself), always open it directly instead of
+    // splitting sessions for the same worktree across two sidebar locations or
+    // redundantly calling `session-cwd` when hopping back to the main repo.
+    const existingWorkspace = workspacesSnapshot.items.find(item => pathKey(item.path) === targetKey)
+    if (existingWorkspace !== undefined) {
+      ctx.uiWorkspace.startSession(existingWorkspace.workspaceId)
+      return
+    }
+
+    if (readSwitchSessionDirectory()) {
+      const repoRoot = await resolveRepoRootForWorktree(path, options?.repoRoot)
+      // Hopping back to an unregistered main repository checkout never needs
+      // session-directory switching: register the repository workspace directly.
+      if (repoRoot !== undefined && pathKey(repoRoot) === targetKey) {
+        const workspace = await ctx.workspaces.create({ path })
+        ctx.uiWorkspace.startSession(workspace.workspaceId)
+        return
+      }
+
+      const sessionsApi = ctx.sessions as typeof ctx.sessions & {
+        create?: (opts?: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId }) => Promise<SessionId>
+        refreshProjections?: (sessionId: SessionId) => Promise<void>
+      }
+      const uiWs = ctx.uiWorkspace as typeof ctx.uiWorkspace & {
+        openSession?: (sessionId: SessionId) => void
+      }
+
+      if (options?.reuseBlankSessionId !== undefined && options.reuseBlankSessionId.length > 0) {
+        const blankId = options.reuseBlankSessionId as SessionId
+        // Withdraw any pending official or plugin deferred worktree request on
+        // this reused blank session so sending the first message never creates
+        // another worktree inside the directory we are switching into.
+        cancelOfficialWorktree(blankId)
+        void requestDeferredWorktreeAction(options.reuseBlankSessionId, 'cancel')
+        const moved = await requestSetSessionDirectory(options.reuseBlankSessionId, path)
+        if (!moved.ok) throw new Error(moved.error)
+        void sessionsApi.refreshProjections?.(blankId).catch(() => {})
+        void gitCache.refresh([path])
+        return
+      }
+
+      if (typeof sessionsApi.create === 'function' && typeof uiWs.openSession === 'function') {
+        if (repoRoot !== undefined) {
+          const existingParent = workspacesSnapshot.items.find(
+            item => pathKey(item.path) === pathKey(repoRoot),
+          )
+          if (existingParent !== undefined) {
+            const reusableBlank = findReusableBlankSessionInWorktree(
+              {
+                workspaceId: existingParent.workspaceId as string,
+                path: existingParent.path,
+                sessionIds: existingParent.sessionIds as readonly string[],
+              },
+              path,
+              ctx.sessions.list.getSnapshot() as SessionListSnapshotLike,
+              workspacesSnapshot.archivedSessionIds as readonly string[],
+            )
+            if (reusableBlank !== undefined) {
+              const reusableId = reusableBlank as SessionId
+              cancelOfficialWorktree(reusableId)
+              uiWs.openSession(reusableId)
+              void gitCache.refresh([path])
+              return
+            }
+          }
+          const parentWorkspace = existingParent ?? await ctx.workspaces.create({ path: repoRoot })
+          const newSessionId = await sessionsApi.create({ workspaceId: parentWorkspace.workspaceId })
+          cancelOfficialWorktree(newSessionId)
+          const moved = await requestSetSessionDirectory(newSessionId as string, path)
+          if (!moved.ok) throw new Error(moved.error)
+          uiWs.openSession(newSessionId)
+          void sessionsApi.refreshProjections?.(newSessionId).catch(() => {})
+          void gitCache.refresh([path])
+          return
+        }
+      }
+    }
+
+    const workspace = await ctx.workspaces.create({ path })
+    ctx.uiWorkspace.startSession(workspace.workspaceId)
+  }
+
+  const armDeferredWorktree = async (spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions): Promise<void> => {
+    const sessionsApi = ctx.sessions as typeof ctx.sessions & {
+      create?: (opts?: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId }) => Promise<SessionId>
+    }
+    const uiWs = ctx.uiWorkspace as typeof ctx.uiWorkspace & {
+      openSession?: (sessionId: SessionId) => void
+    }
+
+    if (options?.reuseBlankSessionId !== undefined && options.reuseBlankSessionId.length > 0) {
+      const blankId = options.reuseBlankSessionId as SessionId
+      cancelOfficialWorktree(blankId)
+      const armed = await requestArmDeferredWorktree({
+        sessionId: options.reuseBlankSessionId,
+        repoPath: spec.repoPath,
+        branch: spec.branch,
+        cutout: spec.cutout,
+        ...(spec.name === undefined ? {} : { name: spec.name }),
+        ...(spec.random === undefined ? {} : { random: spec.random }),
+      })
+      if (!armed.ok) throw new Error(armed.error)
+      return
+    }
+
+    if (typeof sessionsApi.create !== 'function' || typeof uiWs.openSession !== 'function') {
+      throw new Error('Host does not support deferred session worktree creation')
+    }
+    const repoRoot = await resolveRepoRootForWorktree(spec.repoPath, options?.repoRoot)
+    if (repoRoot === undefined) {
+      throw new Error('Could not resolve repository root for deferred worktree creation')
+    }
+    const workspacesSnapshot = ctx.workspaces.list.getSnapshot()
+    const existingParent = workspacesSnapshot.items.find(
+      item => pathKey(item.path) === pathKey(repoRoot),
+    )
+
+    // If the user is already viewing an unarchived, unarmed blank session on
+    // this exact main repository checkout, arm it in place instead of spawning
+    // a second blank session under the same repository workspace.
+    if (existingParent !== undefined) {
+      const sessionsSnap = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+      const archived = new Set(workspacesSnapshot.archivedSessionIds as readonly string[])
+      const activeMainId = Object.entries(sessionsSnap.byId).find(
+        ([, summary]) => (summary?.retainedBy?.mainView ?? 0) > 0,
+      )?.[0]
+      if (
+        activeMainId !== undefined
+        && !archived.has(activeMainId)
+        && (existingParent.sessionIds as readonly string[]).includes(activeMainId)
+      ) {
+        const activeSummary = sessionsSnap.byId[activeMainId]
+        const activeDir = selectSessionDirectory(sessionsSnap, activeMainId)
+        if (
+          activeSummary?.blank === true
+          && activeSummary.origin !== 'subagent'
+          && activeDir !== undefined
+          && pathKey(activeDir) === pathKey(repoRoot)
+        ) {
+          const currentDeferred = await fetchDeferredWorktree(activeMainId)
+          if (currentDeferred.ok && currentDeferred.state === null) {
+            const activeSessionId = activeMainId as SessionId
+            cancelOfficialWorktree(activeSessionId)
+            const armed = await requestArmDeferredWorktree({
+              sessionId: activeMainId,
+              repoPath: spec.repoPath,
+              branch: spec.branch,
+              cutout: spec.cutout,
+              ...(spec.name === undefined ? {} : { name: spec.name }),
+              ...(spec.random === undefined ? {} : { random: spec.random }),
+            })
+            if (!armed.ok) throw new Error(armed.error)
+            return
+          }
+        }
+      }
+    }
+
+    const parentWorkspace = existingParent ?? await ctx.workspaces.create({ path: repoRoot })
+    const newSessionId = await sessionsApi.create({ workspaceId: parentWorkspace.workspaceId })
+    cancelOfficialWorktree(newSessionId)
+    const armed = await requestArmDeferredWorktree({
+      sessionId: newSessionId as string,
+      repoPath: spec.repoPath,
+      branch: spec.branch,
+      cutout: spec.cutout,
+      ...(spec.name === undefined ? {} : { name: spec.name }),
+      ...(spec.random === undefined ? {} : { random: spec.random }),
+    })
+    if (!armed.ok) throw new Error(armed.error)
+    uiWs.openSession(newSessionId)
   }
 
   const chipInjected = (): BranchChipInjected => ({
-    adoptWorktree: async (path) => {
-      const workspace = await ctx.workspaces.create({ path })
-      ctx.uiWorkspace.startSession(workspace.workspaceId)
-    },
+    adoptWorktree,
+    isSwitchSessionDirectory: readSwitchSessionDirectory,
+    armDeferredWorktree,
     describeWorktreeRemoval: (path) => {
-      const facts = removalFacts(path)
+      const facts = ownershipFacts(path)
       return { running: facts.running, archiveCount: facts.archiveIds.length }
     },
     // The menu's removal confirm runs the SAME shared flow as the manager
     // dialog and the lazy prune (git first, archives and unregistration
     // after), so the three surfaces cannot drift apart.
     removeWorktree: async (path, force) => {
-      const facts = removalFacts(path)
+      const facts = ownershipFacts(path)
       await removeWorktreeFully(
         {
           removeWorktree: async (target, targetForce) => {
@@ -204,9 +475,8 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     // Everything here is a browser-side fact: the switches ride SyncedConfig
     // on 0.2.2+ hosts (falling back to the settings scope on older hosts), the
     // cap counts valid scan entries only (orphans never count and never go),
-    // and activity is the freshest qualifying session's updatedAt —
-    // running-session directories, the fresh creation, and the current
-    // session's directory are excluded from selection outright.
+    // and activity/running/archive ownership resolves across both standalone
+    // workspaces and shared-workspace sessions via effective workingDirectory.
     pruneWorktrees: async (createdPath) => {
       const section = (autoPruneRef === undefined || keepWorktreesRef === undefined)
         ? groupingForm.getSnapshot()
@@ -221,41 +491,43 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       const workspaces = ctx.workspaces.list.getSnapshot()
       const scan = await requestWorktreesAll(workspaces.items.map(workspace => workspace.path))
       if (!scan.ok) return undefined
-      const sessions = ctx.sessions.list.getSnapshot()
-      const archived = new Set(workspaces.archivedSessionIds)
+      const sessions = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+      const workspaceRows = workspaces.items.map(workspace => ({
+        workspaceId: workspace.workspaceId as string,
+        path: workspace.path,
+        sessionIds: workspace.sessionIds as readonly string[],
+      }))
+      const archivedIds = workspaces.archivedSessionIds as readonly string[]
       const activity: Record<string, number> = {}
       const workspaceIdByPath = new Map<string, string>()
       const archiveIdsByPath = new Map<string, string[]>()
       const exclude = new Set<string>([pathKey(createdPath)])
-      for (const workspace of workspaces.items) {
-        const key = pathKey(workspace.path)
-        workspaceIdByPath.set(key, workspace.workspaceId)
-        const archiveIds: string[] = []
-        for (const sessionId of workspace.sessionIds) {
-          const summary = sessions.byId[sessionId]
-          if (summary === undefined) continue
-          if (summary.running === true) exclude.add(key)
-          // Blank rows hold nothing worth archiving and subagent rows are
-          // never the user's to manage — same qualification as the removal
-          // flow's archive set.
-          if (summary.blank || summary.origin === 'subagent') continue
-          if (!archived.has(sessionId)) archiveIds.push(sessionId)
-        }
-        // The activity figure and the manager dialog's last-use column share
-        // one helper, so the two views cannot drift apart.
-        activity[key] = freshestUpdatedAt(workspace.sessionIds.map(id => sessions.byId[id]))
-        archiveIdsByPath.set(key, archiveIds)
+
+      // Exclude official `.agents/worktrees` from automatic pruning even when
+      // official worktree management is enabled in the manager modal.
+      const validPaths = scan.worktrees
+        .filter(entry => entry.repoName !== null && entry.source !== 'official')
+        .map(entry => entry.path)
+      for (const worktreePath of validPaths) {
+        const key = pathKey(worktreePath)
+        const owned = collectWorktreeOwnership(worktreePath, workspaceRows, sessions, archivedIds)
+        if (owned.running) exclude.add(key)
+        if (owned.workspaceId !== undefined) workspaceIdByPath.set(key, owned.workspaceId)
+        activity[key] = owned.activity
+        archiveIdsByPath.set(key, owned.archiveIds)
       }
-      // Host 0.1.6 dropped `sessions.current` (navigation belongs to view
-      // owners): the main-view session is whichever row the main view
-      // retains — the same derivation as upstream ui-workspace's
-      // mainSessionId.
-      const currentCwd = Object.values(sessions.byId).find(
-        session => (session.retainedBy.mainView ?? 0) > 0,
-      )?.cwd
+
+      // Exclude whichever directory the main-view session currently works in
+      // (reads projected `workingDirectory` first so shared-workspace sessions
+      // protect their active worktree).
+      const mainSessionId = Object.entries(sessions.byId).find(
+        ([, summary]) => (summary?.retainedBy?.mainView ?? 0) > 0,
+      )?.[0]
+      const currentCwd = mainSessionId === undefined ? undefined : selectSessionDirectory(sessions, mainSessionId)
       if (currentCwd !== undefined) exclude.add(pathKey(currentCwd))
+
       const plan = planPrune({
-        paths: scan.worktrees.filter(entry => entry.repoName !== null).map(entry => entry.path),
+        paths: validPaths,
         activity,
         keep,
         exclude,
@@ -314,31 +586,116 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     inject: chipInjected,
   }, BranchChipDock))
 
+  // Composer-top dock card for deferred worktree creation in shared-workspace
+  // mode: shows armed status (with Cancel), live creation steps, and failure
+  // recovery (Retry / Continue without worktree).
+  const handledCompletions = new Set<string>()
+  const onDeferredCompleted = (sessionId: string, completed: DeferredWorktreeCompleted): void => {
+    const key = `${sessionId}\0${pathKey(completed.path)}`
+    if (handledCompletions.has(key)) return
+    handledCompletions.add(key)
+    const sessionsApi = ctx.sessions as typeof ctx.sessions & {
+      refreshProjections?: (id: SessionId) => Promise<void>
+    }
+    void sessionsApi.refreshProjections?.(sessionId as SessionId).catch(() => {})
+    void gitCache.refresh([completed.path])
+    const t = ctx.locale.bind(NS)
+    if (completed.fetchWarning !== undefined) emitToast(t('fetchWarning', { message: completed.fetchWarning }))
+    if (completed.excludeWarning !== undefined) emitToast(t('excludeWarning', { message: completed.excludeWarning }))
+    if (completed.copyWarning !== undefined) emitToast(t('copyWarning', { message: completed.copyWarning }))
+    const prune = chipInjected().pruneWorktrees
+    if (prune !== undefined) {
+      void prune(completed.path).then((report) => {
+        if (report === undefined) return
+        if (report.removed.length > 0) emitToast(t('pruneDone', { n: report.removed.length }))
+        if (report.failed.length > 0) emitToast(t('pruneFailed', { n: report.failed.length }))
+      }).catch(() => { /* auto-prune must not disrupt an active turn */ })
+    }
+  }
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'git-worktree-deferred',
+    order: 5,
+    locale: NS,
+    inject: () => ({ onDeferredCompleted }),
+  }, DeferredWorktreeDock))
+
+  // Shadow official top-right `forge-panel.worktree` in blank sessions when
+  // `hideOfficialWorktreeEntry` is enabled (default true); dynamically releases
+  // the override when the user turns the switch off in plugin settings.
+  let pluginDisposed = false
+  let officialEntryDisposer: (() => void) | undefined
+  const syncOfficialEntryOverride = (): void => {
+    if (pluginDisposed) return
+    const shouldHide = readHideOfficialEntry()
+    if (shouldHide && officialEntryDisposer === undefined) {
+      officialEntryDisposer = ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
+        name: 'conversation.hero.options',
+        id: OFFICIAL_WORKTREE_SLOT_ID,
+        priority: -10,
+        inject: () => ({ cancelOfficialWorktree }),
+      }, HiddenOfficialWorktreeEntry))
+    } else if (!shouldHide && officialEntryDisposer !== undefined) {
+      officialEntryDisposer()
+      officialEntryDisposer = undefined
+    }
+  }
+  syncOfficialEntryOverride()
+  const unsubHideOfficialSynced = hideOfficialRef?.subscribe(syncOfficialEntryOverride)
+  const unsubHideOfficialForm = groupingForm.subscribe(syncOfficialEntryOverride)
+  ctx.effect(() => () => {
+    unsubHideOfficialSynced?.()
+    unsubHideOfficialForm()
+    officialEntryDisposer?.()
+    officialEntryDisposer = undefined
+  }, 'git-worktree: official worktree entry override lifecycle')
+
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'git-worktree-toasts',
     order: 20,
   }, WorktreeToastHost))
 
-  const gitCache = createWorkspaceGitCache()
+  let lastSyncedPathSignature = ''
   const syncWorkspaceGitFacts = (): void => {
-    const paths = ctx.workspaces.list.getSnapshot().items.map(workspace => workspace.path)
-    void gitCache.syncPaths(paths, true)
+    const workspaces = ctx.workspaces.list.getSnapshot()
+    const sessions = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+    const archived = new Set(workspaces.archivedSessionIds as readonly string[])
+    const seen = new Map<string, string>()
+    for (const workspace of workspaces.items) {
+      if (workspace.path.length > 0) seen.set(pathKey(workspace.path), workspace.path)
+    }
+    for (const sessionId of Object.keys(sessions.byId)) {
+      if (archived.has(sessionId)) continue
+      const dir = selectSessionDirectory(sessions, sessionId)
+      if (dir !== undefined && dir.length > 0) seen.set(pathKey(dir), dir)
+    }
+    const signature = [...seen.keys()].sort().join('\0')
+    if (signature === lastSyncedPathSignature) return
+    lastSyncedPathSignature = signature
+    void gitCache.syncPaths([...seen.values()], true)
   }
   const resolveSessionPathFromCtx = (sessionId: string): string | undefined =>
-    resolveSessionPath(
+    resolveEffectiveSessionPath(
+      ctx.sessions as unknown as SessionsDirectorySourceLike,
       sessionId,
-      ctx.sessions.list.getSnapshot().byId,
-      ctx.workspaces.list.getSnapshot().items,
+      ctx.workspaces.list.getSnapshot().items.map(item => ({
+        workspaceId: item.workspaceId as string,
+        path: item.path,
+        sessionIds: item.sessionIds as readonly string[],
+      })),
     )
   syncWorkspaceGitFacts()
   const unsubscribeWorkspaces = isObservable(ctx.workspaces.list)
     ? ctx.workspaces.list.subscribe(syncWorkspaceGitFacts)
     : undefined
-  let pluginDisposed = false
+  const unsubscribeSessions = isObservable(ctx.sessions.list)
+    ? ctx.sessions.list.subscribe(syncWorkspaceGitFacts)
+    : undefined
   ctx.effect(() => () => {
     pluginDisposed = true
     unsubscribeWorkspaces?.()
+    unsubscribeSessions?.()
     gitCache.dispose()
   }, 'git-worktree: workspace git cache lifecycle')
 
@@ -403,9 +760,9 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     },
     archiveSession: (sessionId) => ctx.workspaces.archiveSession(sessionId as SessionId),
     deleteWorkspace: (workspaceId) => ctx.workspaces.delete(workspaceId as WorkspaceId),
-    openWorktree: async (path) => {
-      const workspace = await ctx.workspaces.create({ path })
-      ctx.uiWorkspace.startSession(workspace.workspaceId)
+    describeWorktreeOwnership: (path) => ownershipFacts(path),
+    openWorktree: async (path, repoRoot) => {
+      await adoptWorktree(path, repoRoot === undefined ? undefined : { repoRoot })
     },
     onWorktreeRemoved: (path) => {
       gitCache.invalidate(path)
@@ -424,6 +781,8 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       return {
         manager: managerFace(),
         adoptWorktree: chip.adoptWorktree,
+        isSwitchSessionDirectory: chip.isSwitchSessionDirectory,
+        armDeferredWorktree: chip.armDeferredWorktree,
         describeWorktreeRemoval: chip.describeWorktreeRemoval,
         removeWorktree: chip.removeWorktree,
         pruneWorktrees: chip.pruneWorktrees,
@@ -435,9 +794,22 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
 
   // Native sidebar decorations for linked worktree sessions (DSH 0.2.2-rc.5+):
   // trailing branch badge and hover card repository/branch identity.
+  // Covers both standalone worktree Workspaces and shared-workspace sessions
+  // switched into a worktree (since the host exposes session-row slots rather
+  // than a workspace-row trailing slot), while yielding when official
+  // `forgeWorktree` already owns the session decoration.
+  const sessionMenuInjected = () => ({
+    gitCache,
+    resolveSessionPath: resolveSessionPathFromCtx,
+  })
   const badgeInjected = () => ({
     gitCache,
     resolveSessionPath: resolveSessionPathFromCtx,
+    sessionsObservable: isObservable(ctx.sessions.list) ? ctx.sessions.list : undefined,
+    shouldDecorateSession: (sessionId: string): boolean => {
+      const sessions = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+      return !hasForgeManagedWorktree(sessions, sessionId)
+    },
   })
   ctx.slots.inject('sidebar.session.row.trailing', () => ctx.slots.register({
     name: 'sidebar.session.row.trailing',
@@ -464,7 +836,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
       id: 'git-worktree-remove',
       order: 500,
       locale: NS,
-      inject: badgeInjected,
+      inject: sessionMenuInjected,
     }, LegacySessionMenuItem))
   }
   const unmountLegacySessionMenu = (): void => {

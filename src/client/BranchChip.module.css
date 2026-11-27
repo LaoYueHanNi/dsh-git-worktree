@@ -60,43 +60,43 @@
   position: fixed;
   z-index: 1000;
   width: max-content;
-  min-width: 168px;
-  max-width: min(400px, 80vw);
-  padding: 4px;
+  min-width: 248px;
+  max-width: min(300px, 80vw);
+  padding: 10px 12px 8px;
   border: 0;
-  border-radius: var(--dsw-radius-xl, 20px);
+  border-radius: var(--dsw-radius-lg, 14px);
   background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2));
   backdrop-filter: var(--dsw-menu-backdrop-filter);
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .popAsk {
   margin: 0;
-  padding: 6px 8px;
+  padding: 0 2px;
   font-size: 13px;
-  line-height: 20px;
+  line-height: 19px;
   color: inherit;
   overflow-wrap: anywhere;
 }
 
 .popSubject {
   margin: 0;
-  padding: 0 8px 2px;
+  padding: 0 2px;
   font-size: 13px;
-  line-height: 20px;
+  line-height: 19px;
   font-weight: 500;
   color: inherit;
   overflow-wrap: anywhere;
 }
 
 .popDetails {
-  padding: 0 8px 2px;
+  padding: 0 2px;
 }
 
 .popDetail {
@@ -113,13 +113,13 @@
 
 .popActions {
   display: flex;
-  gap: 2px;
-  padding: 2px;
+  gap: 6px;
+  padding: 2px 0 0;
 }
 
 .popActions button {
   flex: 1 1 0;
-  height: 28px;
+  height: 30px;
   border: none;
   border-radius: var(--dsw-radius-sm, 8px);
   background: transparent;
@@ -439,25 +439,28 @@
 
 .menuCreate {
   box-sizing: border-box;
-  width: 248px;
-  height: 30px;
-  padding: 0 8px;
-  border: none;
+  width: 100%;
+  min-width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.1));
   border-radius: var(--dsw-radius-sm, 8px);
-  background: transparent;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.04));
   color: inherit;
   font: inherit;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 20px;
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
 
 .menuCreate::placeholder {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary));
 }
 
 .menuCreate:focus {
   outline: none;
+  border-color: var(--dsw-alias-link);
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
@@ -467,7 +470,7 @@
 
 .menuCreateHintBad {
   margin: 0;
-  padding: 0 8px;
+  padding: 0 2px;
   font-size: 12px;
   line-height: 16px;
   color: var(--dsw-alias-state-error-primary);

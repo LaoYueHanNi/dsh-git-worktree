@@ -87,3 +87,57 @@ export function branchNameIssue(name: string): BranchNameIssue | null {
   if (/(^|\/)[^/]+\.lock($|\/)/.test(name)) return 'illegal'
   return null
 }
+
+/**
+ * Default random 4-hex suffix generator (works in both Node and browser).
+ * Uses `crypto.getRandomValues` when available and falls back to `Math.random`.
+ */
+export function defaultRandomHex4(): string {
+  const cryptoObj = globalThis.crypto
+  if (cryptoObj !== undefined && typeof cryptoObj.getRandomValues === 'function') {
+    const bytes = new Uint8Array(2)
+    cryptoObj.getRandomValues(bytes)
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  }
+  return Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0')
+}
+
+/**
+ * Normalize a base branch stem so appending `-<4hex>` always produces a valid
+ * git branch name (handles detached `HEAD`, trailing slashes/dots, or empty input).
+ */
+function randomBranchStem(base: string): string {
+  const trimmed = base.trim()
+  if (trimmed === '' || trimmed === 'HEAD') return 'wt'
+  const cleaned = trimmed
+    .replace(/^[-/]+/, '')
+    .replace(/[./]+$/, '')
+    .replace(/\/+/g, '/')
+  if (cleaned === '' || branchNameIssue(`${cleaned}-0000`) !== null) return 'wt'
+  return cleaned
+}
+
+/**
+ * Generate a human-readable random branch name based on `base` (`<stem>-<4hex>`),
+ * avoiding collisions with `isTaken`. Pure and shared between Host and Client.
+ * @param base - local base branch name (without remote prefix) or `HEAD`.
+ * @param isTaken - optional predicate returning true when a candidate already exists.
+ * @param randomHex - injectable 4-hex generator for deterministic testing.
+ */
+export function generateRandomBranchName(
+  base: string,
+  isTaken?: (candidate: string) => boolean,
+  randomHex: () => string = defaultRandomHex4,
+): string {
+  const stem = randomBranchStem(base)
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const suffix = randomHex().toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 4).padStart(4, '0')
+    const candidate = `${stem}-${suffix}`
+    if (!(isTaken?.(candidate) ?? false)) return candidate
+  }
+  for (let i = 1; ; i += 1) {
+    const suffix = randomHex().toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 4).padStart(4, '0')
+    const candidate = `${stem}-${suffix}-${i}`
+    if (!(isTaken?.(candidate) ?? false)) return candidate
+  }
+}

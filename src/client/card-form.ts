@@ -51,6 +51,12 @@ export interface SectionValue {
   keepWorktrees?: number
   /** Post-create configuration files to copy when .worktreeinclude is absent. */
   postCreateCopyFiles?: string[]
+  /** Hide the official top-right new-worktree control in blank sessions; absent = on. */
+  hideOfficialWorktreeEntry?: boolean
+  /** Open worktrees by switching the session working directory under the parent repository workspace; absent = off. */
+  switchSessionDirectory?: boolean
+  /** Include official `<repo>/.agents/worktrees` worktrees in the worktree manager; absent = off. */
+  manageOfficialWorktrees?: boolean
 }
 
 /**
@@ -70,7 +76,13 @@ export interface CardStore {
 /** Which write-through switch failed to persist, if any. Unlike the staged
  * root field these flip immediately, so a rejected write leaves the control
  * silently snapping back — the card needs to say which one did not take. */
-export type SwitchField = 'fetchBeforeCreate' | 'openGraphByDefault' | 'autoPruneWorktrees'
+export type SwitchField =
+  | 'fetchBeforeCreate'
+  | 'openGraphByDefault'
+  | 'autoPruneWorktrees'
+  | 'hideOfficialWorktreeEntry'
+  | 'switchSessionDirectory'
+  | 'manageOfficialWorktrees'
 
 /** What the git-worktree settings card renders. */
 export interface CardState {
@@ -95,6 +107,12 @@ export interface CardState {
   openGraphByDefault: boolean
   /** Resolved auto-prune switch (user layer over the default off). */
   autoPruneWorktrees: boolean
+  /** Resolved hide-official-worktree-entry switch (user layer over the default on). */
+  hideOfficialWorktreeEntry: boolean
+  /** Resolved switch-session-directory switch (user layer over the default off). */
+  switchSessionDirectory: boolean
+  /** Resolved manage-official-worktrees switch (user layer over the default off). */
+  manageOfficialWorktrees: boolean
   /** The keep-cap field as TEXT: the effective value, or the live draft. */
   keepWorktreesText: string
   /** True when the keep field (draft or effective) is a usable integer >= 1.
@@ -122,6 +140,12 @@ export interface CardActions {
   setOpenGraphByDefault: (value: boolean) => void
   /** Persist the auto-prune switch (takes effect immediately). */
   setAutoPruneWorktrees: (value: boolean) => void
+  /** Persist the hide-official-worktree-entry switch (takes effect immediately). */
+  setHideOfficialWorktreeEntry: (value: boolean) => void
+  /** Persist the switch-session-directory switch (takes effect immediately). */
+  setSwitchSessionDirectory: (value: boolean) => void
+  /** Persist the manage-official-worktrees switch (takes effect immediately). */
+  setManageOfficialWorktrees: (value: boolean) => void
   /** Stage draft text for the keep-cap field (validated on save). */
   editKeepWorktrees: (text: string) => void
   /** Stage draft text for the post-create copy files field. */
@@ -177,9 +201,12 @@ export class CardForm {
         this.failed = false
         this.publish()
       },
-      setFetchBeforeCreate: (value) => this.setSimpleFlag('fetchBeforeCreate', value),
-      setOpenGraphByDefault: (value) => this.setSimpleFlag('openGraphByDefault', value),
-      setAutoPruneWorktrees: (value) => this.setSimpleFlag('autoPruneWorktrees', value),
+      setFetchBeforeCreate: (value) => this.setSimpleFlag('fetchBeforeCreate', value, false),
+      setOpenGraphByDefault: (value) => this.setSimpleFlag('openGraphByDefault', value, false),
+      setAutoPruneWorktrees: (value) => this.setSimpleFlag('autoPruneWorktrees', value, false),
+      setHideOfficialWorktreeEntry: (value) => this.setSimpleFlag('hideOfficialWorktreeEntry', value, true),
+      setSwitchSessionDirectory: (value) => this.setSimpleFlag('switchSessionDirectory', value, false),
+      setManageOfficialWorktrees: (value) => this.setSimpleFlag('manageOfficialWorktrees', value, false),
       editKeepWorktrees: (text) => {
         this.keepDraft = text
         this.failed = false
@@ -234,8 +261,8 @@ export class CardForm {
    * snapping back with no explanation. The failure is recorded instead and
    * the card renders a retry note beside the switch.
    */
-  private async setSimpleFlag(field: 'fetchBeforeCreate' | 'openGraphByDefault' | 'autoPruneWorktrees', value: boolean): Promise<void> {
-    const current = this.scope.getSnapshot().value?.[field] ?? false
+  private async setSimpleFlag(field: SwitchField, value: boolean, fallback: boolean): Promise<void> {
+    const current = this.scope.getSnapshot().value?.[field] ?? fallback
     if (value === current) return
     try {
       await this.scope.set(field, value)
@@ -337,6 +364,9 @@ export class CardForm {
       fetchBeforeCreate: this.scope.getSnapshot().value?.fetchBeforeCreate ?? false,
       openGraphByDefault: this.scope.getSnapshot().value?.openGraphByDefault ?? false,
       autoPruneWorktrees: this.scope.getSnapshot().value?.autoPruneWorktrees ?? false,
+      hideOfficialWorktreeEntry: this.scope.getSnapshot().value?.hideOfficialWorktreeEntry ?? true,
+      switchSessionDirectory: this.scope.getSnapshot().value?.switchSessionDirectory ?? false,
+      manageOfficialWorktrees: this.scope.getSnapshot().value?.manageOfficialWorktrees ?? false,
       keepWorktreesText: keepText,
       keepWorktreesValid: keepParsed !== undefined && keepParsed >= 1,
       switchFailed: this.switchFailed,

@@ -27,6 +27,7 @@ const WATCHED = [
   // — precisely the shape this gate exists for.
   'BranchMenu.tsx', 'WorktreeManagerModal.tsx', 'CommitGraph.tsx',
   'WorktreeActionHost.tsx', 'SidebarWorktreeBadge.tsx', 'LegacySessionMenuItem.tsx',
+  'DeferredWorktreeDock.tsx',
 ] as const
 
 /** One violation: a later-declared const referenced by an earlier JSX const. */

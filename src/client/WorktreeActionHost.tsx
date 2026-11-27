@@ -16,11 +16,12 @@ import {
   Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { BranchEntry, RepoStatus } from '../wire.ts'
+import type { BranchEntry, DeferredWorktreeSpec, RepoStatus } from '../wire.ts'
 import { branchNameIssue } from '../normalize.ts'
 import { closeWorktreeAction, getWorktreeAction, subscribeWorktreeAction } from './action-bus.ts'
 import { fetchStatus, requestInspectWorktree, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { explainGitOpFailure } from './git-error.ts'
+import type { AdoptWorktreeOptions } from './slots.ts'
 import { emitToast } from './toast-bus.ts'
 import { WorktreeManagerModal, type WorktreeManagerFace } from './WorktreeManagerModal.tsx'
 import css from './WorktreeActionHost.module.css'
@@ -33,7 +34,9 @@ export interface PruneSummaryLike {
 
 export interface WorktreeActionHostInjected {
   readonly manager: WorktreeManagerFace
-  readonly adoptWorktree: (path: string) => Promise<void>
+  readonly adoptWorktree: (path: string, options?: AdoptWorktreeOptions) => Promise<void>
+  readonly isSwitchSessionDirectory?: (() => boolean) | undefined
+  readonly armDeferredWorktree?: ((spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>) | undefined
   readonly describeWorktreeRemoval: (path: string) => { running: boolean; archiveCount: number }
   readonly removeWorktree: (path: string, force: boolean) => Promise<void>
   readonly pruneWorktrees?: ((createdPath: string) => Promise<PruneSummaryLike | undefined>) | undefined
@@ -177,7 +180,9 @@ type RepoReady = Extract<RepoStatus, { repo: true }>
 interface CreateModalProps {
   readonly repoPath: string
   readonly repoName: string
-  readonly adoptWorktree: (path: string) => Promise<void>
+  readonly adoptWorktree: (path: string, options?: AdoptWorktreeOptions) => Promise<void>
+  readonly isSwitchSessionDirectory?: (() => boolean) | undefined
+  readonly armDeferredWorktree?: ((spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>) | undefined
   readonly pruneWorktrees?: ((createdPath: string) => Promise<PruneSummaryLike | undefined>) | undefined
   readonly onCreated: (path: string) => void
   readonly onClose: () => void
@@ -188,6 +193,8 @@ function CreateWorktreeModal({
   repoPath,
   repoName,
   adoptWorktree,
+  isSwitchSessionDirectory,
+  armDeferredWorktree,
   pruneWorktrees,
   onCreated,
   onClose,
@@ -249,7 +256,7 @@ function CreateWorktreeModal({
 
   const finishWorktree = async (targetPath: string, warnings?: { fetchWarning?: string; excludeWarning?: string; copyWarning?: string }): Promise<void> => {
     onCreated(targetPath)
-    await adoptWorktree(targetPath)
+    await adoptWorktree(targetPath, status === null ? undefined : { repoRoot: status.repoRoot })
     if (warnings?.fetchWarning !== undefined) emitToast(t('fetchWarning', { message: warnings.fetchWarning }))
     if (warnings?.excludeWarning !== undefined) emitToast(t('excludeWarning', { message: warnings.excludeWarning }))
     if (warnings?.copyWarning !== undefined) emitToast(t('copyWarning', { message: warnings.copyWarning }))
@@ -263,10 +270,57 @@ function CreateWorktreeModal({
     onClose()
   }
 
+  const armDeferred = (spec: DeferredWorktreeSpec): void => {
+    if (armDeferredWorktree === undefined || status === null) return
+    void armDeferredWorktree(spec, { repoRoot: status.repoRoot }).then(
+      () => {
+        setCreating(false)
+        onClose()
+      },
+      (reason: unknown) => {
+        setCreating(false)
+        setCreateError(reason instanceof Error ? reason.message : String(reason))
+      },
+    )
+  }
+
+  const createWithRandomBranch = (): void => {
+    if (creating || status === null) return
+    setCreating(true)
+    setCreateError(null)
+    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
+      armDeferred({ repoPath, branch: status.currentBranch, cutout: true, random: true })
+      return
+    }
+    void requestWorktreeCutout(repoPath, status.currentBranch, undefined, { random: true }).then(
+      async (result) => {
+        if (!result.ok) {
+          setCreating(false)
+          setCreateError(describeWorktreeError(result.error, status.currentBranch, t))
+          return
+        }
+        try {
+          await finishWorktree(result.path, result)
+        } catch (reason: unknown) {
+          setCreating(false)
+          setCreateError(reason instanceof Error ? reason.message : String(reason))
+        }
+      },
+      (reason: unknown) => {
+        setCreating(false)
+        setCreateError(reason instanceof Error ? reason.message : String(reason))
+      },
+    )
+  }
+
   const createFromNewBranch = (): void => {
     if (!canCutNewBranch || creating || status === null) return
     setCreating(true)
     setCreateError(null)
+    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
+      armDeferred({ repoPath, branch: status.currentBranch, cutout: true, name: trimmed })
+      return
+    }
     void requestWorktreeCutout(repoPath, status.currentBranch, trimmed).then(
       async (result) => {
         if (!result.ok) {
@@ -302,8 +356,16 @@ function CreateWorktreeModal({
     }
     const isMainOccupied = entry.kind === 'local'
       && status.worktrees.some(wt => wt.main && wt.branch === entry.name)
+    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
+      armDeferred(
+        isMainOccupied
+          ? { repoPath, branch: entry.name, cutout: true, random: true }
+          : { repoPath, branch: entry.name, cutout: false },
+      )
+      return
+    }
     const call = isMainOccupied
-      ? requestWorktreeCutout(repoPath, entry.name)
+      ? requestWorktreeCutout(repoPath, entry.name, undefined, { random: true })
       : requestWorktree(repoPath, entry.name)
     void call.then(
       async (result) => {
@@ -360,9 +422,14 @@ function CreateWorktreeModal({
                 setCreateError(null)
               }}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && canCutNewBranch) {
-                  event.preventDefault()
-                  createFromNewBranch()
+                if (event.key === 'Enter') {
+                  if (canCutNewBranch) {
+                    event.preventDefault()
+                    createFromNewBranch()
+                  } else if (trimmed === '') {
+                    event.preventDefault()
+                    createWithRandomBranch()
+                  }
                 }
               }}
             />
@@ -372,6 +439,21 @@ function CreateWorktreeModal({
             {creating && <div className={css.status} role="status">{t('createModal.creating')}</div>}
             {createError !== null && <div className={css.error} role="alert">{createError}</div>}
             <div className={css.list} role="listbox">
+              {trimmed === '' && (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  className={`${css.branchRow} ${css.cutoutRow}`}
+                  disabled={creating}
+                  onClick={createWithRandomBranch}
+                >
+                  <span className={css.branchIcon} aria-hidden="true"><IconPlusOutlineRegular size={14} /></span>
+                  <span className={css.branchName}>
+                    {t('createModal.cutRandomBranch', { base: status.currentBranch })}
+                  </span>
+                </button>
+              )}
               {canCutNewBranch && (
                 <button
                   type="button"
@@ -423,6 +505,8 @@ function CreateWorktreeModal({
 export function WorktreeActionHost({
   manager,
   adoptWorktree,
+  isSwitchSessionDirectory,
+  armDeferredWorktree,
   describeWorktreeRemoval,
   removeWorktree,
   pruneWorktrees,
@@ -464,6 +548,8 @@ export function WorktreeActionHost({
       repoPath={action.repoPath}
       repoName={action.repoName}
       adoptWorktree={adoptWorktree}
+      isSwitchSessionDirectory={isSwitchSessionDirectory}
+      armDeferredWorktree={armDeferredWorktree}
       pruneWorktrees={pruneWorktrees}
       onCreated={onWorktreeCreated}
       onClose={closeWorktreeAction}

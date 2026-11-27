@@ -74,6 +74,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { branchNameIssue, localBranchName } from '../normalize.ts'
 import type { BranchEntry, PushBody, RepoStatus, WorktreeEntry } from '../wire.ts'
 import { fetchStatus, requestCreateBranch, requestDeleteBranch, requestFetch, requestInspectWorktree, requestPush, requestRenameBranch, requestSwitch, requestUpdate, requestWorktree, requestWorktreeCutout } from './api.ts'
+import { selectSessionDirectory } from './session-directory.ts'
 import { subscribeCheckedOutBranch } from './head-poll.ts'
 import { PushDialog } from './PushDialog.tsx'
 import { forgetAuthors } from './author-cache.ts'
@@ -498,10 +499,9 @@ function ChipConfirm({
 }
 
 /** The tool-row entry registered into conversation.input.left. */
-export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, describeWorktreeRemoval, removeWorktree, pruneWorktrees, openGraphByDefault, t }: BranchChipDockProps) {
-  const summary = useSessions(state => state.byId[sessionId])
+export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktree, isSwitchSessionDirectory, armDeferredWorktree, describeWorktreeRemoval, removeWorktree, pruneWorktrees, openGraphByDefault, t }: BranchChipDockProps) {
+  const cwd = useSessions(state => selectSessionDirectory(state as never, sessionId))
   const session = useSession(s => s)
-  const cwd = summary?.cwd
   const [repo, refresh] = useRepoStatus(cwd)
   const syncJob = useSyncJob(cwd)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -862,15 +862,21 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     return Promise.resolve(undefined)
   }, [blocked, cwd, noteBranchSync, pushToast, refresh, t])
 
+  const adoptOptions = useCallback(() => ({
+    ...(session.blank && repo.facts?.main === true ? { reuseBlankSessionId: sessionId } : {}),
+    ...(repo.facts?.repoRoot === undefined ? {} : { repoRoot: repo.facts.repoRoot }),
+  }), [repo.facts?.main, repo.facts?.repoRoot, session.blank, sessionId])
+
   /** Worktree-group flow: hop the session into the EXISTING worktree
    * directory. No git action, no confirm — the row menu's hop IS the jump
    * (a directory jump is reversible and touches nothing), and the owner's
-   * adoptWorktree registers the folder and opens a blank session there. */
+   * adoptWorktree opens the worktree (either as a standalone Workspace or by
+   * switching the session's working directory when shared mode is enabled). */
   const doAdoptWorktree = useCallback((path: string): void => {
     if (blocked()) return
     busyRef.current = true
     setBusy(true)
-    adoptWorktree(path)
+    adoptWorktree(path, adoptOptions())
       .then(() => { setMenuOpen(false) })
       .catch((cause: unknown) => {
         showError(cause instanceof Error ? cause.message : String(cause))
@@ -879,21 +885,48 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         busyRef.current = false
         setBusy(false)
       })
-  }, [adoptWorktree, blocked, showError])
+  }, [adoptOptions, adoptWorktree, blocked, showError])
 
-  /** Worktree flow: POST /worktree (create-or-reuse, or cut out a new
-   * branch under an explicit name), register the directory, hop sessions.
-   * After the hop the lazy auto-prune fires (fire-and-forget — a slow
-   * removal must not hold the confirm dialog open), and a failed
-   * pre-create fetch surfaces as a toast without undoing the creation. */
+  /** Worktree flow: in shared-workspace mode (`switchSessionDirectory`), new
+   * worktrees are armed lazily until the first user message arrives while
+   * existing worktrees still switch immediately; in standalone-workspace mode,
+   * POST /worktree runs immediately and opens the workspace. */
   const doWorktree = useCallback((branch: string, cutout: boolean, name?: string) => runGuarded(async () => {
     if (cwd === undefined) return 'no session directory'
+    const customName = name?.trim()
+    if (isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined) {
+      const existing = cutout
+        ? undefined
+        : repo.facts?.worktrees.find(w => !w.main && w.branch === localBranchName(branch))
+      if (existing !== undefined) {
+        try {
+          await adoptWorktree(existing.path, adoptOptions())
+          return undefined
+        } catch (cause) {
+          return cause instanceof Error ? cause.message : String(cause)
+        }
+      }
+      try {
+        await armDeferredWorktree({
+          repoPath: cwd,
+          branch,
+          cutout,
+          ...(customName !== undefined && customName !== '' ? { name: customName } : {}),
+          ...(cutout && (customName === undefined || customName === '') ? { random: true } : {}),
+        }, adoptOptions())
+        return undefined
+      } catch (cause) {
+        return cause instanceof Error ? cause.message : String(cause)
+      }
+    }
     const result = cutout
-      ? await requestWorktreeCutout(cwd, branch, name)
+      ? (customName !== undefined && customName !== ''
+          ? await requestWorktreeCutout(cwd, branch, customName)
+          : await requestWorktreeCutout(cwd, branch, undefined, { random: true }))
       : await requestWorktree(cwd, branch)
     if (!result.ok) return result.error
     try {
-      await adoptWorktree(result.path)
+      await adoptWorktree(result.path, adoptOptions())
     } catch (cause) {
       return cause instanceof Error ? cause.message : String(cause)
     }
@@ -917,7 +950,7 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       }
     }).catch(() => { /* a prune failure must not disturb the session flow */ })
     return undefined
-  }), [adoptWorktree, pruneWorktrees, cwd, pushToast, runGuarded, t])
+  }), [adoptOptions, adoptWorktree, armDeferredWorktree, cwd, isSwitchSessionDirectory, pruneWorktrees, pushToast, repo.facts?.worktrees, runGuarded, t])
 
   const facts = repo.facts
   // The session sits in a linked worktree when its own directory is NOT the
@@ -951,17 +984,18 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
   if (facts === null) return null
 
   const confirmLocalName = confirm === null ? '' : localBranchName(confirm.branch)
-  // The cutout dialog carries an EDITABLE new-branch name (pre-filled with
-  // the first free `<branch>-wt`); validated exactly like the create
-  // flyout — git ref-name rules plus a duplicate check against the rows.
+  // The cutout dialog carries an optional new-branch name: leaving it blank
+  // automatically generates a random branch name on the host; any non-blank
+  // input is validated against git ref-name rules and local duplicates.
   const isCutout = confirm?.kind === 'worktree-cutout'
   const cutoutDraft = isCutout ? confirm.draft ?? '' : ''
-  const cutoutIssue = isCutout ? branchNameIssue(cutoutDraft) : null
-  const cutoutDuplicate = isCutout && cutoutIssue === null && localNames.includes(cutoutDraft)
+  const cutoutBlank = cutoutDraft.trim() === ''
+  const cutoutIssue = isCutout && !cutoutBlank ? branchNameIssue(cutoutDraft) : null
+  const cutoutDuplicate = isCutout && !cutoutBlank && cutoutIssue === null && localNames.includes(cutoutDraft)
   const cutoutValid = cutoutIssue === null && !cutoutDuplicate
   const cutoutHint = cutoutDuplicate
     ? t('menuNewBranchExists')
-    : cutoutIssue !== null && cutoutIssue !== 'empty'
+    : cutoutIssue !== null
       ? t('menuNewBranchBad')
       : undefined
   // Reuse applies only to the plain create flow: a cutout always cuts a
@@ -1031,14 +1065,13 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     cancelLabel: t('actionCancel'),
     ...(confirm.kind === 'delete' || confirm.kind === 'remove-worktree' ? { danger: true } : {}),
     busy,
-    // The cutout dialog carries an EDITABLE new-branch name (typed by
-    // hand): the menu-open flyout renders the input from these fields —
-    // same shape the standalone ChipConfirm spreads below.
+    // The cutout dialog carries an optional new-branch name: leaving it blank
+    // generates a random branch name automatically.
     ...(confirm.kind === 'worktree-cutout'
       ? {
           draft: cutoutDraft,
           onDraftChange: (value: string) => { setConfirm(current => current?.kind === 'worktree-cutout' ? { ...current, draft: value } : current) },
-          draftPlaceholder: t('menuNewBranchPlaceholder'),
+          draftPlaceholder: t('cutoutNewBranchPlaceholder'),
           ...(cutoutValid ? {} : { draftInvalid: true }),
           ...(cutoutHint === undefined ? {} : { draftHint: cutoutHint }),
         }
@@ -1111,9 +1144,10 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         onCutWorktree={(base) => {
           // The cutout dialog staged from a RIGHT-CLICKED row: the base is
           // that row's branch (the current checkout included — the cut is
-          // the isolated-worktree move). The new-branch name is typed by
-          // hand (empty start, confirm disables until valid).
-          setConfirm({ kind: 'worktree-cutout', branch: base })
+          // the isolated-worktree move). Leaving the name blank generates a
+          // random branch automatically.
+          const row = rows.find(r => r.name === base)
+          setConfirm({ kind: 'worktree-cutout', branch: base, remote: row?.kind === 'remote' })
         }}
         onRemoveWorktree={stageRemoveWorktree}
         // The running-session withhold reads the live snapshot at render
@@ -1172,13 +1206,6 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
         <ChipConfirm
           anchorRef={chipRef}
           {...confirmBundle}
-          {...isCutout ? { draft: cutoutDraft } : {}}
-          {...isCutout
-            ? { onDraftChange: (value: string) => { setConfirm(current => current?.kind === 'worktree-cutout' ? { ...current, draft: value } : current) } }
-            : {}}
-          draftPlaceholder={t('menuNewBranchPlaceholder')}
-          {...isCutout && !cutoutValid ? { draftInvalid: true } : {}}
-          {...cutoutHint === undefined ? {} : { draftHint: cutoutHint }}
         />
       )}
       {pushBranch !== null && cwd !== undefined && <PushDialog key={`${cwd}:${pushBranch}`} repoPath={cwd} repoName={facts.repoName}

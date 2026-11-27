@@ -6,17 +6,18 @@
 import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
-import { appendWorktreeExclude, fsExcludeSeams, CancelledError, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
+import { appendWorktreeExclude, fsExcludeSeams, CancelledError, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, randomCutoutBranchName, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, writeWorktreeBaseBranch, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
 import { readCheckedOutBranch } from './head.js'
 import { invalidateAuthorCache, readAuthors, readHistory, readCommit } from './history.js'
 import type { AuthorList, AuthorsBody, HistoryBody, CommitBody, CommitHistory, CommitDetail } from './wire.js'
 import { openPush, previewPush, pushBranch } from './push.js'
-import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
+import { isAbsoluteConfigPath, localBranchName, sanitizeBranchDir } from './normalize.js'
 import { createProgressReader } from './progress.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, PushPlanBody, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SwitchBody, SwitchResult, SyncEvent, UpdateBody, UpdateResult, WorktreesAllResult,
+  ArmDeferredWorktreeBody, CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeferredWorktreeActionBody, DeferredWorktreePhase, DeferredWorktreeSnapshot, DeferredWorktreeSpec, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, PushPlanBody, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SetSessionDirectoryBody, SetSessionDirectoryResult, SwitchBody, SwitchResult, SyncEvent, UpdateBody, UpdateResult, WorktreesAllResult,
 } from './wire.js'
+import type { DeferredCreateOutcome, DeferredWorktreeCoordinator } from './deferred-worktree.js'
 
 /** Everything the handlers need from the host half. */
 export interface RouteDeps {
@@ -27,6 +28,8 @@ export interface RouteDeps {
   sectionFetchBeforeCreate: () => boolean | undefined
   /** Post-create configuration files to copy when .worktreeinclude is absent. */
   sectionPostCreateCopyFiles?: () => string[] | undefined
+  /** Whether `/worktrees-all` and `/purge` also cover official `<repo>/.agents/worktrees`. */
+  sectionManageOfficialWorktrees?: () => boolean | undefined
   /** User home directory seam. */
   home: () => string
   /** `$DSH_HOME` environment value seam. */
@@ -47,6 +50,12 @@ export interface RouteDeps {
   listDir?: (path: string) => Promise<string[]>
   /** Recursive force rm seam (fs.rm with retries); tests substitute. */
   rmRecursive?: (path: string) => Promise<void>
+  /** Move a live session's working directory via host `agents` + `workingDirectory` services. */
+  setSessionDirectory?: (sessionId: string, path: string) => Promise<string>
+  /** Deferred worktree creation coordinator (available when host supports workingDirectory). */
+  deferredWorktrees?: DeferredWorktreeCoordinator
+  /** Deterministic 4-hex generator seam for random cutout branch tests. */
+  randomHex?: () => string
 }
 
 /** Real fs-backed one-level directory listing (names only). Plain FILES are
@@ -79,7 +88,7 @@ export async function fsMkdirRecursive(path: string): Promise<void> {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: AuthorList | CommitHistory | CommitDetail | PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | RouteError
+  body: AuthorList | CommitHistory | CommitDetail | PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | SetSessionDirectoryResult | DeferredWorktreeSnapshot | { ok: true } | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -145,6 +154,9 @@ export async function handleGroupWorktrees(deps: RouteDeps, body: unknown): Prom
 /** The project-internal layout directory name every repository uses. */
 const PROJECT_LAYOUT_DIR = join('.dsh', 'gitworktree')
 
+/** The official DSH worktree layout directory inside a repository. */
+const OFFICIAL_LAYOUT_DIR = join('.agents', 'worktrees')
+
 /**
  * Whether `canonical` sits DIRECTLY inside a `<repo>/.dsh/gitworktree`
  * layout root whose repository actually exists on disk. The layout names its
@@ -157,6 +169,15 @@ function insideProjectLayout(canonical: string, dirExists: DirExists): boolean {
   const dsh = dirname(layout)
   if (basename(dsh) !== '.dsh') return false
   return dirExists(join(dirname(dsh), '.git'))
+}
+
+/** Whether `canonical` sits DIRECTLY inside a `<repo>/.agents/worktrees` directory. */
+function insideOfficialLayout(canonical: string, dirExists: DirExists): boolean {
+  const layout = dirname(canonical)
+  if (basename(layout) !== 'worktrees') return false
+  const agents = dirname(layout)
+  if (basename(agents) !== '.agents') return false
+  return dirExists(join(dirname(agents), '.git'))
 }
 
 /**
@@ -198,7 +219,7 @@ export async function handleWorktreesAll(deps: RouteDeps, body: unknown): Promis
   const listDir = deps.listDir ?? fsListDir
   const facts: WorktreesAllResult['worktrees'] = []
   let truncated = false
-  const scanLocation = async (root: string, source: 'legacy' | 'project'): Promise<void> => {
+  const scanLocation = async (root: string, source: 'legacy' | 'project' | 'official'): Promise<void> => {
     const listed = await listDir(root)
     if (listed.length > SCAN_CHILDREN_LIMIT) {
       truncated = true
@@ -242,8 +263,12 @@ export async function handleWorktreesAll(deps: RouteDeps, body: unknown): Promis
       if (workspaceFacts !== undefined) repoRoots.add(workspaceFacts.repoRoot)
     }
   }
+  const includeOfficial = deps.sectionManageOfficialWorktrees?.() === true
   for (const repoRoot of repoRoots) {
     await scanLocation(join(repoRoot, PROJECT_LAYOUT_DIR), 'project')
+    if (includeOfficial) {
+      await scanLocation(join(repoRoot, OFFICIAL_LAYOUT_DIR), 'official')
+    }
   }
 
   return { status: 200, body: { worktrees: facts, legacyRoot, legacyRootExists, ...truncated ? { truncated } : {} } }
@@ -284,7 +309,13 @@ export async function handlePurgeDirectory(deps: RouteDeps, body: unknown): Prom
   }
   const rootDir = resolveRootDir(deps.sectionRootDir(), deps.home(), deps.envHome())
   const canonical = resolve(path)
-  if (dirname(canonical) !== resolve(rootDir) && !insideProjectLayout(canonical, deps.dirExists ?? fsDirExists)) {
+  const allowOfficialPurge = deps.sectionManageOfficialWorktrees?.() === true
+  const dirExists = deps.dirExists ?? fsDirExists
+  if (
+    dirname(canonical) !== resolve(rootDir)
+    && !insideProjectLayout(canonical, dirExists)
+    && !(allowOfficialPurge && insideOfficialLayout(canonical, dirExists))
+  ) {
     return fail(400, `"${canonical}" is outside the plugin's worktree storage locations`)
   }
   const statDirectory = deps.statDirectory ?? fsStatDirectory
@@ -461,88 +492,131 @@ export async function handleCommit(deps: RouteDeps, body: unknown): Promise<Rout
  * @param deps - host dependencies.
  * @param body - parsed request body.
  */
+/**
+ * Shared worktree creation execution pipeline used by both immediate
+ * `POST /worktree` and deferred first-turn creation.
+ */
+export async function executeCreateWorktree(
+  deps: RouteDeps,
+  spec: DeferredWorktreeSpec,
+  onPhase?: (phase: Exclude<DeferredWorktreePhase, 'switch'>, resolvedBranch?: string) => void,
+): Promise<DeferredCreateOutcome> {
+  const { repoPath, branch, cutout, random, name } = spec
+  const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+  if (facts === undefined) {
+    throw Object.assign(new Error(`"${repoPath}" is not inside a git repository`), { httpStatus: 400 })
+  }
+  const excludeWarning = await appendWorktreeExclude(deps.excludeSeams ?? fsExcludeSeams, facts.repoRoot)
+  const layoutRoot = join(facts.repoRoot, PROJECT_LAYOUT_DIR)
+  let fetchWarning: string | undefined
+  if (deps.sectionFetchBeforeCreate() === true) {
+    const resolved = await resolveBranch(deps.exec, facts.repoRoot, branch)
+    if (resolved?.remote !== undefined) {
+      onPhase?.('fetch')
+      try {
+        await fetchAll(deps.exec, facts.repoRoot)
+      } catch (error) {
+        fetchWarning = error instanceof GitError ? error.stderr.trim() : error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+  const warnings = {
+    ...(fetchWarning === undefined ? {} : { fetchWarning }),
+    ...(excludeWarning === undefined ? {} : { excludeWarning }),
+  }
+  if (cutout) {
+    const custom = name?.trim()
+    if (custom !== undefined && custom !== '') {
+      if (custom.startsWith('-')) {
+        throw Object.assign(new Error('"name" must not start with "-"'), { httpStatus: 400 })
+      }
+      onPhase?.('create', custom)
+      const target = join(layoutRoot, sanitizeBranchDir(custom))
+      await mkdirSlot(deps, layoutRoot)
+      await addWorktreeCutout(deps.exec, facts.repoRoot, branch, custom, target)
+      await writeWorktreeBaseBranch(target, branch)
+      onPhase?.('copy', custom)
+      const copyWarning = await runPostCreateCopy(deps, facts.repoRoot, target)
+      return {
+        path: target,
+        branch: custom,
+        created: true,
+        ...warnings,
+        ...(copyWarning === undefined ? {} : { copyWarning }),
+      }
+    }
+    const dirExists = deps.dirExists ?? fsDirExists
+    const folderTaken = (candidate: string): boolean =>
+      dirExists(join(layoutRoot, sanitizeBranchDir(candidate)))
+    const newBranch = random === true
+      ? await randomCutoutBranchName(deps.exec, facts.repoRoot, branch, folderTaken, deps.randomHex)
+      : await cutoutBranchName(deps.exec, facts.repoRoot, branch, folderTaken)
+    onPhase?.('create', newBranch)
+    const target = join(layoutRoot, sanitizeBranchDir(newBranch))
+    await mkdirSlot(deps, layoutRoot)
+    await addWorktreeCutout(deps.exec, facts.repoRoot, branch, newBranch, target)
+    await writeWorktreeBaseBranch(target, branch)
+    onPhase?.('copy', newBranch)
+    const copyWarning = await runPostCreateCopy(deps, facts.repoRoot, target)
+    return {
+      path: target,
+      branch: newBranch,
+      created: true,
+      ...warnings,
+      ...(copyWarning === undefined ? {} : { copyWarning }),
+    }
+  }
+  const localName = localBranchName(branch)
+  onPhase?.('create', localName)
+  const target = join(layoutRoot, sanitizeBranchDir(branch))
+  await mkdirSlot(deps, layoutRoot)
+  const result = await addWorktree(deps.exec, facts.repoRoot, branch, target, deps.dirExists)
+  let copyWarning: string | undefined
+  if (result.created) {
+    if (branch !== localName) await writeWorktreeBaseBranch(result.path, branch)
+    onPhase?.('copy', localName)
+    copyWarning = await runPostCreateCopy(deps, facts.repoRoot, result.path)
+  }
+  return {
+    path: result.path,
+    branch: localName,
+    created: result.created,
+    ...warnings,
+    ...(copyWarning === undefined ? {} : { copyWarning }),
+  }
+}
+
 export async function handleCreateWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  const parsed = readBody<CreateWorktreeBody>(body, ['repoPath', 'branch'], ['cutout'], ['name'])
+  const parsed = readBody<CreateWorktreeBody>(body, ['repoPath', 'branch'], ['cutout', 'random'], ['name'])
   if (isOutcome(parsed)) return parsed
-  const { repoPath, branch, cutout, name } = parsed
+  const { repoPath, branch, cutout, random, name } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (branch.trim() === '') return fail(400, '"branch" must be non-empty')
   try {
-    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
-    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
-    // Local-ignore first, creation second: the rule is harmless when the
-    // creation later fails (the directory simply does not exist), while the
-    // reverse order leaves a created worktree visible as untracked on the
-    // next `git status` when the write fails. A write failure never blocks
-    // the creation — the worktree cannot be rolled back — it rides the
-    // successful response as `excludeWarning` for the client to toast.
-    const excludeWarning = await appendWorktreeExclude(deps.excludeSeams ?? fsExcludeSeams, facts.repoRoot)
-    const layoutRoot = join(facts.repoRoot, PROJECT_LAYOUT_DIR)
-    // Optional pre-create remote sync — but only when the branch actually
-    // consumes remote data: a LOCAL branch's worktree (or an existing twin)
-    // never reads the fetched refs, so the resolve runs first and the fetch
-    // fires just for the remote-only shape (the twin `worktree add -b`
-    // consumes it, the cutout's arbitrary base too). Deliberately NOT a
-    // gate: a network hiccup must not block the creation — the failure
-    // rides the successful response as `fetchWarning` for the client to
-    // toast.
-    let fetchWarning: string | undefined
-    if (deps.sectionFetchBeforeCreate() === true) {
-      const resolved = await resolveBranch(deps.exec, facts.repoRoot, branch)
-      if (resolved?.remote !== undefined) {
-        try {
-          await fetchAll(deps.exec, facts.repoRoot)
-        } catch (error) {
-          fetchWarning = error instanceof GitError ? error.stderr.trim() : error instanceof Error ? error.message : String(error)
-        }
-      }
+    const outcome = await executeCreateWorktree(deps, {
+      repoPath,
+      branch,
+      cutout: cutout === true,
+      ...(name === undefined ? {} : { name }),
+      ...(random === undefined ? {} : { random }),
+    })
+    return {
+      status: 200,
+      body: {
+        path: outcome.path,
+        created: outcome.created,
+        ...(outcome.fetchWarning === undefined ? {} : { fetchWarning: outcome.fetchWarning }),
+        ...(outcome.excludeWarning === undefined ? {} : { excludeWarning: outcome.excludeWarning }),
+        ...(outcome.copyWarning === undefined ? {} : { copyWarning: outcome.copyWarning }),
+      },
     }
-    const warnings = { ...fetchWarning === undefined ? {} : { fetchWarning }, ...excludeWarning === undefined ? {} : { excludeWarning } }
-    if (cutout === true) {
-      // An explicit name skips the `-wt` suffix walk and is used verbatim —
-      // both for the branch and the storage folder. A leading dash would
-      // ride `worktree add -b` as a flag; any other git-invalid name
-      // surfaces through the error envelope (the client pre-flights).
-      const custom = name?.trim()
-      if (custom !== undefined && custom !== '') {
-        if (custom.startsWith('-')) return fail(400, '"name" must not start with "-"')
-        const target = join(layoutRoot, sanitizeBranchDir(custom))
-        await mkdirSlot(deps, layoutRoot)
-        await addWorktreeCutout(deps.exec, facts.repoRoot, branch, custom, target)
-        const copyWarning = await runPostCreateCopy(deps, facts.repoRoot, target)
-        const copyWarnObj = copyWarning !== undefined ? { copyWarning } : {}
-        return { status: 200, body: { path: target, created: true, ...warnings, ...copyWarnObj } }
-      }
-      // The new branch name must be known before the folder name can be
-      // computed: the folder carries the NEW branch's directory name. The
-      // name must be free in BOTH namespaces — the branch table and the
-      // storage folder: a leftover folder of a since-deleted branch would
-      // otherwise fail `worktree add` with a bare "already exists", so the
-      // suffix walk probes the folder too.
-      const dirExists = deps.dirExists ?? fsDirExists
-      const newBranch = await cutoutBranchName(deps.exec, facts.repoRoot, branch, (candidate) =>
-        dirExists(join(layoutRoot, sanitizeBranchDir(candidate))),
-      )
-      const target = join(layoutRoot, sanitizeBranchDir(newBranch))
-      await mkdirSlot(deps, layoutRoot)
-      await addWorktreeCutout(deps.exec, facts.repoRoot, branch, newBranch, target)
-      const copyWarning = await runPostCreateCopy(deps, facts.repoRoot, target)
-      const copyWarnObj = copyWarning !== undefined ? { copyWarning } : {}
-      return { status: 200, body: { path: target, created: true, ...warnings, ...copyWarnObj } }
-    }
-    // The folder name carries the branch: `<repo>/.dsh/gitworktree/<branch>`.
-    const target = join(layoutRoot, sanitizeBranchDir(branch))
-    await mkdirSlot(deps, layoutRoot)
-    const result = await addWorktree(deps.exec, facts.repoRoot, branch, target, deps.dirExists)
-    let copyWarning: string | undefined
-    if (result.created) {
-      copyWarning = await runPostCreateCopy(deps, facts.repoRoot, result.path)
-    }
-    const copyWarnObj = copyWarning !== undefined ? { copyWarning } : {}
-    return { status: 200, body: { ...result, ...warnings, ...copyWarnObj } }
   } catch (error) {
     if (error instanceof GitError) return gitFailure(error)
-    return fail(500, error instanceof Error ? error.message : String(error))
+    const status = typeof error === 'object' && error !== null && 'httpStatus' in error
+      && typeof (error as { httpStatus?: unknown }).httpStatus === 'number'
+      ? (error as { httpStatus: number }).httpStatus
+      : 500
+    return fail(status, error instanceof Error ? error.message : String(error))
   }
 }
 
@@ -974,4 +1048,100 @@ export async function handleEnsureDirectory(deps: RouteDeps, body: unknown): Pro
   } catch (error) {
     return fail(500, error instanceof Error ? error.message : String(error))
   }
+}
+
+/**
+ * POST /session-cwd — move a session's working directory to an existing
+ * directory via the host `workingDirectory` service. Used by the shared
+ * workspace mode (`switchSessionDirectory`) so a blank session stays under
+ * its parent repository workspace while working inside a linked worktree.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ sessionId, path }`.
+ */
+export async function handleSetSessionDirectory(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<SetSessionDirectoryBody>(body, ['sessionId', 'path'])
+  if (isOutcome(parsed)) return parsed
+  const sessionId = parsed.sessionId.trim()
+  const { path } = parsed
+  if (sessionId === '') return fail(400, '"sessionId" must be non-empty')
+  if (!isAbsoluteDir(path)) return fail(400, '"path" must be an absolute directory')
+  if (deps.setSessionDirectory === undefined) {
+    return fail(501, 'Session working directory switching is not supported by this host')
+  }
+  const canonical = resolve(path)
+  const statDirectory = deps.statDirectory ?? fsStatDirectory
+  if (!(await statDirectory(canonical))) {
+    return fail(400, `"${canonical}" is not an existing directory`)
+  }
+  try {
+    const committed = await deps.setSessionDirectory(sessionId, canonical)
+    return { status: 200, body: { sessionId, path: committed } }
+  } catch (error) {
+    const status = typeof error === 'object' && error !== null && 'httpStatus' in error
+      && typeof (error as { httpStatus?: unknown }).httpStatus === 'number'
+      ? (error as { httpStatus: number }).httpStatus
+      : 500
+    return fail(status, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** GET /deferred?sessionId=<id> — read a session's current deferred worktree state. */
+export async function handleGetDeferredWorktree(deps: RouteDeps, sessionId: string | undefined): Promise<RouteOutcome> {
+  if (sessionId === undefined || sessionId.trim() === '') {
+    return fail(400, 'query parameter "sessionId" must be non-empty')
+  }
+  const state = deps.deferredWorktrees?.get(sessionId.trim()) ?? null
+  return { status: 200, body: { state } }
+}
+
+/** POST /deferred/arm — arm a deferred worktree creation for a blank session. */
+export async function handleArmDeferredWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<ArmDeferredWorktreeBody>(body, ['sessionId', 'repoPath', 'branch'], ['cutout', 'random'], ['name'])
+  if (isOutcome(parsed)) return parsed
+  const sessionId = parsed.sessionId.trim()
+  if (sessionId === '') return fail(400, '"sessionId" must be non-empty')
+  if (!isAbsoluteDir(parsed.repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  if (parsed.branch.trim() === '') return fail(400, '"branch" must be non-empty')
+  const custom = parsed.name?.trim()
+  if (custom !== undefined && custom !== '' && custom.startsWith('-')) {
+    return fail(400, '"name" must not start with "-"')
+  }
+  if (deps.deferredWorktrees === undefined) {
+    return fail(501, 'Deferred worktree creation is not supported by this host')
+  }
+  try {
+    const state = deps.deferredWorktrees.arm(sessionId, {
+      repoPath: parsed.repoPath,
+      branch: parsed.branch,
+      cutout: parsed.cutout === true,
+      ...(custom !== undefined && custom !== '' ? { name: custom } : {}),
+      ...(parsed.random === true ? { random: true } : {}),
+    })
+    return { status: 200, body: { state } }
+  } catch (error) {
+    const status = typeof error === 'object' && error !== null && 'httpStatus' in error
+      && typeof (error as { httpStatus?: unknown }).httpStatus === 'number'
+      ? (error as { httpStatus: number }).httpStatus
+      : 500
+    return fail(status, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** POST /deferred/action — cancel, retry, or withdraw a deferred worktree. */
+export async function handleDeferredWorktreeAction(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<DeferredWorktreeActionBody>(body, ['sessionId', 'action'])
+  if (isOutcome(parsed)) return parsed
+  const sessionId = parsed.sessionId.trim()
+  if (sessionId === '') return fail(400, '"sessionId" must be non-empty')
+  const action = parsed.action
+  if (action !== 'cancel' && action !== 'retry' && action !== 'withdraw') {
+    return fail(400, '"action" must be "cancel", "retry", or "withdraw"')
+  }
+  if (deps.deferredWorktrees === undefined) {
+    return fail(501, 'Deferred worktree creation is not supported by this host')
+  }
+  if (action === 'cancel') deps.deferredWorktrees.cancel(sessionId)
+  else if (action === 'retry') deps.deferredWorktrees.retry(sessionId)
+  else deps.deferredWorktrees.withdraw(sessionId)
+  return { status: 200, body: { state: deps.deferredWorktrees.get(sessionId) } }
 }

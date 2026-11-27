@@ -29,13 +29,28 @@ describe('config section shapes', () => {
       openGraphByDefault: false,
       autoPruneWorktrees: false,
       keepWorktrees: 30,
+      hideOfficialWorktreeEntry: true,
+      switchSessionDirectory: false,
+      manageOfficialWorktrees: false,
     })
-    expect(sectionOf({ groupSidebar: false, fetchBeforeCreate: true, openGraphByDefault: true, autoPruneWorktrees: true, keepWorktrees: 5 })).toEqual({
+    expect(sectionOf({
       groupSidebar: false,
       fetchBeforeCreate: true,
       openGraphByDefault: true,
       autoPruneWorktrees: true,
       keepWorktrees: 5,
+      hideOfficialWorktreeEntry: false,
+      switchSessionDirectory: true,
+      manageOfficialWorktrees: true,
+    })).toEqual({
+      groupSidebar: false,
+      fetchBeforeCreate: true,
+      openGraphByDefault: true,
+      autoPruneWorktrees: true,
+      keepWorktrees: 5,
+      hideOfficialWorktreeEntry: false,
+      switchSessionDirectory: true,
+      manageOfficialWorktrees: true,
     })
     expect(sectionOf({ rootDir: 'D:\\wt' })).toEqual({
       rootDir: 'D:\\wt',
@@ -44,6 +59,9 @@ describe('config section shapes', () => {
       openGraphByDefault: false,
       autoPruneWorktrees: false,
       keepWorktrees: 30,
+      hideOfficialWorktreeEntry: true,
+      switchSessionDirectory: false,
+      manageOfficialWorktrees: false,
     })
     expect(sectionOf({ postCreateCopyFiles: ['.env'] })).toEqual({
       postCreateCopyFiles: ['.env'],
@@ -52,16 +70,31 @@ describe('config section shapes', () => {
       openGraphByDefault: false,
       autoPruneWorktrees: false,
       keepWorktrees: 30,
+      hideOfficialWorktreeEntry: true,
+      switchSessionDirectory: false,
+      manageOfficialWorktrees: false,
     })
   })
 
   it('validates the switch keys and rejects unknown keys', () => {
     expect(() => validateConfig({})).not.toThrow()
-    expect(() => validateConfig({ groupSidebar: false, fetchBeforeCreate: true, autoPruneWorktrees: true, keepWorktrees: 1, postCreateCopyFiles: ['.env'] })).not.toThrow()
+    expect(() => validateConfig({
+      groupSidebar: false,
+      fetchBeforeCreate: true,
+      autoPruneWorktrees: true,
+      keepWorktrees: 1,
+      postCreateCopyFiles: ['.env'],
+      hideOfficialWorktreeEntry: false,
+      switchSessionDirectory: true,
+      manageOfficialWorktrees: true,
+    })).not.toThrow()
     expect(() => validateConfig({ groupSidebar: 'yes' })).toThrow('"groupSidebar" must be a boolean')
     expect(() => validateConfig({ fetchBeforeCreate: 'yes' })).toThrow('"fetchBeforeCreate" must be a boolean')
     expect(() => validateConfig({ openGraphByDefault: 'yes' })).toThrow('"openGraphByDefault" must be a boolean')
     expect(() => validateConfig({ autoPruneWorktrees: 'yes' })).toThrow('"autoPruneWorktrees" must be a boolean')
+    expect(() => validateConfig({ hideOfficialWorktreeEntry: 'yes' as unknown as boolean })).toThrow('"hideOfficialWorktreeEntry" must be a boolean')
+    expect(() => validateConfig({ switchSessionDirectory: 'yes' as unknown as boolean })).toThrow('"switchSessionDirectory" must be a boolean')
+    expect(() => validateConfig({ manageOfficialWorktrees: 'yes' as unknown as boolean })).toThrow('"manageOfficialWorktrees" must be a boolean')
     expect(() => validateConfig({ postCreateCopyFiles: 'not-array' as unknown as string[] })).toThrow('"postCreateCopyFiles" must be an array of strings')
     expect(() => validateConfig({ postCreateCopyFiles: [123 as unknown as string] })).toThrow('"postCreateCopyFiles" must be an array of strings')
     expect(() => validateConfig({ groupSidebar: true, nope: 1 })).toThrow('unknown key "nope"')

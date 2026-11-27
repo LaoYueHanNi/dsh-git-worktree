@@ -14,16 +14,17 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Type-only: pulls the settings Context declaration merge (`ctx.settings`).
 import type {} from '@deepseek-ai/dsh-settings'
+import { DeferredWorktreeCoordinator, type DeferredAgentLike } from './deferred-worktree.js'
 import { childProcessExec } from './git.js'
 import {
-  handleCreateBranch, handleCreateWorktree, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePush, handlePushPlan, handlePushPreview, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
+  executeCreateWorktree, handleArmDeferredWorktree, handleCreateBranch, handleCreateWorktree, handleDeferredWorktreeAction, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGetDeferredWorktree, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePush, handlePushPlan, handlePushPreview, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleSetSessionDirectory, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
   type RouteDeps, type RouteLive, type RouteOutcome,
 } from './routes.js'
 import { validateRootDir } from './settings.js'
 import { handleAuthors, handleHistory, handleCommit } from './routes.js'
 import { ROUTE_AUTHORS, ROUTE_HISTORY, ROUTE_COMMIT } from './wire.js'
 import { streamRoute } from './stream.js'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_DEFERRED, ROUTE_DEFERRED_ACTION, ROUTE_DEFERRED_ARM, ROUTE_DEFERRED_EVENTS, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_SESSION_CWD, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -58,6 +59,13 @@ export interface Config {
   /** Post-create configuration files to copy when .worktreeinclude is absent;
    * absent = none. */
   postCreateCopyFiles?: Volatile<string[]> | string[]
+  /** Hide the official top-right new-worktree control in blank sessions; absent = on. */
+  hideOfficialWorktreeEntry?: Volatile<boolean> | boolean
+  /** Open worktrees by switching the session working directory under the parent
+   * repository workspace instead of creating a standalone workspace; absent = off. */
+  switchSessionDirectory?: Volatile<boolean> | boolean
+  /** Include official `<repo>/.agents/worktrees` worktrees in the worktree manager; absent = off. */
+  manageOfficialWorktrees?: Volatile<boolean> | boolean
 }
 
 /** The shipped prune cap (whole storage root, valid git worktrees only). */
@@ -76,12 +84,15 @@ export const Config: z = z.object({
   autoPruneWorktrees: z.boolean().default(false).volatile(),
   keepWorktrees: z.number().default(KEEP_WORKTREES_DEFAULT).volatile(),
   postCreateCopyFiles: z.array(z.string()).default([]).volatile(),
+  hideOfficialWorktreeEntry: z.boolean().default(true).volatile(),
+  switchSessionDirectory: z.boolean().default(false).volatile(),
+  manageOfficialWorktrees: z.boolean().default(false).volatile(),
 })
 
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: Config): void {
   const unknown = Object.keys(config).find(key =>
-    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'openGraphByDefault' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees' && key !== 'postCreateCopyFiles')
+    key !== 'rootDir' && key !== 'groupSidebar' && key !== 'fetchBeforeCreate' && key !== 'openGraphByDefault' && key !== 'autoPruneWorktrees' && key !== 'keepWorktrees' && key !== 'postCreateCopyFiles' && key !== 'hideOfficialWorktreeEntry' && key !== 'switchSessionDirectory' && key !== 'manageOfficialWorktrees')
   if (unknown !== undefined) {
     throw new Error(`GitWorktreeConfig: unknown key "${unknown}"`)
   }
@@ -104,6 +115,18 @@ export function validateConfig(config: Config): void {
   const autoPruneWorktrees = readVolatile(config.autoPruneWorktrees)
   if (autoPruneWorktrees !== undefined && typeof autoPruneWorktrees !== 'boolean') {
     throw new Error('GitWorktreeConfig: "autoPruneWorktrees" must be a boolean')
+  }
+  const hideOfficialWorktreeEntry = readVolatile(config.hideOfficialWorktreeEntry)
+  if (hideOfficialWorktreeEntry !== undefined && typeof hideOfficialWorktreeEntry !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "hideOfficialWorktreeEntry" must be a boolean')
+  }
+  const switchSessionDirectory = readVolatile(config.switchSessionDirectory)
+  if (switchSessionDirectory !== undefined && typeof switchSessionDirectory !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "switchSessionDirectory" must be a boolean')
+  }
+  const manageOfficialWorktrees = readVolatile(config.manageOfficialWorktrees)
+  if (manageOfficialWorktrees !== undefined && typeof manageOfficialWorktrees !== 'boolean') {
+    throw new Error('GitWorktreeConfig: "manageOfficialWorktrees" must be a boolean')
   }
   const postCreateCopyFiles = readVolatile(config.postCreateCopyFiles)
   if (postCreateCopyFiles !== undefined) {
@@ -148,6 +171,12 @@ export interface SectionConfig {
   keepWorktrees?: number
   /** Post-create configuration files to copy when .worktreeinclude is absent. */
   postCreateCopyFiles?: string[]
+  /** Hide the official top-right new-worktree control in blank sessions; absent = on. */
+  hideOfficialWorktreeEntry?: boolean
+  /** Switch session working directory under parent repository workspace instead of creating standalone workspaces; absent = off. */
+  switchSessionDirectory?: boolean
+  /** Include official `<repo>/.agents/worktrees` worktrees in the worktree manager; absent = off. */
+  manageOfficialWorktrees?: boolean
 }
 
 
@@ -162,6 +191,9 @@ export function sectionOf(config: Config): SectionConfig {
   const openGraphByDefault = readVolatile(config.openGraphByDefault)
   const autoPruneWorktrees = readVolatile(config.autoPruneWorktrees)
   const keepWorktrees = readVolatile(config.keepWorktrees)
+  const hideOfficialWorktreeEntry = readVolatile(config.hideOfficialWorktreeEntry)
+  const switchSessionDirectory = readVolatile(config.switchSessionDirectory)
+  const manageOfficialWorktrees = readVolatile(config.manageOfficialWorktrees)
   return {
     ...(rootDir === undefined ? {} : { rootDir }),
     ...(postCreateCopyFiles === undefined ? {} : { postCreateCopyFiles }),
@@ -172,7 +204,29 @@ export function sectionOf(config: Config): SectionConfig {
     openGraphByDefault: openGraphByDefault ?? false,
     autoPruneWorktrees: autoPruneWorktrees ?? false,
     keepWorktrees: keepWorktrees ?? KEEP_WORKTREES_DEFAULT,
+    hideOfficialWorktreeEntry: hideOfficialWorktreeEntry ?? true,
+    switchSessionDirectory: switchSessionDirectory ?? false,
+    manageOfficialWorktrees: manageOfficialWorktrees ?? false,
   }
+}
+
+interface HostAgentRegistryLike {
+  get(sessionId: string): unknown
+  resume?: (options: { readonly resumeSessionId: string }) => Promise<{ readonly agent: unknown; readonly dispose?: () => Promise<void> | void }>
+}
+
+interface HostWorkingDirectoryLike {
+  set(agent: unknown, path: string, signal?: AbortSignal): Promise<string>
+}
+
+const isHostAgentRegistryLike = (value: unknown): value is HostAgentRegistryLike =>
+  typeof value === 'object' && value !== null && typeof (value as { get?: unknown }).get === 'function'
+
+const isHostWorkingDirectoryLike = (value: unknown): value is HostWorkingDirectoryLike =>
+  typeof value === 'object' && value !== null && typeof (value as { set?: unknown }).set === 'function'
+
+function withHttpStatus(message: string, httpStatus: number): Error & { httpStatus: number } {
+  return Object.assign(new Error(message), { httpStatus })
 }
 
 /**
@@ -186,14 +240,89 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   const currentConfig = (): Config => (ctx.fiber?.config as Config | undefined) ?? config
 
-  const deps = (): RouteDeps => ({
+  let sessionDirectorySetter: ((sessionId: string, path: string) => Promise<string>) | undefined
+  let deferredWorktrees: DeferredWorktreeCoordinator | undefined
+
+  const baseDeps = (): RouteDeps => ({
     exec: childProcessExec,
     sectionRootDir: () => readVolatile(currentConfig().rootDir),
     sectionFetchBeforeCreate: () => readVolatile(currentConfig().fetchBeforeCreate),
     sectionPostCreateCopyFiles: () => readVolatile(currentConfig().postCreateCopyFiles),
+    sectionManageOfficialWorktrees: () => readVolatile(currentConfig().manageOfficialWorktrees),
+    ...(sessionDirectorySetter === undefined ? {} : { setSessionDirectory: sessionDirectorySetter }),
+    ...(deferredWorktrees === undefined ? {} : { deferredWorktrees }),
     home: () => homedir(),
     envHome: () => process.env.DSH_HOME,
   })
+
+  if (typeof ctx.inject === 'function') {
+    const injectOptional = ctx.inject.bind(ctx) as (
+      deps: readonly string[],
+      callback: (scope: Context) => void,
+    ) => unknown
+    injectOptional(['agents', 'workingDirectory'], (hostCtx) => {
+      const agentsCandidate = (hostCtx as unknown as { agents?: unknown }).agents
+      const workingDirCandidate = (hostCtx as unknown as { workingDirectory?: unknown }).workingDirectory
+      if (!isHostAgentRegistryLike(agentsCandidate) || !isHostWorkingDirectoryLike(workingDirCandidate)) return
+      const setter = async (sessionId: string, targetPath: string): Promise<string> => {
+        const live = agentsCandidate.get(sessionId)
+        if (live !== undefined) {
+          return await workingDirCandidate.set(live, targetPath)
+        }
+        if (typeof agentsCandidate.resume === 'function') {
+          const resumed = await agentsCandidate.resume({ resumeSessionId: sessionId })
+          try {
+            return await workingDirCandidate.set(resumed.agent, targetPath)
+          } finally {
+            await resumed.dispose?.()
+          }
+        }
+        throw withHttpStatus(`Session "${sessionId}" is not loaded`, 404)
+      }
+      const coordinator = new DeferredWorktreeCoordinator({
+        createWorktree: (spec, onPhase) => executeCreateWorktree(baseDeps(), spec, onPhase),
+        setWorkingDirectory: (agent, targetPath, signal) => workingDirCandidate.set(agent, targetPath, signal),
+      })
+      sessionDirectorySetter = setter
+      deferredWorktrees = coordinator
+
+      const listen = (hostCtx as unknown as {
+        on?: (event: string, listener: (...args: unknown[]) => unknown) => (() => void)
+      }).on?.bind(hostCtx)
+      const unsubInbox = listen?.('agent/inbox/inserted', (payload: unknown) => {
+        const record = payload as { readonly agent?: DeferredAgentLike; readonly message?: { readonly id?: string } } | undefined
+        if (record?.agent !== undefined) coordinator.onInboxInserted(record.agent, record.message)
+      })
+      const unsubPreStep = listen?.('agent/pre-step', async (payload: unknown, next: unknown) => {
+        const record = payload as { readonly agent?: DeferredAgentLike; readonly step?: number; readonly signal?: AbortSignal } | undefined
+        const callNext = typeof next === 'function' ? next as () => Promise<unknown> : async () => undefined
+        if (record?.agent !== undefined && typeof record.step === 'number') {
+          await coordinator.onPreStep(record.agent, record.step, record.signal)
+          const decision = await callNext() as { readonly kind?: string; readonly messages?: readonly unknown[] } | undefined
+          if (decision !== undefined && decision.kind !== 'reject' && Array.isArray(decision.messages) && decision.messages.length > 0) {
+            const nextStep = record.agent.inbox?.nextStep ?? []
+            const notices = nextStep.filter(item => item.source?.kind === 'working-directory')
+            if (notices.length > 0) {
+              for (const notice of notices) record.agent.inbox?.remove?.(notice.id)
+              return { ...decision, messages: [...decision.messages, ...notices] }
+            }
+          }
+          return decision
+        }
+        return await callNext()
+      })
+
+      hostCtx.effect(() => async () => {
+        unsubInbox?.()
+        unsubPreStep?.()
+        if (sessionDirectorySetter === setter) sessionDirectorySetter = undefined
+        if (deferredWorktrees === coordinator) deferredWorktrees = undefined
+        await coordinator.dispose()
+      }, 'git-worktree: optional workingDirectory & deferred worktree bridge')
+    })
+  }
+
+  const deps = (): RouteDeps => baseDeps()
 
   // In dsh 0.1.7+, the settings service projects volatile Config fields into forms.
   // We configure auto: false to inform the host that this plugin provides its own
@@ -298,5 +427,44 @@ export function apply(ctx: Context, config: Config = {}): void {
     postRoute(ROUTE_ENSURE_DIRECTORY, 'ensure-directory', handleEnsureDirectory)
     postRoute(ROUTE_WORKTREES_ALL, 'worktrees-all', handleWorktreesAll)
     postRoute(ROUTE_PURGE, 'purge', handlePurgeDirectory)
+    postRoute(ROUTE_SESSION_CWD, 'session-cwd', handleSetSessionDirectory)
+
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_DEFERRED, handler: async (req: IncomingMessage, res: ServerResponse) => {
+      /* v8 ignore next -- node:http always sets url on server requests. */
+      const query = new URL(req.url ?? '/', 'http://x').searchParams
+      send(res, await handleGetDeferredWorktree(deps(), query.get('sessionId') ?? undefined))
+    } }), 'git-worktree: deferred-get route')
+
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_DEFERRED_EVENTS, handler: (req: IncomingMessage, res: ServerResponse) => {
+      /* v8 ignore next -- node:http always sets url on server requests. */
+      const query = new URL(req.url ?? '/', 'http://x').searchParams
+      const sessionId = query.get('sessionId')?.trim() ?? ''
+      if (sessionId === '') {
+        send(res, { status: 400, body: { error: 'query parameter "sessionId" must be non-empty' } })
+        return
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+      })
+      const writeFrame = (payload: unknown): void => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`)
+      }
+      const coordinator = deferredWorktrees
+      writeFrame({ state: coordinator?.get(sessionId) ?? null })
+      const unsubscribe = coordinator?.subscribe(sessionId, writeFrame)
+      const heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(': keepalive\n\n')
+      }, 25_000)
+      req.on('close', () => {
+        clearInterval(heartbeat)
+        unsubscribe?.()
+        if (!res.writableEnded) res.end()
+      })
+    } }), 'git-worktree: deferred-events route')
+
+    postRoute(ROUTE_DEFERRED_ARM, 'deferred-arm', handleArmDeferredWorktree)
+    postRoute(ROUTE_DEFERRED_ACTION, 'deferred-action', handleDeferredWorktreeAction)
   })
 }

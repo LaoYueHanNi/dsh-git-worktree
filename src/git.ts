@@ -6,9 +6,9 @@
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
-import { localBranchName } from './normalize.js'
+import { generateRandomBranchName, localBranchName } from './normalize.js'
 import { stripProgress } from './progress.js'
 import type { BranchEntry, WorktreeEntry, WorkspaceGitFacts } from './wire.js'
 
@@ -534,6 +534,39 @@ export async function cutoutBranchName(
 }
 
 /**
+ * Plan a random branch name (`<stem>-<4hex>`) to cut out of `base`, avoiding
+ * collisions with existing local branches and storage folders. Remote display
+ * names (`origin/feat/x`) strip their remote prefix before generating the stem.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param base - base branch display name (local, `<remote>/<name>`, or `HEAD`).
+ * @param folderTaken - storage-folder occupancy probe (branch name → taken).
+ * @param randomHex - optional 4-hex generator seam for deterministic tests.
+ */
+export async function randomCutoutBranchName(
+  exec: Exec,
+  repoRoot: string,
+  base: string,
+  folderTaken?: (branch: string) => boolean,
+  randomHex?: () => string,
+): Promise<string> {
+  const out = await git(exec, repoRoot, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
+  const locals = new Set(out.split('\n').map(l => l.trim()).filter(l => l !== ''))
+  let stem = base
+  if (base !== 'HEAD' && !locals.has(base) && base.includes('/')) {
+    const remoteOut = await gitMaybe(exec, repoRoot, ['for-each-ref', `refs/remotes/${base}`, '--format=%(refname:short)'])
+    if (remoteOut !== undefined && remoteOut.trim() !== '') {
+      stem = localBranchName(base)
+    }
+  }
+  return generateRandomBranchName(
+    stem,
+    candidate => locals.has(candidate) || (folderTaken?.(candidate) ?? false),
+    randomHex,
+  )
+}
+
+/**
  * Create a worktree on a brand-new branch cut out of `base`: the base is
  * checked out by the main worktree (git forbids a second worktree on it),
  * so the new branch is created from it and checked out in the fresh
@@ -933,11 +966,60 @@ export async function probeWorkspaceGit(exec: Exec, path: string): Promise<Works
   // Git outputs carry forward slashes on Windows — normalize every derived
   // path so consumers can compare against join()-built ones.
   const gitDir = normalize(resolve(path, commonDir))
+  const main = isMainWorktree(toplevel, gitDir)
+  const baseBranch = main ? undefined : await readWorktreeBaseBranch(toplevel)
   return {
     repoRoot: dirname(gitDir),
     repoName: basename(dirname(gitDir)),
     branch: branchName === '' || branchName === 'HEAD' ? null : branchName,
-    main: isMainWorktree(toplevel, gitDir),
+    main,
+    ...(baseBranch === undefined ? {} : { baseBranch }),
+  }
+}
+
+/** Filename inside a linked worktree's gitdir storing the base branch it was created from. */
+const WORKTREE_BASE_FILE = 'dsh-worktree-base'
+
+/** Resolve the linked worktree's private gitdir from its `.git` pointer file. */
+async function resolveWorktreeGitDir(worktreePath: string): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(worktreePath, '.git'), 'utf8')
+    const match = /^gitdir:\s*(.+)$/m.exec(raw)
+    if (match === null) return undefined
+    const target = match[1]?.trim()
+    if (target === undefined || target === '') return undefined
+    return isAbsolute(target) ? normalize(target) : normalize(resolve(worktreePath, target))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Best-effort persistence of the base branch a linked worktree was created
+ * from, stored inside `<worktreeGitDir>/dsh-worktree-base` so it never dirties
+ * the working tree and is removed automatically by `git worktree remove`.
+ */
+export async function writeWorktreeBaseBranch(worktreePath: string, baseBranch: string): Promise<void> {
+  const trimmed = baseBranch.trim()
+  if (trimmed === '') return
+  const gitDir = await resolveWorktreeGitDir(worktreePath)
+  if (gitDir === undefined) return
+  try {
+    await writeFile(join(gitDir, WORKTREE_BASE_FILE), `${trimmed}\n`, 'utf8')
+  } catch {
+    // Metadata persistence must never fail worktree creation.
+  }
+}
+
+/** Read the persisted base branch for a linked worktree, or undefined when absent. */
+export async function readWorktreeBaseBranch(worktreePath: string): Promise<string | undefined> {
+  const gitDir = await resolveWorktreeGitDir(worktreePath)
+  if (gitDir === undefined) return undefined
+  try {
+    const text = (await readFile(join(gitDir, WORKTREE_BASE_FILE), 'utf8')).trim()
+    return text === '' ? undefined : text
+  } catch {
+    return undefined
   }
 }
 

@@ -46,6 +46,7 @@ export type GitWorktreeKey =
   | 'menuExpandAll'
   | 'menuCollapseAll'
   | 'menuNewBranchPlaceholder'
+  | 'cutoutNewBranchPlaceholder'
   | 'menuNewBranchBad'
   | 'menuNewBranchExists'
   | 'menuFetch'
@@ -151,6 +152,12 @@ export type GitWorktreeKey =
   | 'cardSwitchFailed'
   | 'cardOpenGraphLabel'
   | 'cardOpenGraphHint'
+  | 'cardHideOfficialWorktreeLabel'
+  | 'cardHideOfficialWorktreeHint'
+  | 'cardSwitchSessionDirLabel'
+  | 'cardSwitchSessionDirHint'
+  | 'cardManageOfficialWorktreesLabel'
+  | 'cardManageOfficialWorktreesHint'
   | 'cardManageWorktrees'
   | 'cardManageHint'
   | 'cardFetchBeforeCreateLabel'
@@ -181,7 +188,10 @@ export type GitWorktreeKey =
   | 'manager.countOrphans'
   | 'manager.orphans'
   | 'manager.sourceProject'
+  | 'manager.sourceOfficial'
   | 'manager.sourceLegacy'
+  | 'manager.modeStandalone'
+  | 'manager.modeSession'
   | 'manager.activityNever'
   | 'manager.dirty.one'
   | 'manager.dirty.other'
@@ -194,6 +204,7 @@ export type GitWorktreeKey =
   | 'manager.removeAria'
   | 'manager.refresh'
   | 'manager.openSession'
+  | 'manager.openSessionOfficialHint'
   | 'manager.copyPath'
   | 'manager.openFailed'
   | 'manager.scopeRepo'
@@ -208,16 +219,36 @@ export type GitWorktreeKey =
   | 'sidebar.worktreeBadgeWithBranch'
   | 'sidebar.worktreeHover'
   | 'sidebar.worktreeHoverWithBranch'
+  | 'sidebar.worktreeHoverLabel'
+  | 'sidebar.worktreeHoverFrom'
   | 'createModal.title'
   | 'createModal.loading'
   | 'createModal.loadFailed'
   | 'createModal.searchPlaceholder'
   | 'createModal.cutNewBranch'
+  | 'createModal.cutRandomBranch'
   | 'createModal.noMatches'
   | 'createModal.tagCurrent'
   | 'createModal.tagWorktree'
   | 'createModal.tagRemote'
   | 'createModal.creating'
+  | 'deferred.armedTitle'
+  | 'deferred.armedRandom'
+  | 'deferred.armedCutout'
+  | 'deferred.armedBranch'
+  | 'deferred.armedCancel'
+  | 'deferred.runningTitle'
+  | 'deferred.failedTitle'
+  | 'deferred.phaseFetch'
+  | 'deferred.phaseCreate'
+  | 'deferred.phaseCopy'
+  | 'deferred.phaseSwitch'
+  | 'deferred.labelBranch'
+  | 'deferred.labelBase'
+  | 'deferred.labelReason'
+  | 'deferred.waitingNote'
+  | 'deferred.retry'
+  | 'deferred.withdraw'
   | 'fetchWarning'
   | 'excludeWarning'
   | 'copyWarning'
@@ -294,6 +325,7 @@ export const en: Record<GitWorktreeKey, string> = {
   menuExpandAll: 'Expand all',
   menuCollapseAll: 'Collapse all',
   menuNewBranchPlaceholder: 'New branch name',
+  cutoutNewBranchPlaceholder: 'New branch name (blank = random)',
   menuNewBranchBad: 'Git will not accept this name',
   menuNewBranchExists: 'A branch with this name already exists',
   menuFetch: 'Fetch',
@@ -399,6 +431,12 @@ export const en: Record<GitWorktreeKey, string> = {
   cardSwitchFailed: 'This switch did not save. Try again.',
   cardOpenGraphLabel: 'Open the commit graph by default',
   cardOpenGraphHint: 'Clicking the branch button in the composer opens the graph.',
+  cardHideOfficialWorktreeLabel: 'Take over official new-worktree entry',
+  cardHideOfficialWorktreeHint: 'Hide the default new-worktree control in the top-right of blank sessions and manage worktrees from this plugin instead (keeps the right-side changes & review panel).',
+  cardSwitchSessionDirLabel: 'Switch worktree directory in current workspace (DSH official style)',
+  cardSwitchSessionDirHint: 'Open worktrees by switching the session working directory under its repository workspace instead of creating extra sidebar workspaces. New worktrees are created lazily when the first message is sent.',
+  cardManageOfficialWorktreesLabel: 'Manage official worktrees',
+  cardManageOfficialWorktreesHint: 'Include worktrees under <repo>/.agents/worktrees in the worktree manager for browsing, opening, or manual removal (never touched by auto-prune).',
   cardManageWorktrees: 'Manage worktrees…',
   cardManageHint: 'Browse and remove worktrees across repositories — including directories never registered as workspaces.',
   cardFetchBeforeCreateLabel: 'Fetch upstream before creating',
@@ -429,7 +467,10 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.countOrphans': ', {n} unrecognized',
   'manager.orphans': 'Unrecognized directories',
   'manager.sourceProject': 'in project',
+  'manager.sourceOfficial': 'DSH official',
   'manager.sourceLegacy': 'legacy location',
+  'manager.modeStandalone': 'Standalone workspace',
+  'manager.modeSession': 'Session dir',
   'manager.activityNever': 'no sessions',
   'manager.dirty.one': '{n} uncommitted file',
   'manager.dirty.other': '{n} uncommitted files',
@@ -442,6 +483,7 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.removeAria': 'Remove the worktree “{path}”',
   'manager.refresh': 'Refresh',
   'manager.openSession': 'Open session in this worktree',
+  'manager.openSessionOfficialHint': 'Reuse the native DSH worktree directory to continue the conversation',
   'manager.copyPath': 'Copy path',
   'manager.openFailed': 'Could not open worktree: {message}',
   'manager.scopeRepo': 'Current repository',
@@ -456,16 +498,36 @@ export const en: Record<GitWorktreeKey, string> = {
   'sidebar.worktreeBadgeWithBranch': 'Git worktree · {repo} ({branch})',
   'sidebar.worktreeHover': 'Worktree · {repo}',
   'sidebar.worktreeHoverWithBranch': 'Worktree · {repo} / {branch}',
+  'sidebar.worktreeHoverLabel': 'Worktree',
+  'sidebar.worktreeHoverFrom': 'Worktree · from {base}',
   'createModal.title': 'New worktree · {repo}',
   'createModal.loading': 'Loading branches…',
   'createModal.loadFailed': 'Could not load branches: {message}',
-  'createModal.searchPlaceholder': 'Search branches or enter a new branch name',
+  'createModal.searchPlaceholder': 'Search branches, type a new name, or leave blank for random',
   'createModal.cutNewBranch': 'Create branch “{name}” from {base} in a new worktree',
+  'createModal.cutRandomBranch': 'Quick-create worktree with a random branch from {base}',
   'createModal.noMatches': 'No matching branches',
   'createModal.tagCurrent': 'current',
   'createModal.tagWorktree': 'worktree',
   'createModal.tagRemote': 'remote',
   'createModal.creating': 'Creating worktree…',
+  'deferred.armedTitle': 'Will create a worktree when you send the first message',
+  'deferred.armedRandom': 'Random branch from {base}',
+  'deferred.armedCutout': 'New branch {name} from {base}',
+  'deferred.armedBranch': 'Branch {branch}',
+  'deferred.armedCancel': 'Cancel',
+  'deferred.runningTitle': 'Creating worktree',
+  'deferred.failedTitle': 'Failed to create worktree',
+  'deferred.phaseFetch': 'Syncing upstream remotes',
+  'deferred.phaseCreate': 'Creating branch and worktree',
+  'deferred.phaseCopy': 'Copying configuration files',
+  'deferred.phaseSwitch': 'Switching session directory',
+  'deferred.labelBranch': 'Branch',
+  'deferred.labelBase': 'Base',
+  'deferred.labelReason': 'Reason',
+  'deferred.waitingNote': 'Your message will be sent once the worktree is ready',
+  'deferred.retry': 'Retry',
+  'deferred.withdraw': 'Continue without worktree',
   fetchWarning: 'Upstream sync failed; created from the local state: {message}',
   excludeWarning: 'The ignore rule for the repository could not be written; `.dsh/` will show as untracked: {message}',
   copyWarning: 'Some configuration files could not be copied: {message}',
@@ -486,8 +548,8 @@ export const en: Record<GitWorktreeKey, string> = {
   'worktreeRemove.dirty.other': '{n} uncommitted files will be deleted with the folder.',
   'worktreeRemove.clean': 'No uncommitted changes.',
   'worktreeRemove.ahead': '{n} commits ahead of upstream, kept on the branch.',
-  'worktreeRemove.sessions.one': '{n} session in this workspace will be archived too.',
-  'worktreeRemove.sessions.other': '{n} sessions in this workspace will be archived too.',
+  'worktreeRemove.sessions.one': '{n} session associated with this worktree will be archived too.',
+  'worktreeRemove.sessions.other': '{n} sessions associated with this worktree will be archived too.',
   'worktreeRemove.busy': 'Removing…',
   'hover.copied': 'Copied',
   'time.now': 'now',
@@ -543,6 +605,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   menuExpandAll: '全部展开',
   menuCollapseAll: '全部折叠',
   menuNewBranchPlaceholder: '新分支名称',
+  cutoutNewBranchPlaceholder: '新分支名（留空随机生成）',
   menuNewBranchBad: 'Git 不接受该名称',
   menuNewBranchExists: '同名分支已存在',
   menuFetch: '提取',
@@ -648,6 +711,12 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardSwitchFailed: '该开关未保存，请重试。',
   cardOpenGraphLabel: '默认展开 Git 图谱',
   cardOpenGraphHint: '点击对话框里的分支图标时直接打开提交图谱。',
+  cardHideOfficialWorktreeLabel: '接管官方新建工作树入口',
+  cardHideOfficialWorktreeHint: '隐藏空白会话右上角默认的新建工作树按钮，统一由左下角分支菜单管理（不影响右侧变更与评审面板）。',
+  cardSwitchSessionDirLabel: '在当前工作区下切换工作树目录（同 DSH 官方方式）',
+  cardSwitchSessionDirHint: '新建或打开工作树时不再新增侧边栏工作区，直接在所属仓库下切换会话工作目录；新建工作树将在发送首条消息时延迟创建（已有独立工作区不受影响）。',
+  cardManageOfficialWorktreesLabel: '管理官方创建的工作树',
+  cardManageOfficialWorktreesHint: '在工作树管理弹窗中一并扫描并管理 <repo>/.agents/worktrees 下的官方工作树（仅支持查看、打开与手动删除，不参与自动清理）。',
   cardManageWorktrees: '管理工作树…',
   cardManageHint: '跨仓库查看并删除全部工作树，包含从未注册为工作区的目录。',
   cardFetchBeforeCreateLabel: '创建工作树前同步上游',
@@ -678,7 +747,10 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.countOrphans': '，{n} 个无法识别',
   'manager.orphans': '无法识别的目录',
   'manager.sourceProject': '项目内',
+  'manager.sourceOfficial': 'DSH 官方',
   'manager.sourceLegacy': '历史位置',
+  'manager.modeStandalone': '独立工作区',
+  'manager.modeSession': '会话目录',
   'manager.activityNever': '无会话',
   'manager.dirty.one': '{n} 个未提交文件',
   'manager.dirty.other': '{n} 个未提交文件',
@@ -691,6 +763,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.removeAria': '删除工作树“{path}”',
   'manager.refresh': '刷新',
   'manager.openSession': '在此工作树中打开会话',
+  'manager.openSessionOfficialHint': '复用 DSH 原生工作树目录继续对话',
   'manager.copyPath': '复制路径',
   'manager.openFailed': '无法打开工作树：{message}',
   'manager.scopeRepo': '当前仓库',
@@ -705,16 +778,36 @@ export const zh: Record<GitWorktreeKey, string> = {
   'sidebar.worktreeBadgeWithBranch': 'Git 工作树 · {repo}（{branch}）',
   'sidebar.worktreeHover': '工作树 · {repo}',
   'sidebar.worktreeHoverWithBranch': '工作树 · {repo} / {branch}',
+  'sidebar.worktreeHoverLabel': '工作树',
+  'sidebar.worktreeHoverFrom': '工作树 · 基于 {base}',
   'createModal.title': '新建工作树 · {repo}',
   'createModal.loading': '正在加载分支…',
   'createModal.loadFailed': '分支加载失败：{message}',
-  'createModal.searchPlaceholder': '搜索已有分支，或输入新分支名',
+  'createModal.searchPlaceholder': '搜索已有分支、输入新分支名，或留空快速生成随机分支',
   'createModal.cutNewBranch': '从 {base} 切出新分支“{name}”并新建工作树',
+  'createModal.cutRandomBranch': '从 {base} 快速创建随机分支工作树',
   'createModal.noMatches': '没有匹配的分支',
   'createModal.tagCurrent': '当前',
   'createModal.tagWorktree': '已有工作树',
   'createModal.tagRemote': '远程',
   'createModal.creating': '正在创建工作树…',
+  'deferred.armedTitle': '将在发送首条消息时创建工作树',
+  'deferred.armedRandom': '基于 {base} 随机生成分支',
+  'deferred.armedCutout': '基于 {base} 新建分支 {name}',
+  'deferred.armedBranch': '分支 {branch}',
+  'deferred.armedCancel': '取消',
+  'deferred.runningTitle': '正在创建工作树',
+  'deferred.failedTitle': '创建工作树失败',
+  'deferred.phaseFetch': '同步上游远程分支',
+  'deferred.phaseCreate': '创建分支与工作树',
+  'deferred.phaseCopy': '复制配置文件',
+  'deferred.phaseSwitch': '切换会话工作目录',
+  'deferred.labelBranch': '分支',
+  'deferred.labelBase': '基于',
+  'deferred.labelReason': '原因',
+  'deferred.waitingNote': '消息会在工作树建好后发送',
+  'deferred.retry': '重试',
+  'deferred.withdraw': '不使用工作树',
   fetchWarning: '上游同步失败，已按本地状态创建：{message}',
   excludeWarning: '仓库忽略规则写入失败，`.dsh/` 将显示为未跟踪目录：{message}',
   copyWarning: '部分配置文件未能复制到新工作树：{message}',
@@ -735,8 +828,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   'worktreeRemove.dirty.other': '{n} 个未提交文件将随目录一并删除。',
   'worktreeRemove.clean': '无未提交改动。',
   'worktreeRemove.ahead': '分支领先上游 {n} 个提交，提交将保留在分支上。',
-  'worktreeRemove.sessions.one': '该工作区下的 {n} 个会话将一并归档。',
-  'worktreeRemove.sessions.other': '该工作区下的 {n} 个会话将一并归档。',
+  'worktreeRemove.sessions.one': '此工作树关联的 {n} 个会话将一并归档。',
+  'worktreeRemove.sessions.other': '此工作树关联的 {n} 个会话将一并归档。',
   'worktreeRemove.busy': '删除中…',
   'hover.copied': '已复制',
   'time.now': '刚刚',
