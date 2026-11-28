@@ -292,6 +292,8 @@ export type GitWorktreeKey =
   | 'prModal.errWorktreeDirty'
   | 'prModal.errPrRefNotFound'
   | 'prModal.errPrAuthFailed'
+  | 'prModal.errPrTimeout'
+  | 'prModal.errPrNetworkFailed'
   | 'forgeSlot.checkoutTooltip'
   | 'forgeSlot.checkoutLabel'
   | 'forgeSlot.syncTooltip'
@@ -656,6 +658,8 @@ export const en: Record<GitWorktreeKey, string> = {
   'prModal.errWorktreeDirty': 'The PR worktree has uncommitted changes. Commit or stash them before updating.',
   'prModal.errPrRefNotFound': 'Could not find {ref} on remote "{remote}". Check the PR/MR number, remote, and host type.',
   'prModal.errPrAuthFailed': 'Authentication failed when fetching from remote "{remote}". Check your Git credentials or SSH key.',
+  'prModal.errPrTimeout': 'Timed out connecting to remote "{remote}". Check your network or proxy and try again.',
+  'prModal.errPrNetworkFailed': 'Could not reach remote "{remote}". Check your network connection and remote URL.',
   'forgeSlot.checkoutTooltip': 'Checkout PR/MR to isolated worktree',
   'forgeSlot.checkoutLabel': 'Checkout to worktree',
   'forgeSlot.syncTooltip': 'Sync this PR/MR worktree to latest',
@@ -1021,6 +1025,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   'prModal.errWorktreeDirty': '该 PR 工作树存在未提交改动，请先提交或暂存后再更新。',
   'prModal.errPrRefNotFound': '在 Remote“{remote}”上未找到引用 {ref}，请确认 PR / MR 编号、Remote 和平台类型是否正确。',
   'prModal.errPrAuthFailed': '从 Remote“{remote}”拉取失败：认证未通过。请检查 Git 凭据或 SSH 密钥配置。',
+  'prModal.errPrTimeout': '连接 Remote“{remote}”超时，请检查网络或代理后重试。',
+  'prModal.errPrNetworkFailed': '无法连接到 Remote“{remote}”，请检查网络连接与远端地址。',
   'forgeSlot.checkoutTooltip': '检出 PR / MR 到隔离工作树',
   'forgeSlot.checkoutLabel': '检出到工作树',
   'forgeSlot.syncTooltip': '同步此 PR / MR 工作树到最新',

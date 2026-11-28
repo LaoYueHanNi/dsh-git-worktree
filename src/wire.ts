@@ -721,6 +721,8 @@ export type PrErrorCode =
   | 'worktree_diverged'
   | 'pr_ref_not_found'
   | 'pr_auth_failed'
+  | 'pr_timeout'
+  | 'pr_network_failed'
 
 /** One Git remote classified for PR/MR resolution. */
 export interface PrRemoteInfo {

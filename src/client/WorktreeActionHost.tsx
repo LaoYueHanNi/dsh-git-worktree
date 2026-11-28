@@ -40,6 +40,8 @@ export interface WorktreeActionHostInjected {
   readonly isSwitchSessionDirectory?: (() => boolean) | undefined
   readonly armDeferredWorktree?: ((spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>) | undefined
   readonly currentSessionPath?: (() => string | undefined) | undefined
+  readonly hasStandaloneWorkspace?: ((path: string) => boolean) | undefined
+  readonly trackCurrentSessionPr?: ((url: string) => void) | undefined
   readonly forgeTrackAvailable?: boolean | (() => boolean)
   readonly describeWorktreeRemoval: (path: string) => { running: boolean; archiveCount: number }
   readonly removeWorktree: (path: string, force: boolean) => Promise<void>
@@ -528,6 +530,8 @@ export function WorktreeActionHost({
   isSwitchSessionDirectory,
   armDeferredWorktree,
   currentSessionPath,
+  hasStandaloneWorkspace,
+  trackCurrentSessionPr,
   forgeTrackAvailable,
   describeWorktreeRemoval,
   removeWorktree,
@@ -580,6 +584,8 @@ export function WorktreeActionHost({
         isSwitchSessionDirectory={isSwitchSessionDirectory}
         armDeferredWorktree={armDeferredWorktree}
         currentSessionPath={currentSessionPath}
+        hasStandaloneWorkspace={hasStandaloneWorkspace}
+        trackCurrentSessionPr={trackCurrentSessionPr}
         pruneWorktrees={pruneWorktrees}
         onCreated={onWorktreeCreated}
         onClose={closeWorktreeAction}

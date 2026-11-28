@@ -572,6 +572,111 @@ describe('CheckoutPrModal', () => {
     expect(unsupportedNodes.some(el => el.props.children === 'prModal.forgeListUnsupported')).toBe(true)
   })
 
+  it('syncs in-place without switching sessions when already inside the target PR worktree, and respects Rule A for existing standalone workspaces', async () => {
+    vi.mocked(requestPrContext).mockResolvedValue({
+      ok: true,
+      repoRoot: '/repo',
+      repoName: 'repo',
+      remotes: [{ name: 'origin', url: 'https://github.com/org/app.git', provider: 'github', host: 'github.com', owner: 'org', repo: 'app' }],
+      defaultRemote: 'origin',
+      forge: { available: true, readiness: 'ready' },
+      candidates: [],
+    })
+    vi.mocked(requestPrResolve).mockResolvedValue({
+      ok: true,
+      provider: 'github',
+      number: 99,
+      remote: 'origin',
+      refSpec: 'refs/pull/99/head',
+      localBranch: 'github-pr-99',
+      targetPath: '/repo/.dsh/gitworktree/github-pr-99',
+      canonicalUrl: 'https://github.com/org/app/pull/99',
+      existingWorktreePath: '/repo/.dsh/gitworktree/github-pr-99',
+      existingBranch: true,
+    })
+    vi.mocked(requestPrCheckout).mockResolvedValue({
+      ok: true,
+      path: '/repo/.dsh/gitworktree/github-pr-99',
+      created: false,
+      updated: true,
+      branch: 'github-pr-99',
+      provider: 'github',
+      number: 99,
+      canonicalUrl: 'https://github.com/org/app/pull/99',
+    })
+
+    // Case 1: already inside the target PR worktree -> sync in-place, never call adoptWorktree or armDeferredWorktree
+    const adoptWorktree = vi.fn().mockResolvedValue(undefined)
+    const armDeferredWorktree = vi.fn().mockResolvedValue(undefined)
+    const trackCurrentSessionPr = vi.fn()
+    const onCreated = vi.fn()
+    const onClose = vi.fn()
+    const inPlaceProps: CheckoutPrModalProps = {
+      repoPath: '/repo',
+      repoName: 'repo',
+      initialInput: 'https://github.com/org/app/pull/99',
+      initialIfExists: 'update',
+      forgeTrackAvailable: true,
+      adoptWorktree,
+      isSwitchSessionDirectory: () => true,
+      armDeferredWorktree,
+      currentSessionPath: () => '/repo/.dsh/gitworktree/github-pr-99',
+      trackCurrentSessionPr,
+      onCreated,
+      onClose,
+      t,
+    }
+    let tree = await hooks.flush(() => CheckoutPrModal(inPlaceProps))
+    await vi.advanceTimersByTimeAsync(200)
+    tree = await hooks.flush(() => CheckoutPrModal(inPlaceProps))
+    const syncBtn = nodes(tree).find(el => el.type === 'button' && el.props.variant === 'primary')!
+    ;(syncBtn.props.onClick as () => void)()
+    await vi.advanceTimersByTimeAsync(0)
+    await hooks.flush(() => CheckoutPrModal(inPlaceProps))
+
+    expect(onCreated).toHaveBeenCalledWith('/repo/.dsh/gitworktree/github-pr-99')
+    expect(adoptWorktree).not.toHaveBeenCalled()
+    expect(armDeferredWorktree).not.toHaveBeenCalled()
+    expect(trackCurrentSessionPr).toHaveBeenCalledWith('https://github.com/org/app/pull/99')
+    expect(onClose).toHaveBeenCalled()
+
+    // Case 2: switchSessionDirectory is on, but existing worktree already has a standalone workspace -> Rule A bypasses deferred arming
+    hooks.unmount()
+    adoptWorktree.mockClear()
+    armDeferredWorktree.mockClear()
+    onClose.mockClear()
+    const ruleAProps: CheckoutPrModalProps = {
+      repoPath: '/repo',
+      repoName: 'repo',
+      initialInput: '99',
+      initialIfExists: 'reuse',
+      forgeTrackAvailable: false,
+      adoptWorktree,
+      isSwitchSessionDirectory: () => true,
+      armDeferredWorktree,
+      currentSessionPath: () => '/repo',
+      hasStandaloneWorkspace: p => p === '/repo/.dsh/gitworktree/github-pr-99',
+      onCreated: vi.fn(),
+      onClose,
+      t,
+    }
+    tree = await hooks.flush(() => CheckoutPrModal(ruleAProps))
+    await vi.advanceTimersByTimeAsync(200)
+    tree = await hooks.flush(() => CheckoutPrModal(ruleAProps))
+    const openBtn = nodes(tree).find(el => el.type === 'button' && el.props.variant === 'primary')!
+    ;(openBtn.props.onClick as () => void)()
+    await vi.advanceTimersByTimeAsync(0)
+    await hooks.flush(() => CheckoutPrModal(ruleAProps))
+
+    expect(armDeferredWorktree).not.toHaveBeenCalled()
+    expect(adoptWorktree).toHaveBeenCalledWith('/repo/.dsh/gitworktree/github-pr-99', { repoRoot: '/repo' })
+    expect(onClose).toHaveBeenCalled()
+
+    // Formatters cover timeout & network codes cleanly
+    expect(formatPrError('raw timeout', 'pr_timeout', { remote: 'origin' }, t)).toContain('prModal.errPrTimeout')
+    expect(formatPrError('raw net', 'pr_network_failed', { remote: 'origin' }, t)).toContain('prModal.errPrNetworkFailed')
+  })
+
   it('degrades cleanly when forge is unavailable and hides auto-track checkbox', async () => {
     vi.mocked(requestPrContext).mockResolvedValue({
       ok: true,

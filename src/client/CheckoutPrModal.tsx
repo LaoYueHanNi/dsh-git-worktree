@@ -49,6 +49,8 @@ export interface CheckoutPrModalProps {
   readonly isSwitchSessionDirectory?: (() => boolean) | undefined
   readonly armDeferredWorktree?: ((spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>) | undefined
   readonly currentSessionPath?: (() => string | undefined) | undefined
+  readonly hasStandaloneWorkspace?: ((path: string) => boolean) | undefined
+  readonly trackCurrentSessionPr?: ((url: string) => void) | undefined
   readonly pruneWorktrees?: ((createdPath: string) => Promise<PruneSummaryLike | undefined>) | undefined
   readonly onCreated: (path: string) => void
   readonly onClose: () => void
@@ -109,6 +111,8 @@ export function CheckoutPrModal({
   isSwitchSessionDirectory,
   armDeferredWorktree,
   currentSessionPath,
+  hasStandaloneWorkspace,
+  trackCurrentSessionPr,
   pruneWorktrees,
   onCreated,
   onClose,
@@ -287,10 +291,15 @@ export function CheckoutPrModal({
     ) ?? null
   }, [resolved, selectedCandidate, context])
 
-  const handleRemoteChange = (nextRemote: string): void => {
+  const handleRemoteChange = (nextRemote: string, options?: { readonly preserveSelection?: boolean }): void => {
+    const preserve = options?.preserveSelection === true
     setRemote(nextRemote)
-    setProviderOverride('')
-    setSelectedCandidate(null)
+    if (!preserve) {
+      setProviderOverride('')
+      setSelectedCandidate(null)
+      setResolved(null)
+      setResolveError(null)
+    }
     setCheckoutError(null)
     setDivergedPrompt(false)
     if (context === null) return
@@ -302,8 +311,17 @@ export function CheckoutPrModal({
       if (controller.signal.aborted) return
       setSwitchingRemote(false)
       if (!result.ok) {
-        setContext(prev => (prev === null ? null : { ...prev, candidates: [] }))
-        setCheckoutError(formatPrError(result.error, result.code, result.params, tRef.current))
+        const message = formatPrError(result.error, result.code, result.params, tRef.current)
+        setContext(prev => (prev === null
+          ? null
+          : {
+              ...prev,
+              candidates: [],
+              forge: prev.forge.available
+                ? { available: true, readiness: 'unavailable', message }
+                : prev.forge,
+            }))
+        setCheckoutError(message)
         return
       }
       setContext(result)
@@ -315,8 +333,10 @@ export function CheckoutPrModal({
 
   const handleClose = (): void => {
     if (busy) {
-      abortRef.current?.abort()
-      return
+      if (abortRef.current !== null) {
+        abortRef.current.abort()
+        return
+      }
     }
     onClose()
   }
@@ -327,7 +347,9 @@ export function CheckoutPrModal({
     const canDeferPr = isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined
     const alreadyInTargetWorktree = resolved.existingWorktreePath !== undefined
       && isPathWithinWorktree(currentSessionPath?.(), resolved.existingWorktreePath)
-    const shouldDeferAfterAction = canDeferPr && !alreadyInTargetWorktree
+    const hasExistingStandalone = resolved.existingWorktreePath !== undefined
+      && hasStandaloneWorkspace?.(resolved.existingWorktreePath) === true
+    const shouldDeferAfterAction = canDeferPr && !alreadyInTargetWorktree && !hasExistingStandalone
     const buildTrackUrl = (canonical: string | null | undefined): string | null =>
       autoTrack && forgeTrackAvailable ? (canonical ?? null) : null
     const armPrDeferred = (mode: 'reuse' | 'update' | 'reset' | undefined, canonical: string | null | undefined): Promise<void> => {
@@ -424,7 +446,10 @@ export function CheckoutPrModal({
         }
         try {
           onCreated(result.path)
-          if (shouldDeferAfterAction) {
+          if (alreadyInTargetWorktree && !result.created) {
+            const trackUrl = buildTrackUrl(result.canonicalUrl)
+            if (trackUrl !== null) trackCurrentSessionPr?.(trackUrl)
+          } else if (shouldDeferAfterAction) {
             await armPrDeferred('reuse', result.canonicalUrl)
           } else {
             const trackUrl = buildTrackUrl(result.canonicalUrl)
@@ -592,6 +617,8 @@ export function CheckoutPrModal({
                 onChange={(event) => {
                   setQuery(event.target.value)
                   setSelectedCandidate(null)
+                  setResolved(null)
+                  setResolveError(null)
                   setCheckoutError(null)
                   setDivergedPrompt(false)
                 }}
@@ -623,7 +650,11 @@ export function CheckoutPrModal({
                   aria-label={t('prModal.providerLabel')}
                   value={effectiveProvider ?? defaultPickerProvider}
                   disabled={busy}
-                  onChange={(event) => { setProviderOverride(event.target.value as PrProviderKind) }}
+                  onChange={(event) => {
+                    setProviderOverride(event.target.value as PrProviderKind)
+                    setResolved(null)
+                    setResolveError(null)
+                  }}
                 >
                   <option value="github">{t('prModal.providerGithub')}</option>
                   <option value="gitlab">{t('prModal.providerGitlab')}</option>
@@ -662,7 +693,7 @@ export function CheckoutPrModal({
                     type="button"
                     className={css.refreshTab}
                     disabled={busy || switchingRemote}
-                    onClick={() => { handleRemoteChange(remote) }}
+                    onClick={() => { handleRemoteChange(remote, { preserveSelection: true }) }}
                   >
                     {t('prModal.refreshCandidates')}
                   </button>
@@ -674,8 +705,10 @@ export function CheckoutPrModal({
                       {counts.all === 0 ? t('prModal.emptyRepoCandidates') : t('prModal.noCandidates')}
                     </div>
                   ) : visibleCandidates.map((item) => {
+                    const trimmedQuery = query.trim()
+                    const normalizedNum = trimmedQuery.replace(/^[#!]/, '')
                     const selected = (selectedCandidate !== null && selectedCandidate.provider === item.provider && selectedCandidate.number === item.number && selectedCandidate.remote === item.remote)
-                      || (selectedCandidate === null && (query.trim() === item.url || query.trim() === String(item.number)))
+                      || (selectedCandidate === null && item.remote === remote && (trimmedQuery === item.url || normalizedNum === String(item.number)))
                     const checks = ciText(item.checksRollup, t)
                     return (
                       <button

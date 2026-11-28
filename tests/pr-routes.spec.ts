@@ -155,6 +155,51 @@ describe('handlePrContext and handlePrResolve', () => {
       readiness: 'unavailable',
       message: 'API rate limit exceeded',
     })
+
+    // Host has viewerSources() for github.com only -> GitLab remote returns listUnsupported without calling listForViewer
+    let gitlabListCalled = false
+    const githubOnlyViewerForge: ForgeServiceLike = {
+      repositoryFromRemote: () => ({ forge: 'gitlab', host: 'gitlab.com', owner: 'group', name: 'app' }),
+      changeRequestFromUrl: () => undefined,
+      changeRequestUrl: () => '',
+      readiness: async () => ({ state: 'ready', message: null, signIn: null }),
+      viewerSources: () => [{ forge: 'github', hosts: ['github.com'], filters: new Set(['authored']), maxItems: 50 }],
+      listForViewer: async () => {
+        gitlabListCalled = true
+        return { code: 'unsupported', message: 'This provider does not read viewer lists' }
+      },
+    }
+    const gitlabDeps = makeDeps({
+      forge: () => githubOnlyViewerForge,
+      exec: scripted({
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
+        'for-each-ref refs/heads': { stdout: 'main\n' },
+        'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
+        'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
+        'remote -v': { stdout: 'origin\thttps://gitlab.com/group/app.git (fetch)\n' },
+      }),
+    })
+    const gitlabOutcome = await handlePrContext(gitlabDeps, { repoPath: '/repo' })
+    expect(gitlabOutcome.status).toBe(200)
+    expect(gitlabListCalled).toBe(false)
+    expect((gitlabOutcome.body as PrContextResult).forge).toEqual({
+      available: true,
+      readiness: 'unavailable',
+      listUnsupported: true,
+    })
+
+    // Provider returning { code: 'unsupported' } maps cleanly to listUnsupported without leaking English message
+    const unsupportedListForge: ForgeServiceLike = {
+      ...noListForge,
+      listForViewer: async () => ({ code: 'unsupported', message: 'This provider does not read viewer lists' }),
+    }
+    const unsupportedOutcome = await handlePrContext(makeDeps({ forge: () => unsupportedListForge }), { repoPath: '/repo' })
+    expect(unsupportedOutcome.status).toBe(200)
+    expect((unsupportedOutcome.body as PrContextResult).forge).toEqual({
+      available: true,
+      readiness: 'unavailable',
+      listUnsupported: true,
+    })
   })
 
   it('resolves numeric PR and reports existing worktree without touching git', async () => {
@@ -248,7 +293,7 @@ describe('handlePrContext and handlePrResolve', () => {
     const skipOutcome = await handlePrResolve(makeDeps(), { repoPath: '/repo', input: '88', verifyRemote: false })
     expect(skipOutcome.status).toBe(200)
 
-    // Authentication error during ls-remote maps to pr_auth_failed
+    // Authentication error during ls-remote maps to pr_auth_failed (including SSH host key rejection)
     const authDeps = makeDeps({
       exec: scripted({
         'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
@@ -256,12 +301,41 @@ describe('handlePrContext and handlePrResolve', () => {
         'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
         'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
         'remote -v': { stdout: 'origin\thttps://github.com/org/app.git (fetch)\n' },
-        'ls-remote -- origin refs/pull/88/head': { code: 128, stderr: 'fatal: Authentication failed for https://github.com/org/app.git' },
+        'ls-remote -- origin refs/pull/88/head': { code: 128, stderr: 'Host key verification failed.\nfatal: Could not read from remote repository.' },
       }),
     })
     const authOutcome = await handlePrResolve(authDeps, { repoPath: '/repo', input: '88' })
     expect(authOutcome.status).toBe(400)
     expect((authOutcome.body as RouteError).code).toBe('pr_auth_failed')
+
+    // Timeout and unreachable network map to structured pr_timeout / pr_network_failed instead of HTTP 500
+    const timeoutDeps = makeDeps({
+      exec: scripted({
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
+        'for-each-ref refs/heads': { stdout: 'main\n' },
+        'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
+        'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
+        'remote -v': { stdout: 'origin\thttps://github.com/org/app.git (fetch)\n' },
+        'ls-remote -- origin refs/pull/88/head': { code: 1, stderr: 'Git command timed out; check the remote before retrying.' },
+      }),
+    })
+    const timeoutOutcome = await handlePrResolve(timeoutDeps, { repoPath: '/repo', input: '88' })
+    expect(timeoutOutcome.status).toBe(504)
+    expect((timeoutOutcome.body as RouteError).code).toBe('pr_timeout')
+
+    const netDeps = makeDeps({
+      exec: scripted({
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
+        'for-each-ref refs/heads': { stdout: 'main\n' },
+        'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
+        'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
+        'remote -v': { stdout: 'origin\thttps://github.com/org/app.git (fetch)\n' },
+        'ls-remote -- origin refs/pull/88/head': { code: 128, stderr: 'fatal: unable to access https://github.com/org/app.git/: Could not resolve host: github.com' },
+      }),
+    })
+    const netOutcome = await handlePrResolve(netDeps, { repoPath: '/repo', input: '88' })
+    expect(netOutcome.status).toBe(502)
+    expect((netOutcome.body as RouteError).code).toBe('pr_network_failed')
 
     // Pre-aborted AbortSignal returns 499 without running ls-remote
     const aborted = new AbortController()

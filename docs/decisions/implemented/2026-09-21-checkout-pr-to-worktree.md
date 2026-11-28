@@ -13,7 +13,7 @@ Status: implemented
 在保留纯原生 Git 零依赖兜底的前提下，以**可选注入**方式深度结合 `@deepseek-ai/dsh-experimental-forge-bundle`，实现「一键检出 PR / MR 到独立隔离工作树」：
 
 1. **元数据查询与原生 Git 隔离检出解耦**：
-   - 本地检出统一在 `src/git.ts` 与 `src/routes.ts`（`POST /plugin/git-worktree/pr-checkout`）通过原生 `git fetch --progress <remote> refs/pull/<id>/head`（GitHub）或 `refs/merge-requests/<id>/head`（GitLab）拉取到 `FETCH_HEAD` 并解析精确 commit SHA，再通过 `addWorktreeAtCommit` 检出到 `<repoRoot>/.dsh/gitworktree/github-pr-<id>`（或 `gitlab-mr-<id>`），绝不改动主仓库 `HEAD`（若主仓库本身正占用同名分支则明确拦截提示）。
+   - 本地检出统一在 `src/git.ts` 与 `src/routes.ts`（`POST /plugin/git-worktree/pr-checkout`）通过原生 `git fetch --progress <remote> refs/pull/<id>/head`（GitHub）或 `refs/merge-requests/<id>/head`（GitLab）拉取到独立临时引用 `refs/dsh-pr-tmp/<uuid>`（不触碰 `FETCH_HEAD` 并在 `finally` 自动清理）并解析精确 commit SHA，再通过 `addWorktreeAtCommit` 检出到 `<repoRoot>/.dsh/gitworktree/github-pr-<id>`（或 `gitlab-mr-<id>`），绝不改动主仓库 `HEAD`（若主仓库本身正占用同名分支则明确拦截提示）。
    - 检出及每次更新后在 `<worktreeGitDir>/dsh-worktree-base` 写入 PR 来源标签（如 `PR #42` / `PR #42 → main`）供侧边栏悬停展示，并在 `<worktreeGitDir>/dsh-worktree-pr-sha` 记录上次同步的 PR SHA。
    - 当对应工作树已存在时支持「直接打开（`reuse`）」与「同步更新（`update`，仅干净工作树）」：能快进时走 `--ff-only`；若 PR 作者 rebase / force-push 且当前 `HEAD === 上次 PR SHA`（确认无本地提交），自动执行 `git reset --hard <newSha>` 安全同步并提示；若本地存在独有提交（或无历史 SHA 记录），返回 `409 worktree_diverged` 由弹窗提供「保留本地直接打开」或二次确认「重置到 PR 最新（`reset`）」。当本地已有同名分支但无工作树且含未合并提交时保留原分支不丢弃提交。
 2. **Host 侧可选增强 `ctx.forge` 与多 Remote 联动**：

@@ -1283,8 +1283,26 @@ function prGitFailure(
     || stderr.includes('could not read Username')
     || stderr.includes('terminal prompts disabled')
     || stderr.includes('Permission denied (publickey)')
+    || stderr.includes('Permission denied, please try again')
+    || stderr.includes('Host key verification failed')
   ) {
     return failCode(400, error.message, 'pr_auth_failed', { remote: context.remote })
+  }
+  if (
+    stderr.includes('Git command timed out')
+    || lowerStderr.includes('connection timed out')
+    || lowerStderr.includes('operation timed out')
+  ) {
+    return failCode(504, error.message, 'pr_timeout', { remote: context.remote })
+  }
+  if (
+    lowerStderr.includes('could not resolve host')
+    || lowerStderr.includes('failed to connect')
+    || lowerStderr.includes('network is unreachable')
+    || lowerStderr.includes('connection refused')
+    || lowerStderr.includes('could not read from remote repository')
+  ) {
+    return failCode(502, error.message, 'pr_network_failed', { remote: context.remote })
   }
   return gitFailure(error)
 }
@@ -1304,14 +1322,17 @@ function validatePrOptionalFields(
  * POST /pr-context — remotes, optional `ctx.forge` readiness, and open PR/MR candidates.
  * @param deps - host dependencies.
  * @param body - parsed request body: `{ repoPath, remote? }`.
+ * @param signal - optional cancellation signal aborted when the HTTP client disconnects.
  */
-export async function handlePrContext(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+export async function handlePrContext(deps: RouteDeps, body: unknown, signal?: AbortSignal): Promise<RouteOutcome> {
   const parsed = readBody<PrContextBody>(body, ['repoPath'], [], ['remote'])
   if (isOutcome(parsed)) return parsed
   const { repoPath, remote } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   if (remote !== undefined && remote.trim() === '') return fail(400, '"remote" must be non-empty when present')
+  const isAborted = (): boolean => signal?.aborted === true
   try {
+    if (isAborted()) return fail(499, 'Cancelled')
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
     const rawRemotes = await listRemotes(deps.exec, facts.repoRoot)
@@ -1323,9 +1344,12 @@ export async function handlePrContext(deps: RouteDeps, body: unknown): Promise<R
       worktrees: facts.worktrees,
       ...(remote === undefined ? {} : { requestedRemote: remote }),
       ...(forge === undefined ? {} : { forge }),
+      ...(signal === undefined ? {} : { signal }),
     })
+    if (isAborted()) return fail(499, 'Cancelled')
     return { status: 200, body: result }
   } catch (error) {
+    if (error instanceof CancelledError) return fail(499, error.message)
     if (error instanceof GitError) return gitFailure(error)
     return fail(500, error instanceof Error ? error.message : String(error))
   }

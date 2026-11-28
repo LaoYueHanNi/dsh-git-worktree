@@ -844,6 +844,17 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
           )?.[0]
           return mainId === undefined ? undefined : resolveSessionPathFromCtx(mainId)
         },
+        hasStandaloneWorkspace: (path: string) =>
+          ctx.workspaces.list.getSnapshot().items.some(item => pathKey(item.path) === pathKey(path)),
+        trackCurrentSessionPr: (url: string) => {
+          const sessionsSnap = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+          const mainId = Object.entries(sessionsSnap.byId).find(
+            ([, summary]) => (summary?.retainedBy?.mainView ?? 0) > 0,
+          )?.[0]
+          if (mainId !== undefined && forgePanelTrack !== undefined) {
+            void forgePanelTrack(mainId as SessionId, url).catch(() => {})
+          }
+        },
         forgeTrackAvailable: () => forgePanelTrack !== undefined,
         describeWorktreeRemoval: chip.describeWorktreeRemoval,
         removeWorktree: chip.removeWorktree,

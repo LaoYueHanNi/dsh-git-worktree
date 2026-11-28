@@ -20,6 +20,8 @@ const KNOWN_PR_ERROR_CODES: ReadonlySet<string> = new Set<PrErrorCode>([
   'worktree_diverged',
   'pr_ref_not_found',
   'pr_auth_failed',
+  'pr_timeout',
+  'pr_network_failed',
 ])
 
 function isPrErrorCode(code: string | undefined): code is PrErrorCode {
@@ -63,6 +65,10 @@ function translateKnownPrError(
       })
     case 'pr_auth_failed':
       return t('prModal.errPrAuthFailed', { remote: String(params?.remote ?? '') })
+    case 'pr_timeout':
+      return t('prModal.errPrTimeout', { remote: String(params?.remote ?? '') })
+    case 'pr_network_failed':
+      return t('prModal.errPrNetworkFailed', { remote: String(params?.remote ?? '') })
   }
   const exhaustive: never = code
   return exhaustive

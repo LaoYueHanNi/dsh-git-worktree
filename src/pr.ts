@@ -335,7 +335,7 @@ export function formatPrBaseLabel(provider: PrProviderKind, number: number, base
   return trimmed !== undefined && trimmed !== '' ? `${prefix} → ${trimmed}` : prefix
 }
 
-/** Git refspec fetched into `FETCH_HEAD` for a given provider and PR/MR number. */
+/** Git refspec fetched into a temporary ref (`refs/dsh-pr-tmp/<uuid>`) for a given provider and PR/MR number. */
 export function prRefSpec(provider: PrProviderKind, number: number): string {
   return provider === 'gitlab'
     ? `refs/merge-requests/${number}/head`
@@ -476,7 +476,13 @@ export function resolvePrTarget(args: ResolvePrTargetInput): PrResolveResult {
     provider = kind
     number = fromForgeUrl.number
     forgeRef = fromForgeUrl
-    canonicalUrl = forge!.changeRequestUrl(fromForgeUrl)
+    try {
+      canonicalUrl = forge!.changeRequestUrl(fromForgeUrl)
+    } catch {
+      canonicalUrl = provider === 'gitlab'
+        ? `https://${fromForgeUrl.repository.host}/${fromForgeUrl.repository.owner}/${fromForgeUrl.repository.name}/-/merge_requests/${number}`
+        : `https://${fromForgeUrl.repository.host}/${fromForgeUrl.repository.owner}/${fromForgeUrl.repository.name}/pull/${number}`
+    }
     const matchingRemotes = remotes.filter(r =>
       sameRepo(r, fromForgeUrl.repository.host, fromForgeUrl.repository.owner, fromForgeUrl.repository.name),
     )
@@ -587,6 +593,27 @@ export function resolvePrTarget(args: ResolvePrTargetInput): PrResolveResult {
 
 const FILTER_ORDER = ['review-requested', 'authored', 'involved'] as const
 
+function createTimeoutSignal(timeoutMs: number, externalSignal?: AbortSignal): {
+  readonly signal: AbortSignal
+  readonly cleanup: () => void
+} {
+  const controller = new AbortController()
+  if (externalSignal?.aborted === true) {
+    controller.abort(externalSignal.reason)
+    return { signal: controller.signal, cleanup: () => {} }
+  }
+  const onAbort = (): void => { controller.abort(externalSignal?.reason) }
+  externalSignal?.addEventListener('abort', onAbort, { once: true })
+  const timer = setTimeout(() => { controller.abort(new Error('Forge query timed out')) }, timeoutMs)
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer)
+      externalSignal?.removeEventListener('abort', onAbort)
+    },
+  }
+}
+
 /**
  * Assemble `/pr-context` payload: classified remotes + optional `ctx.forge` readiness &
  * open PR/MR candidate lists scoped to the repository (or an explicitly selected remote).
@@ -599,8 +626,9 @@ export async function loadPrContext(args: {
   worktrees: readonly WorktreeEntry[]
   requestedRemote?: string
   forge?: ForgeServiceLike
+  signal?: AbortSignal
 }): Promise<PrContextResult> {
-  const { repoRoot, repoName, rawRemotes, worktrees, requestedRemote, forge } = args
+  const { repoRoot, repoName, rawRemotes, worktrees, requestedRemote, forge, signal: externalSignal } = args
   const remotes = classifyRemotes(rawRemotes, forge)
   const defaultRemote = pickDefaultRemote(remotes)
 
@@ -640,11 +668,11 @@ export async function loadPrContext(args: {
     owner: primaryRemote.owner,
     name: primaryRemote.repo,
   }
-  const readinessSignal = AbortSignal.timeout(FORGE_READINESS_TIMEOUT_MS)
+  const readinessBudget = createTimeoutSignal(FORGE_READINESS_TIMEOUT_MS, externalSignal)
 
   let readiness: ForgeReadinessLike
   try {
-    readiness = await forge.readiness(repository, readinessSignal)
+    readiness = await forge.readiness(repository, readinessBudget.signal)
   } catch (error) {
     return {
       repoRoot,
@@ -658,6 +686,8 @@ export async function loadPrContext(args: {
       },
       candidates: [],
     }
+  } finally {
+    readinessBudget.cleanup()
   }
 
   if (readiness.state !== 'ready') {
@@ -691,44 +721,72 @@ export async function loadPrContext(args: {
     }
   }
 
-  const viewerSource = forge.viewerSources?.().find(s => s.forge.toLowerCase() === primaryRemote.provider)
-  const activeFilters = viewerSource === undefined
-    ? FILTER_ORDER
-    : FILTER_ORDER.filter(filter => viewerSource.filters.has(filter))
-  if (activeFilters.length === 0) {
-    return {
-      repoRoot,
-      repoName,
-      remotes,
-      defaultRemote,
-      forge: {
-        available: true,
-        readiness: 'unavailable',
-        listUnsupported: true,
-      },
-      candidates: [],
+  let activeFilters: readonly ('review-requested' | 'authored' | 'involved')[] = FILTER_ORDER
+  let limit = 20
+  if (typeof forge.viewerSources === 'function') {
+    const hostLower = primaryRemote.host.toLowerCase()
+    const viewerSource = forge.viewerSources().find(
+      s => s.forge.toLowerCase() === primaryRemote.provider
+        && s.hosts.some(h => h.toLowerCase() === hostLower),
+    )
+    if (viewerSource === undefined) {
+      return {
+        repoRoot,
+        repoName,
+        remotes,
+        defaultRemote,
+        forge: {
+          available: true,
+          readiness: 'unavailable',
+          listUnsupported: true,
+        },
+        candidates: [],
+      }
     }
+    activeFilters = FILTER_ORDER.filter(filter => viewerSource.filters.has(filter))
+    if (activeFilters.length === 0) {
+      return {
+        repoRoot,
+        repoName,
+        remotes,
+        defaultRemote,
+        forge: {
+          available: true,
+          readiness: 'unavailable',
+          listUnsupported: true,
+        },
+        candidates: [],
+      }
+    }
+    limit = Math.max(1, Math.min(20, viewerSource.maxItems))
   }
-  const limit = Math.max(1, Math.min(20, viewerSource?.maxItems ?? 20))
-  const listSignal = AbortSignal.timeout(FORGE_LIST_TIMEOUT_MS)
+  const listBudget = createTimeoutSignal(FORGE_LIST_TIMEOUT_MS, externalSignal)
 
   const seen = new Set<string>()
   const candidates: PrCandidateItem[] = []
-  const lists = await Promise.allSettled(
-    activeFilters.map(async (filter) => ({
-      filter,
-      res: await forge.listForViewer!(
-        primaryRemote.provider!,
-        {
-          host: primaryRemote.host!,
-          filter,
-          repository: { owner: primaryRemote.owner!, name: primaryRemote.repo! },
-          limit,
-        },
-        listSignal,
-      ),
-    })),
-  )
+  let lists: PromiseSettledResult<{
+    filter: 'review-requested' | 'authored' | 'involved'
+    res: ForgeViewerListLike | { readonly code: string; readonly message: string }
+  }>[]
+  try {
+    lists = await Promise.allSettled(
+      activeFilters.map(async (filter) => ({
+        filter,
+        res: await forge.listForViewer!(
+          primaryRemote.provider!,
+          {
+            host: primaryRemote.host!,
+            filter,
+            repository: { owner: primaryRemote.owner!, name: primaryRemote.repo! },
+            limit,
+          },
+          listBudget.signal,
+        ),
+      })),
+    )
+  } finally {
+    listBudget.cleanup()
+  }
 
   let succeededLists = 0
   let firstFailure: { readonly code: string; readonly message: string } | undefined
@@ -776,6 +834,20 @@ export async function loadPrContext(args: {
   }
 
   if (succeededLists === 0 && firstFailure !== undefined) {
+    if (firstFailure.code === 'unsupported') {
+      return {
+        repoRoot,
+        repoName,
+        remotes,
+        defaultRemote,
+        forge: {
+          available: true,
+          readiness: 'unavailable',
+          listUnsupported: true,
+        },
+        candidates: [],
+      }
+    }
     return {
       repoRoot,
       repoName,

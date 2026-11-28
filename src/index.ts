@@ -497,22 +497,34 @@ export function apply(ctx: Context, config: Config = {}): void {
 
     postRoute(ROUTE_DEFERRED_ARM, 'deferred-arm', handleArmDeferredWorktree)
     postRoute(ROUTE_DEFERRED_ACTION, 'deferred-action', handleDeferredWorktreeAction)
-    postRoute(ROUTE_PR_CONTEXT, 'pr-context', handlePrContext)
-    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_PR_RESOLVE, handler: async (req: IncomingMessage, res: ServerResponse) => {
-      let body: unknown
-      try {
-        body = await readJson(req)
-      } catch (error) {
-        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
-        return
-      }
-      const controller = new AbortController()
-      res.on('close', () => {
-        if (!res.writableEnded) controller.abort()
-      })
-      const outcome = await handlePrResolve(deps(), body, controller.signal)
-      if (!res.writableEnded) send(res, outcome)
-    } }), 'git-worktree: pr-resolve route')
+    const cancellablePostRoute = (
+      path: string,
+      label: string,
+      handle: (deps: RouteDeps, body: unknown, signal: AbortSignal) => Promise<RouteOutcome>,
+    ): void => {
+      webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path, handler: async (req: IncomingMessage, res: ServerResponse) => {
+        let body: unknown
+        try {
+          body = await readJson(req)
+        } catch (error) {
+          send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
+          return
+        }
+        const controller = new AbortController()
+        res.on('close', () => {
+          if (!res.writableEnded) controller.abort()
+        })
+        try {
+          const outcome = await handle(deps(), body, controller.signal)
+          if (!res.writableEnded) send(res, outcome)
+        } catch (error) {
+          if (!res.writableEnded) send(res, { status: 500, body: { error: error instanceof Error ? error.message : String(error) } })
+        }
+      } }), `git-worktree: ${label} route`)
+    }
+
+    cancellablePostRoute(ROUTE_PR_CONTEXT, 'pr-context', handlePrContext)
+    cancellablePostRoute(ROUTE_PR_RESOLVE, 'pr-resolve', handlePrResolve)
     streamPostRoute(ROUTE_PR_CHECKOUT, 'pr-checkout', handlePrCheckout)
   })
 }
