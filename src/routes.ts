@@ -16,7 +16,7 @@ import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { createProgressReader } from './progress.js'
 import { resolveRootDir } from './settings.js'
 import type {
-  ArmDeferredWorktreeBody, CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeferredWorktreeActionBody, DeferredWorktreePhase, DeferredWorktreeSnapshot, DeferredWorktreeSpec, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, PushPlanBody, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SetSessionDirectoryBody, SetSessionDirectoryResult, SwitchBody, SwitchResult, SyncEvent, UpdateBody, UpdateResult, WorktreesAllResult,
+  ArmDeferredWorktreeBody, CreateBranchBody, CreateBranchResult, CreateWorktreeBody, CreateWorktreeResult, DeferredPrCheckoutSpec, DeferredWorktreeActionBody, DeferredWorktreePhase, DeferredWorktreeSnapshot, DeferredWorktreeSpec, DeleteBranchBody, DeleteBranchResult, EnsureDirectoryBody, EnsureDirectoryResult, FetchBody, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeBody, InspectWorktreeResult, PathExistsResult, PushBody, PushPlan, PushPreview, PushPreviewBody, PushResult, PushPlanBody, PurgeDirectoryBody, PurgeDirectoryResult, RemoveWorktreeBody, RemoveWorktreeResult, RenameBranchBody, RenameBranchResult, RepoStatus, RouteError, SetSessionDirectoryBody, SetSessionDirectoryResult, SwitchBody, SwitchResult, SyncEvent, UpdateBody, UpdateResult, WorktreesAllResult,
 } from './wire.js'
 import type { DeferredCreateOutcome, DeferredWorktreeCoordinator } from './deferred-worktree.js'
 
@@ -505,7 +505,48 @@ export async function executeCreateWorktree(
   deps: RouteDeps,
   spec: DeferredWorktreeSpec,
   onPhase?: (phase: Exclude<DeferredWorktreePhase, 'switch'>, resolvedBranch?: string) => void,
+  signal?: AbortSignal,
 ): Promise<DeferredCreateOutcome> {
+  if (spec.pr !== undefined) {
+    const pr = spec.pr
+    const controller = new AbortController()
+    const abortSignal = signal ?? controller.signal
+    const outcome = await handlePrCheckout(
+      deps,
+      {
+        repoPath: spec.repoPath,
+        input: pr.input,
+        ...(pr.remote === undefined ? {} : { remote: pr.remote }),
+        ...(pr.provider === undefined ? {} : { provider: pr.provider }),
+        ...(pr.ifExists === undefined ? {} : { ifExists: pr.ifExists }),
+      },
+      {
+        signal: abortSignal,
+        emit: (event) => {
+          if (event.type !== 'stage') return
+          if (event.stage === 'fetch') onPhase?.('fetch', spec.branch)
+          else if (event.stage === 'worktree') onPhase?.('create', spec.branch)
+          else if (event.stage === 'copy') onPhase?.('copy', spec.branch)
+        },
+      },
+    )
+    if (outcome.status !== 200) {
+      const errBody = outcome.body as RouteError
+      throw Object.assign(new Error(errBody.error), { httpStatus: outcome.status })
+    }
+    const res = outcome.body as PrCheckoutResult
+    onPhase?.('create', res.branch)
+    const trackPrUrl = pr.canonicalUrl === null ? undefined : (pr.canonicalUrl ?? res.canonicalUrl ?? undefined)
+    return {
+      path: res.path,
+      branch: res.branch,
+      created: res.created,
+      ...(res.fetchWarning === undefined ? {} : { fetchWarning: res.fetchWarning }),
+      ...(res.excludeWarning === undefined ? {} : { excludeWarning: res.excludeWarning }),
+      ...(res.copyWarning === undefined ? {} : { copyWarning: res.copyWarning }),
+      ...(trackPrUrl === undefined ? {} : { trackPrUrl }),
+    }
+  }
   const { repoPath, branch, cutout, random, name } = spec
   const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
   if (facts === undefined) {
@@ -1106,10 +1147,48 @@ export async function handleGetDeferredWorktree(deps: RouteDeps, sessionId: stri
   return { status: 200, body: { state } }
 }
 
+function parseDeferredPr(raw: unknown): DeferredPrCheckoutSpec | RouteOutcome | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return fail(400, 'body key "pr" must be a JSON object')
+  }
+  const rec = raw as Record<string, unknown>
+  const unknown = Object.keys(rec).filter(k => !['input', 'remote', 'provider', 'ifExists', 'canonicalUrl'].includes(k))
+  if (unknown.length > 0) return fail(400, `unknown "pr" key "${unknown[0]}"`)
+  if (typeof rec.input !== 'string' || rec.input.trim() === '') {
+    return fail(400, '"pr.input" must be a non-empty string')
+  }
+  if (rec.remote !== undefined && (typeof rec.remote !== 'string' || rec.remote.trim() === '')) {
+    return fail(400, '"pr.remote" must be a non-empty string when present')
+  }
+  if (rec.provider !== undefined && rec.provider !== 'github' && rec.provider !== 'gitlab') {
+    return fail(400, '"pr.provider" must be "github" or "gitlab"')
+  }
+  if (rec.ifExists !== undefined && rec.ifExists !== 'reuse' && rec.ifExists !== 'update' && rec.ifExists !== 'reset') {
+    return fail(400, '"pr.ifExists" must be "reuse", "update", or "reset"')
+  }
+  if (rec.canonicalUrl !== undefined && rec.canonicalUrl !== null && typeof rec.canonicalUrl !== 'string') {
+    return fail(400, '"pr.canonicalUrl" must be a string or null when present')
+  }
+  return {
+    input: rec.input.trim(),
+    ...(typeof rec.remote === 'string' ? { remote: rec.remote } : {}),
+    ...(rec.provider === 'github' || rec.provider === 'gitlab' ? { provider: rec.provider } : {}),
+    ...(rec.ifExists === 'reuse' || rec.ifExists === 'update' || rec.ifExists === 'reset' ? { ifExists: rec.ifExists } : {}),
+    ...(rec.canonicalUrl === null || typeof rec.canonicalUrl === 'string' ? { canonicalUrl: rec.canonicalUrl } : {}),
+  }
+}
+
 /** POST /deferred/arm — arm a deferred worktree creation for a blank session. */
 export async function handleArmDeferredWorktree(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  const parsed = readBody<ArmDeferredWorktreeBody>(body, ['sessionId', 'repoPath', 'branch'], ['cutout', 'random'], ['name'])
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'request body must be a JSON object')
+  }
+  const { pr: rawPr, ...scalarBody } = body as Record<string, unknown>
+  const parsed = readBody<Omit<ArmDeferredWorktreeBody, 'pr'>>(scalarBody, ['sessionId', 'repoPath', 'branch'], ['cutout', 'random'], ['name'])
   if (isOutcome(parsed)) return parsed
+  const parsedPr = parseDeferredPr(rawPr)
+  if (parsedPr !== undefined && isOutcome(parsedPr)) return parsedPr
   const sessionId = parsed.sessionId.trim()
   if (sessionId === '') return fail(400, '"sessionId" must be non-empty')
   if (!isAbsoluteDir(parsed.repoPath)) return fail(400, '"repoPath" must be an absolute directory')
@@ -1128,6 +1207,7 @@ export async function handleArmDeferredWorktree(deps: RouteDeps, body: unknown):
       cutout: parsed.cutout === true,
       ...(custom !== undefined && custom !== '' ? { name: custom } : {}),
       ...(parsed.random === true ? { random: true } : {}),
+      ...(parsedPr === undefined ? {} : { pr: parsedPr }),
     })
     return { status: 200, body: { state } }
   } catch (error) {

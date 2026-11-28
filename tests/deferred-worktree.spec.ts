@@ -599,4 +599,78 @@ describe('client apply() deferred worktree integration', () => {
     expect(createdSessions).toEqual([])
     expect(armedPayloads).toMatchObject([{ sessionId: 's-active-blank', repoPath, branch: 'main', cutout: true, random: true }])
   })
+
+  it('arms and executes a deferred PR checkout through DeferredWorktreeCoordinator with trackPrUrl propagation', async () => {
+    const snapshots: DeferredWorktreeSnapshot[] = []
+    const prWtPath = resolve('/repo/.dsh/gitworktree/github-pr-10')
+    const armDeps: RouteDeps = {
+      exec: async () => ({ code: 0, stdout: '', stderr: '' }),
+      sectionRootDir: () => undefined,
+      sectionFetchBeforeCreate: () => undefined,
+      home: () => '/home/test',
+      envHome: () => undefined,
+      deferredWorktrees: new DeferredWorktreeCoordinator({
+        createWorktree: async (_spec, onPhase) => {
+          onPhase('fetch', 'github-pr-10')
+          onPhase('create', 'github-pr-10')
+          onPhase('copy', 'github-pr-10')
+          return {
+            path: prWtPath,
+            branch: 'github-pr-10',
+            created: true,
+            trackPrUrl: 'https://github.com/org/repo/pull/10',
+          }
+        },
+        setWorkingDirectory: async (_agent, targetPath) => targetPath,
+      }),
+    }
+
+    const armedOutcome = await handleArmDeferredWorktree(armDeps, {
+      sessionId: 's-pr-1',
+      repoPath: resolve('/repo'),
+      branch: 'github-pr-10',
+      cutout: false,
+      pr: {
+        input: '10',
+        remote: 'origin',
+        provider: 'github',
+        canonicalUrl: 'https://github.com/org/repo/pull/10',
+      },
+    })
+    expect(armedOutcome.status).toBe(200)
+
+    armDeps.deferredWorktrees!.subscribe('s-pr-1', snap => snapshots.push(snap))
+    let maintenancePromise: Promise<void> | undefined
+    const agent: DeferredAgentLike = {
+      session: { id: 's-pr-1' },
+      inbox: { nextTurn: [{ id: 'msg-pr-1' }] },
+      runMaintenance: (task) => {
+        maintenancePromise = task(new AbortController().signal)
+        return maintenancePromise
+      },
+    }
+    armDeps.deferredWorktrees!.onInboxInserted(agent, { id: 'msg-pr-1' })
+    expect(maintenancePromise).toBeDefined()
+    await maintenancePromise
+
+    const last = snapshots[snapshots.length - 1]
+    expect(last).toEqual({
+      state: null,
+      completed: {
+        path: prWtPath,
+        branch: 'github-pr-10',
+        created: true,
+        trackPrUrl: 'https://github.com/org/repo/pull/10',
+      },
+    })
+
+    // Validation rejects malformed nested pr specs cleanly
+    const badPr = await handleArmDeferredWorktree(armDeps, {
+      sessionId: 's-pr-bad',
+      repoPath: resolve('/repo'),
+      branch: 'github-pr-10',
+      pr: { input: '' },
+    })
+    expect(badPr.status).toBe(400)
+  })
 })

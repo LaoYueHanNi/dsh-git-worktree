@@ -623,6 +623,16 @@ export interface SetSessionDirectoryResult {
 /** Phases reported while a deferred worktree creation runs on the first user turn. */
 export type DeferredWorktreePhase = 'fetch' | 'create' | 'copy' | 'switch'
 
+/** PR/MR checkout payload attached to a deferred worktree request in shared-workspace mode. */
+export interface DeferredPrCheckoutSpec {
+  readonly input: string
+  readonly remote?: string
+  readonly provider?: PrProviderKind
+  readonly ifExists?: 'reuse' | 'update' | 'reset'
+  /** Canonical PR/MR web URL to track in host forge panel after completion, or null when auto-track was opted out. */
+  readonly canonicalUrl?: string | null
+}
+
 /** Specification of a deferred worktree creation armed on a blank session. */
 export interface DeferredWorktreeSpec {
   /** Main repository path (or any path inside the repository). */
@@ -635,6 +645,8 @@ export interface DeferredWorktreeSpec {
   readonly name?: string
   /** Generate a random `<stem>-<4hex>` branch name when `cutout` is true and `name` is absent. */
   readonly random?: boolean
+  /** Present when this deferred slot checks out or enters a PR/MR worktree on the first turn. */
+  readonly pr?: DeferredPrCheckoutSpec
 }
 
 /** Live state of a deferred worktree for one session. */
@@ -666,6 +678,7 @@ export interface DeferredWorktreeCompleted {
   readonly fetchWarning?: string
   readonly excludeWarning?: string
   readonly copyWarning?: string
+  readonly trackPrUrl?: string
 }
 
 /** Snapshot / SSE payload pushed for a session's deferred worktree. */
@@ -682,6 +695,7 @@ export interface ArmDeferredWorktreeBody {
   readonly cutout?: boolean
   readonly name?: string
   readonly random?: boolean
+  readonly pr?: DeferredPrCheckoutSpec
 }
 
 /** POST deferred/action request body. */

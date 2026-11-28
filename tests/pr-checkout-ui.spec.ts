@@ -728,4 +728,127 @@ describe('Forge slot integration & sidebar badge coexistence', () => {
     expect(formatPrError('raw', 'worktree_diverged', { branch: 'github-pr-55' }, t))
       .toBe('prModal.divergedTitle:{"branch":"github-pr-55"}')
   })
+
+  it('defers PR checkout & reuse on first turn in shared-workspace mode to keep Ctrl+N blank session on main', async () => {
+    vi.useFakeTimers()
+    vi.mocked(requestPrContext).mockResolvedValue({
+      ok: true,
+      repoRoot: '/code/app',
+      repoName: 'app',
+      remotes: [
+        { name: 'origin', url: 'https://github.com/org/app.git', provider: 'github', host: 'github.com', owner: 'org', repo: 'app' },
+      ],
+      defaultRemote: 'origin',
+      forge: { available: false, readiness: 'unavailable' },
+      candidates: [],
+    })
+    vi.mocked(requestPrResolve).mockResolvedValue({
+      ok: true,
+      provider: 'github',
+      number: 10,
+      remote: 'origin',
+      refSpec: 'refs/pull/10/head',
+      localBranch: 'github-pr-10',
+      targetPath: '/code/app/.dsh/gitworktree/github-pr-10',
+      canonicalUrl: 'https://github.com/org/app/pull/10',
+      existingBranch: false,
+    })
+
+    const adoptWorktree = vi.fn(async () => {})
+    const armDeferredWorktree = vi.fn(async () => {})
+    const onClose = vi.fn()
+    const props: CheckoutPrModalProps = {
+      repoPath: '/code/app',
+      repoName: 'app',
+      initialInput: '10',
+      reuseBlankSessionId: 's-main-blank',
+      forgeTrackAvailable: true,
+      adoptWorktree,
+      isSwitchSessionDirectory: () => true,
+      armDeferredWorktree,
+      currentSessionPath: () => '/code/app',
+      onCreated: vi.fn(),
+      onClose,
+      t,
+    }
+    let tree = await hooks.flush(() => CheckoutPrModal(props))
+    await vi.advanceTimersByTimeAsync(200)
+    tree = await hooks.flush(() => CheckoutPrModal(props))
+
+    const submit = nodes(tree).find(n => n.type === 'button' && n.props.children === 'prModal.submitCreate')!
+    ;(submit.props.onClick as () => void)()
+    await hooks.flush(() => CheckoutPrModal(props))
+
+    expect(vi.mocked(requestPrCheckout)).not.toHaveBeenCalled()
+    expect(adoptWorktree).not.toHaveBeenCalled()
+    expect(armDeferredWorktree).toHaveBeenCalledWith(
+      {
+        repoPath: '/code/app',
+        branch: 'github-pr-10',
+        cutout: false,
+        pr: {
+          input: '10',
+          remote: 'origin',
+          provider: 'github',
+          canonicalUrl: 'https://github.com/org/app/pull/10',
+        },
+      },
+      {
+        reuseBlankSessionId: 's-main-blank',
+        repoRoot: '/code/app',
+      },
+    )
+    expect(onClose).toHaveBeenCalled()
+
+    // When updating an already-existing PR worktree while on main checkout, update runs first, then switch defers to first message
+    armDeferredWorktree.mockClear()
+    vi.mocked(requestPrCheckout).mockClear()
+    vi.mocked(requestPrResolve).mockResolvedValue({
+      ok: true,
+      provider: 'github',
+      number: 10,
+      remote: 'origin',
+      refSpec: 'refs/pull/10/head',
+      localBranch: 'github-pr-10',
+      targetPath: '/code/app/.dsh/gitworktree/github-pr-10',
+      canonicalUrl: 'https://github.com/org/app/pull/10',
+      existingWorktreePath: '/code/app/.dsh/gitworktree/github-pr-10',
+      existingBranch: true,
+    })
+    vi.mocked(requestPrCheckout).mockResolvedValue({
+      ok: true,
+      path: '/code/app/.dsh/gitworktree/github-pr-10',
+      created: false,
+      updated: true,
+      branch: 'github-pr-10',
+      provider: 'github',
+      number: 10,
+      canonicalUrl: 'https://github.com/org/app/pull/10',
+    })
+    hooks.unmount()
+    const updateProps: CheckoutPrModalProps = {
+      ...props,
+      initialIfExists: 'update',
+    }
+    tree = await hooks.flush(() => CheckoutPrModal(updateProps))
+    await vi.advanceTimersByTimeAsync(200)
+    tree = await hooks.flush(() => CheckoutPrModal(updateProps))
+
+    const updateBtn = nodes(tree).find(n => n.type === 'button' && n.props.children === 'prModal.submitUpdate')!
+    ;(updateBtn.props.onClick as () => void)()
+    await hooks.flush(() => CheckoutPrModal(updateProps))
+
+    expect(vi.mocked(requestPrCheckout)).toHaveBeenCalledWith(
+      expect.objectContaining({ input: '10', ifExists: 'update' }),
+      expect.any(Object),
+    )
+    expect(adoptWorktree).not.toHaveBeenCalled()
+    expect(armDeferredWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branch: 'github-pr-10',
+        pr: expect.objectContaining({ ifExists: 'reuse' }),
+      }),
+      { reuseBlankSessionId: 's-main-blank', repoRoot: '/code/app' },
+    )
+  })
 })

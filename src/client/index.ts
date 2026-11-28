@@ -409,21 +409,24 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     const uiWs = ctx.uiWorkspace as typeof ctx.uiWorkspace & {
       openSession?: (sessionId: SessionId) => void
     }
-
-    if (options?.reuseBlankSessionId !== undefined && options.reuseBlankSessionId.length > 0) {
-      const blankId = options.reuseBlankSessionId as SessionId
-      cancelOfficialWorktree(blankId)
+    const armSlot = async (targetSessionId: string): Promise<void> => {
+      cancelOfficialWorktree(targetSessionId as SessionId)
       const armed = await requestArmDeferredWorktree({
-        sessionId: options.reuseBlankSessionId,
+        sessionId: targetSessionId,
         repoPath: spec.repoPath,
         branch: spec.branch,
         cutout: spec.cutout,
         ...(spec.name === undefined ? {} : { name: spec.name }),
         ...(spec.random === undefined ? {} : { random: spec.random }),
+        ...(spec.pr === undefined ? {} : { pr: spec.pr }),
       })
       if (!armed.ok) throw new Error(armed.error)
-      armedDeferredSessions.add(options.reuseBlankSessionId)
-      notifyDeferredWorktreeState(options.reuseBlankSessionId, armed.state)
+      armedDeferredSessions.add(targetSessionId)
+      notifyDeferredWorktreeState(targetSessionId, armed.state)
+    }
+
+    if (options?.reuseBlankSessionId !== undefined && options.reuseBlankSessionId.length > 0) {
+      await armSlot(options.reuseBlankSessionId)
       return
     }
 
@@ -463,19 +466,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
         ) {
           const currentDeferred = await fetchDeferredWorktree(activeMainId)
           if (currentDeferred.ok && currentDeferred.state === null) {
-            const activeSessionId = activeMainId as SessionId
-            cancelOfficialWorktree(activeSessionId)
-            const armed = await requestArmDeferredWorktree({
-              sessionId: activeMainId,
-              repoPath: spec.repoPath,
-              branch: spec.branch,
-              cutout: spec.cutout,
-              ...(spec.name === undefined ? {} : { name: spec.name }),
-              ...(spec.random === undefined ? {} : { random: spec.random }),
-            })
-            if (!armed.ok) throw new Error(armed.error)
-            armedDeferredSessions.add(activeMainId)
-            notifyDeferredWorktreeState(activeMainId, armed.state)
+            await armSlot(activeMainId)
             return
           }
         }
@@ -484,18 +475,7 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
 
     const parentWorkspace = existingParent ?? await ctx.workspaces.create({ path: repoRoot })
     const newSessionId = await sessionsApi.create({ workspaceId: parentWorkspace.workspaceId })
-    cancelOfficialWorktree(newSessionId)
-    const armed = await requestArmDeferredWorktree({
-      sessionId: newSessionId as string,
-      repoPath: spec.repoPath,
-      branch: spec.branch,
-      cutout: spec.cutout,
-      ...(spec.name === undefined ? {} : { name: spec.name }),
-      ...(spec.random === undefined ? {} : { random: spec.random }),
-    })
-    if (!armed.ok) throw new Error(armed.error)
-    armedDeferredSessions.add(newSessionId as string)
-    notifyDeferredWorktreeState(newSessionId as string, armed.state)
+    await armSlot(newSessionId as string)
     uiWs.openSession(newSessionId)
   }
 
@@ -667,6 +647,9 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
     }
     void sessionsApi.refreshProjections?.(sessionId as SessionId).catch(() => {})
     void gitCache.refresh([completed.path])
+    if (completed.trackPrUrl !== undefined && forgePanelTrack !== undefined) {
+      void forgePanelTrack(sessionId as SessionId, completed.trackPrUrl).catch(() => {})
+    }
     const t = ctx.locale.bind(NS)
     if (completed.fetchWarning !== undefined) emitToast(t('fetchWarning', { message: completed.fetchWarning }))
     if (completed.excludeWarning !== undefined) emitToast(t('excludeWarning', { message: completed.excludeWarning }))
@@ -854,6 +837,13 @@ export function apply(ctx: ClientContext, config?: SyncedConfigLike): void {
         adoptWorktree: chip.adoptWorktree,
         isSwitchSessionDirectory: chip.isSwitchSessionDirectory,
         armDeferredWorktree: chip.armDeferredWorktree,
+        currentSessionPath: () => {
+          const sessionsSnap = ctx.sessions.list.getSnapshot() as SessionListSnapshotLike
+          const mainId = Object.entries(sessionsSnap.byId).find(
+            ([, summary]) => (summary?.retainedBy?.mainView ?? 0) > 0,
+          )?.[0]
+          return mainId === undefined ? undefined : resolveSessionPathFromCtx(mainId)
+        },
         forgeTrackAvailable: () => forgePanelTrack !== undefined,
         describeWorktreeRemoval: chip.describeWorktreeRemoval,
         removeWorktree: chip.removeWorktree,

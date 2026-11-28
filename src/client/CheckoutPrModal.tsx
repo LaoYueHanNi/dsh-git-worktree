@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Modal, Tag, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
+  DeferredWorktreeSpec,
   PrCandidateItem,
   PrContextResult,
   PrProviderKind,
@@ -15,6 +16,7 @@ import type {
 } from '../wire.ts'
 import { requestPrCheckout, requestPrContext, requestPrResolve } from './api.ts'
 import { formatPrError } from './pr-error.ts'
+import { isPathWithinWorktree } from './session-directory.ts'
 import type { AdoptWorktreeOptions } from './slots.ts'
 import { emitToast } from './toast-bus.ts'
 import type { PruneSummaryLike } from './WorktreeActionHost.tsx'
@@ -44,6 +46,9 @@ export interface CheckoutPrModalProps {
   readonly initialIfExists?: 'reuse' | 'update'
   readonly forgeTrackAvailable: boolean
   readonly adoptWorktree: (path: string, options?: AdoptWorktreeOptions) => Promise<void>
+  readonly isSwitchSessionDirectory?: (() => boolean) | undefined
+  readonly armDeferredWorktree?: ((spec: DeferredWorktreeSpec, options?: AdoptWorktreeOptions) => Promise<void>) | undefined
+  readonly currentSessionPath?: (() => string | undefined) | undefined
   readonly pruneWorktrees?: ((createdPath: string) => Promise<PruneSummaryLike | undefined>) | undefined
   readonly onCreated: (path: string) => void
   readonly onClose: () => void
@@ -94,6 +99,9 @@ export function CheckoutPrModal({
   initialIfExists,
   forgeTrackAvailable,
   adoptWorktree,
+  isSwitchSessionDirectory,
+  armDeferredWorktree,
+  currentSessionPath,
   pruneWorktrees,
   onCreated,
   onClose,
@@ -310,6 +318,51 @@ export function CheckoutPrModal({
   const executeCheckout = (modeOverride?: 'reuse' | 'update' | 'reset'): void => {
     if (busy || resolved === null || resolved.occupiedByMain === true) return
     const effectiveMode = modeOverride ?? (resolved.existingWorktreePath === undefined ? undefined : ifExists)
+    const canDeferPr = isSwitchSessionDirectory?.() === true && armDeferredWorktree !== undefined
+    const alreadyInTargetWorktree = resolved.existingWorktreePath !== undefined
+      && isPathWithinWorktree(currentSessionPath?.(), resolved.existingWorktreePath)
+    const shouldDeferAfterAction = canDeferPr && !alreadyInTargetWorktree
+    const buildTrackUrl = (canonical: string | null | undefined): string | null =>
+      autoTrack && forgeTrackAvailable ? (canonical ?? null) : null
+    const armPrDeferred = (mode: 'reuse' | 'update' | 'reset' | undefined, canonical: string | null | undefined): Promise<void> => {
+      const trackUrl = buildTrackUrl(canonical)
+      return armDeferredWorktree!(
+        {
+          repoPath,
+          branch: resolved.localBranch,
+          cutout: false,
+          pr: {
+            input: effectiveInput,
+            remote: resolved.remote,
+            provider: resolved.provider,
+            ...(mode === undefined ? {} : { ifExists: mode }),
+            canonicalUrl: trackUrl,
+          },
+        },
+        {
+          ...(reuseBlankSessionId === undefined ? {} : { reuseBlankSessionId }),
+          ...(context === null ? {} : { repoRoot: context.repoRoot }),
+        },
+      )
+    }
+
+    if (shouldDeferAfterAction && (resolved.existingWorktreePath === undefined || effectiveMode === 'reuse')) {
+      setBusy(true)
+      setBusyMode(effectiveMode === 'reuse' ? 'open' : 'create')
+      setCheckoutError(null)
+      setDivergedPrompt(false)
+      void armPrDeferred(effectiveMode, resolved.canonicalUrl).then(
+        () => {
+          onClose()
+        },
+        (reason: unknown) => {
+          setBusy(false)
+          setCheckoutError(reason instanceof Error ? reason.message : String(reason))
+        },
+      )
+      return
+    }
+
     const nextBusyMode = effectiveMode === 'reuse'
       ? 'open'
       : effectiveMode === 'update' || effectiveMode === 'reset'
@@ -365,13 +418,17 @@ export function CheckoutPrModal({
         }
         try {
           onCreated(result.path)
-          const trackUrl = autoTrack && forgeTrackAvailable ? result.canonicalUrl : null
-          const adoptOptions: AdoptWorktreeOptions = {
-            ...(reuseBlankSessionId === undefined ? {} : { reuseBlankSessionId }),
-            ...(context === null ? {} : { repoRoot: context.repoRoot }),
-            ...(trackUrl === null ? {} : { trackPrUrl: trackUrl }),
+          if (shouldDeferAfterAction) {
+            await armPrDeferred('reuse', result.canonicalUrl)
+          } else {
+            const trackUrl = buildTrackUrl(result.canonicalUrl)
+            const adoptOptions: AdoptWorktreeOptions = {
+              ...(reuseBlankSessionId === undefined ? {} : { reuseBlankSessionId }),
+              ...(context === null ? {} : { repoRoot: context.repoRoot }),
+              ...(trackUrl === null ? {} : { trackPrUrl: trackUrl }),
+            }
+            await adoptWorktree(result.path, Object.keys(adoptOptions).length === 0 ? undefined : adoptOptions)
           }
-          await adoptWorktree(result.path, Object.keys(adoptOptions).length === 0 ? undefined : adoptOptions)
           if (result.reset === true) emitToast(t('prModal.resetToast', { branch: result.branch }), 'success')
           else if (result.forceUpdated === true) emitToast(t('prModal.forceUpdatedToast', { branch: result.branch }), 'success')
           else if (result.updated === true) emitToast(t('prModal.updatedToast', { branch: result.branch }), 'success')

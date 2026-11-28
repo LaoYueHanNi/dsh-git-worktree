@@ -302,6 +302,7 @@ export type GitWorktreeKey =
   | 'deferred.armedRandom'
   | 'deferred.armedCutout'
   | 'deferred.armedBranch'
+  | 'deferred.armedPr'
   | 'deferred.armedCancel'
   | 'deferred.runningTitle'
   | 'deferred.failedTitle'
@@ -647,6 +648,7 @@ export const en: Record<GitWorktreeKey, string> = {
   'deferred.armedRandom': 'Random branch from {base}',
   'deferred.armedCutout': 'New branch {name} from {base}',
   'deferred.armedBranch': 'Branch {branch}',
+  'deferred.armedPr': 'PR / MR · {branch}',
   'deferred.armedCancel': 'Cancel',
   'deferred.runningTitle': 'Creating worktree',
   'deferred.failedTitle': 'Failed to create worktree',
@@ -993,6 +995,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   'deferred.armedRandom': '基于 {base} 随机生成分支',
   'deferred.armedCutout': '基于 {base} 新建分支 {name}',
   'deferred.armedBranch': '分支 {branch}',
+  'deferred.armedPr': 'PR / MR · {branch}',
   'deferred.armedCancel': '取消',
   'deferred.runningTitle': '正在创建工作树',
   'deferred.failedTitle': '创建工作树失败',

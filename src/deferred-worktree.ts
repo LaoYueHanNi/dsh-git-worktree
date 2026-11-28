@@ -39,6 +39,7 @@ export interface DeferredCreateOutcome {
   readonly fetchWarning?: string
   readonly excludeWarning?: string
   readonly copyWarning?: string
+  readonly trackPrUrl?: string
 }
 
 /** Host seams injected into {@link DeferredWorktreeCoordinator}. */
@@ -47,6 +48,7 @@ export interface DeferredCoordinatorDeps {
   readonly createWorktree: (
     spec: DeferredWorktreeSpec,
     onPhase: (phase: Exclude<DeferredWorktreePhase, 'switch'>, resolvedBranch?: string) => void,
+    signal?: AbortSignal,
   ) => Promise<DeferredCreateOutcome>
   /** Move the Agent's working directory via DSH `ctx.workingDirectory.set`. */
   readonly setWorkingDirectory: (agent: DeferredAgentLike, path: string, signal?: AbortSignal) => Promise<string>
@@ -299,7 +301,7 @@ export class DeferredWorktreeCoordinator {
       publishPhase('create', spec.cutout ? spec.name : spec.branch)
       created = await this.deps.createWorktree(spec, (phase, branch) => {
         publishPhase(phase, branch)
-      })
+      }, signal)
       slot.created = created
       signal.throwIfAborted()
     }
@@ -315,6 +317,7 @@ export class DeferredWorktreeCoordinator {
       ...(created.fetchWarning === undefined ? {} : { fetchWarning: created.fetchWarning }),
       ...(created.excludeWarning === undefined ? {} : { excludeWarning: created.excludeWarning }),
       ...(created.copyWarning === undefined ? {} : { copyWarning: created.copyWarning }),
+      ...(created.trackPrUrl === undefined ? {} : { trackPrUrl: created.trackPrUrl }),
     }
     this.slots.delete(sessionId)
     this.emit(sessionId, { state: null, completed })

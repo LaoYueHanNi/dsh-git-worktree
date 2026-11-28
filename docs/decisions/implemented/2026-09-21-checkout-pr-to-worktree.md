@@ -22,7 +22,7 @@ Status: implemented
 3. **多入口触发、双工作区模式衔接与自动回绑**：
    - 在 `BranchMenu.tsx` 左侧工具栏与 `context-menus.ts` 主仓库右键菜单提供「检出 PR / MR…」入口；弹窗内将候选列表选中态与搜索/输入框解耦，点击列表项不破坏其余候选可见性，预览区优先复用候选元数据。
    - 在 `src/client/ForgeIntegration.tsx` 可选挂载 `forge.change-request.card.actions` 与 `forge.changes.toolbar` 槽位：当会话已位于目标 PR 工作树中时自动切换为「同步 / 更新此 PR 工作树」并默认预选 `update`。
-   - 兼容「独立工作区」与「会话目录切换（`switchSessionDirectory`）」双模式：空白会话中从分支菜单触发时透传 `reuseBlankSessionId` 就地切换当前空白会话目录；打开会话后若客户端存在 `remote.forgePanel.track`，自动回绑规范 PR/MR URL，补齐官方 `findByHead` 不发现 Fork PR 的短板。
+   - 兼容「独立工作区」与「会话目录切换（`switchSessionDirectory`）」双模式：在 `switchSessionDirectory` 模式下，当用户尚未身处目标 PR 工作树内时，新建检出、复用已有工作树及更新后的切换均通过 `DeferredWorktreeCoordinator`（`armDeferredWorktree`）挂载至首条消息发送时再拉取创建或切换工作目录，避免提前改写空白会话的 `workingDirectory` 投影而导致 `Ctrl+N` 无法返回主仓库新建会话；已有独立工作区模式或身处目标 PR 工作树内更新时则立即就地生效；完成后若客户端存在 `remote.forgePanel.track`，自动回绑规范 PR/MR URL，补齐官方 `findByHead` 不发现 Fork PR 的短板。
 4. **双插件共存避让**：
    - 侧边栏徽标与悬停复用 `SidebarWorktreeBadge.tsx` 的 `shouldDecorateSession`（内部基于 `hasForgeManagedWorktree` 避让官方 `forgeWorktree` 托管会话），并为 PR 来源标签展示 `工作树 · PR #42 → main` 样式。
 

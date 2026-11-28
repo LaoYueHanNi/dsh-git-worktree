@@ -89,6 +89,9 @@ function describeArmedTarget(
   spec: DeferredWorktreeSpec,
   t: PropsLocale<'git-worktree'>['t'],
 ): string {
+  if (spec.pr !== undefined) {
+    return t('deferred.armedPr', { branch: spec.branch })
+  }
   if (spec.cutout) {
     const explicit = spec.name?.trim()
     if (explicit !== undefined && explicit !== '') {

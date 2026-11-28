@@ -292,7 +292,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         throw withHttpStatus(`Session "${sessionId}" is not loaded`, 404)
       }
       const coordinator = new DeferredWorktreeCoordinator({
-        createWorktree: (spec, onPhase) => executeCreateWorktree(baseDeps(), spec, onPhase),
+        createWorktree: (spec, onPhase, signal) => executeCreateWorktree(baseDeps(), spec, onPhase, signal),
         setWorkingDirectory: (agent, targetPath, signal) => workingDirCandidate.set(agent, targetPath, signal),
       })
       sessionDirectorySetter = setter
