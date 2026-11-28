@@ -149,6 +149,99 @@ describe('handlePrContext and handlePrResolve', () => {
     expect(body.existingBranch).toBe(true)
   })
 
+  it('rejects missing remote PR ref with pr_ref_not_found via git ls-remote and aborts opportunistic forge meta fetch', async () => {
+    let metaAborted = false
+    const forge: ForgeServiceLike = {
+      repositoryFromRemote: () => ({ forge: 'github', host: 'github.com', owner: 'org', name: 'app' }),
+      changeRequestFromUrl: () => undefined,
+      changeRequestUrl: ref => `https://github.com/${ref.repository.owner}/${ref.repository.name}/pull/${ref.number}`,
+      readiness: async () => ({ state: 'ready', message: null, signIn: null }),
+      fetchChecks: async (_ref, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          metaAborted = true
+          reject(new Error('aborted'))
+        }, { once: true })
+      }),
+    }
+    const deps = makeDeps({
+      forge: () => forge,
+      exec: scripted({
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
+        'for-each-ref refs/heads': { stdout: 'main\n' },
+        'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
+        'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
+        'remote -v': { stdout: 'origin\thttps://github.com/org/app.git (fetch)\n' },
+        'ls-remote -- origin refs/pull/1999/head': { stdout: '' },
+      }),
+    })
+    const outcome = await handlePrResolve(deps, { repoPath: '/repo', input: '1999' })
+    expect(outcome.status).toBe(400)
+    expect((outcome.body as RouteError).code).toBe('pr_ref_not_found')
+    expect((outcome.body as RouteError).params).toEqual({ ref: 'refs/pull/1999/head', remote: 'origin' })
+    expect(metaAborted).toBe(true)
+  })
+
+  it('verifies remote PR ref via ls-remote, enriches meta from forge.fetchChecks, and supports verifyRemote: false / auth failure / abort', async () => {
+    const forge: ForgeServiceLike = {
+      repositoryFromRemote: () => ({ forge: 'github', host: 'github.com', owner: 'org', name: 'app' }),
+      changeRequestFromUrl: () => undefined,
+      changeRequestUrl: ref => `https://github.com/${ref.repository.owner}/${ref.repository.name}/pull/${ref.number}`,
+      readiness: async () => ({ state: 'ready', message: null, signIn: null }),
+      fetchChecks: async () => ({
+        url: 'https://github.com/org/app/pull/88',
+        title: 'Improve PR lookup',
+        state: 'merged',
+        draft: false,
+        author: 'alice',
+        headBranch: 'feat/pr-lookup',
+        baseBranch: 'main',
+      }),
+    }
+    const okDeps = makeDeps({
+      forge: () => forge,
+      exec: scripted({
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
+        'for-each-ref refs/heads': { stdout: 'main\n' },
+        'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
+        'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
+        'remote -v': { stdout: 'origin\thttps://github.com/org/app.git (fetch)\n' },
+        'ls-remote -- origin refs/pull/88/head': { stdout: '0123456789abcdef0123456789abcdef01234567\trefs/pull/88/head\n' },
+      }),
+    })
+    const okOutcome = await handlePrResolve(okDeps, { repoPath: '/repo', input: '88' })
+    expect(okOutcome.status).toBe(200)
+    expect((okOutcome.body as PrResolveResult).meta).toMatchObject({
+      title: 'Improve PR lookup',
+      author: 'alice',
+      state: 'merged',
+    })
+
+    // verifyRemote: false skips ls-remote completely
+    const skipOutcome = await handlePrResolve(makeDeps(), { repoPath: '/repo', input: '88', verifyRemote: false })
+    expect(skipOutcome.status).toBe(200)
+
+    // Authentication error during ls-remote maps to pr_auth_failed
+    const authDeps = makeDeps({
+      exec: scripted({
+        'rev-parse --show-toplevel --git-common-dir --abbrev-ref HEAD': { stdout: '/repo\n/repo/.git\nmain\n' },
+        'for-each-ref refs/heads': { stdout: 'main\n' },
+        'for-each-ref refs/remotes': { stdout: 'origin/main\n' },
+        'worktree list --porcelain': { stdout: 'worktree /repo\nHEAD 1\nbranch refs/heads/main\n' },
+        'remote -v': { stdout: 'origin\thttps://github.com/org/app.git (fetch)\n' },
+        'ls-remote -- origin refs/pull/88/head': { code: 128, stderr: 'fatal: Authentication failed for https://github.com/org/app.git' },
+      }),
+    })
+    const authOutcome = await handlePrResolve(authDeps, { repoPath: '/repo', input: '88' })
+    expect(authOutcome.status).toBe(400)
+    expect((authOutcome.body as RouteError).code).toBe('pr_auth_failed')
+
+    // Pre-aborted AbortSignal returns 499 without running ls-remote
+    const aborted = new AbortController()
+    aborted.abort()
+    const cancelOutcome = await handlePrResolve(makeDeps(), { repoPath: '/repo', input: '88' }, aborted.signal)
+    expect(cancelOutcome.status).toBe(499)
+  })
+
   it('rejects checkout with occupied_by_main when the main worktree already holds the PR branch', async () => {
     const deps = makeDeps({
       exec: scripted({
@@ -206,6 +299,15 @@ describe('handlePrCheckout real git integration', () => {
       home: () => root,
       envHome: () => undefined,
     }
+
+    // Real git ls-remote validation in handlePrResolve: accepts existing PR #12 and rejects nonexistent #1999
+    const resolveMissing = await handlePrResolve(realDeps, { repoPath: mainDir, input: '1999', provider: 'github' })
+    expect(resolveMissing.status).toBe(400)
+    expect((resolveMissing.body as RouteError).code).toBe('pr_ref_not_found')
+
+    const resolveFound = await handlePrResolve(realDeps, { repoPath: mainDir, input: '12', provider: 'github' })
+    expect(resolveFound.status).toBe(200)
+    expect((resolveFound.body as PrResolveResult).refSpec).toBe('refs/pull/12/head')
 
     const events: SyncEvent[] = []
     const checkout1 = await handlePrCheckout(

@@ -87,6 +87,66 @@ export interface ForgeServiceLike {
     signal: AbortSignal,
   ): Promise<ForgeViewerListLike | { readonly code: string; readonly message: string }>
   latest?(ref: ChangeRequestRefLike): { readonly snapshot?: ChangeRequestSnapshotLike } | undefined
+  fetchChecks?(
+    ref: ChangeRequestRefLike,
+    signal: AbortSignal,
+  ): Promise<ChangeRequestSnapshotLike | { readonly code: string; readonly message: string }>
+}
+
+/** Timeout for opportunistic `ctx.forge` single-PR metadata lookup during `/pr-resolve`. */
+const FORGE_META_TIMEOUT_MS = 3_500
+
+/**
+ * Opportunistically fetch PR/MR metadata (title, author, state, draft, branches) from optional
+ * `ctx.forge` when not already cached in `forge.latest`. Failures and timeouts degrade silently
+ * to `undefined` so native Git checkout previews are never blocked.
+ */
+export async function fetchPrMeta(
+  forge: ForgeServiceLike | undefined,
+  remote: PrRemoteInfo | undefined,
+  provider: PrProviderKind,
+  number: number,
+  signal?: AbortSignal,
+): Promise<PrResolveResult['meta'] | undefined> {
+  if (
+    forge?.fetchChecks === undefined
+    || remote === undefined
+    || remote.host === null
+    || remote.owner === null
+    || remote.repo === null
+    || signal?.aborted === true
+  ) {
+    return undefined
+  }
+  const controller = new AbortController()
+  const onAbort = (): void => { controller.abort() }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  const timer = setTimeout(() => { controller.abort() }, FORGE_META_TIMEOUT_MS)
+  try {
+    const result = await forge.fetchChecks(
+      {
+        repository: { forge: provider, host: remote.host, owner: remote.owner, name: remote.repo },
+        number,
+      },
+      controller.signal,
+    )
+    if (result !== null && typeof result === 'object' && 'title' in result && typeof result.title === 'string') {
+      return {
+        title: result.title,
+        author: result.author,
+        state: result.state,
+        draft: result.draft,
+        headBranch: result.headBranch,
+        baseBranch: result.baseBranch,
+      }
+    }
+    return undefined
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
 }
 
 /** Runtime guard for optional `ctx.forge` service injection. */

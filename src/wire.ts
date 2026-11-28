@@ -782,6 +782,8 @@ export interface PrResolveBody {
   input: string
   remote?: string
   provider?: PrProviderKind
+  /** Verify the target ref exists on the remote via `git ls-remote` (default: `true`). Pass `false` for items just picked from the live Forge candidate list. */
+  verifyRemote?: boolean
 }
 
 /** POST pr-resolve response body. */

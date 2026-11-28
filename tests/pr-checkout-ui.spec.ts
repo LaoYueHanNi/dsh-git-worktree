@@ -258,11 +258,15 @@ describe('CheckoutPrModal', () => {
     let optionButtons = nodes(tree).filter(el => el.props.role === 'option')
     expect(optionButtons).toHaveLength(2)
 
-    // Clicking candidate #412 resolves it WITHOUT filtering out candidate #415.
+    // Clicking candidate #412 resolves it WITHOUT filtering out candidate #415, and skips redundant remote ls-remote.
     ;(optionButtons[0]!.props.onClick as () => void)()
     await hooks.flush(() => CheckoutPrModal(props))
     await vi.advanceTimersByTimeAsync(200)
     tree = await hooks.flush(() => CheckoutPrModal(props))
+    expect(requestPrResolve).toHaveBeenCalledWith(
+      expect.objectContaining({ input: 'https://github.com/org/app/pull/412', verifyRemote: false }),
+      expect.any(AbortSignal),
+    )
     optionButtons = nodes(tree).filter(el => el.props.role === 'option')
     expect(optionButtons).toHaveLength(2)
 
@@ -436,6 +440,80 @@ describe('CheckoutPrModal', () => {
     await hooks.flush(() => CheckoutPrModal(props))
 
     expect(requestPrContext).toHaveBeenLastCalledWith('/repo', expect.objectContaining({ remote: 'origin' }))
+  })
+
+  it('clears stale preview while verifying a new PR number, blocks submit when remote ref is missing, and shows merged tag when present', async () => {
+    vi.mocked(requestPrContext).mockResolvedValue({
+      ok: true,
+      repoRoot: '/repo',
+      repoName: 'repo',
+      remotes: [{ name: 'origin', url: 'https://github.com/org/app.git', provider: 'github', host: 'github.com', owner: 'org', repo: 'app' }],
+      defaultRemote: 'origin',
+      forge: { available: false, readiness: 'unsupported' },
+      candidates: [],
+    })
+    let finishSecondResolve!: (value: Awaited<ReturnType<typeof requestPrResolve>>) => void
+    vi.mocked(requestPrResolve)
+      .mockResolvedValueOnce({
+        ok: true,
+        provider: 'github',
+        number: 10,
+        remote: 'origin',
+        refSpec: 'refs/pull/10/head',
+        localBranch: 'github-pr-10',
+        targetPath: '/repo/.dsh/gitworktree/github-pr-10',
+        canonicalUrl: 'https://github.com/org/app/pull/10',
+        meta: {
+          title: 'Shipped PR',
+          author: 'alice',
+          state: 'merged',
+          draft: false,
+          headBranch: 'feat/shipped',
+          baseBranch: 'main',
+        },
+      })
+      .mockImplementationOnce(() => new Promise((resolvePromise) => {
+        finishSecondResolve = resolvePromise
+      }))
+
+    const props: CheckoutPrModalProps = {
+      repoPath: '/repo',
+      repoName: 'repo',
+      forgeTrackAvailable: false,
+      adoptWorktree: vi.fn().mockResolvedValue(undefined),
+      onCreated: vi.fn(),
+      onClose: vi.fn(),
+      t,
+    }
+    let tree = await hooks.flush(() => CheckoutPrModal(props))
+    const input = () => nodes(tree).find(el => el.type === 'input' && el.props.type === 'text')!
+    ;(input().props.onChange as (e: { target: { value: string } }) => void)({ target: { value: '10' } })
+    await hooks.flush(() => CheckoutPrModal(props))
+    await vi.advanceTimersByTimeAsync(200)
+    tree = await hooks.flush(() => CheckoutPrModal(props))
+
+    // Valid PR #10 renders merged tag and enables submit
+    expect(nodes(tree).some(el => el.type === 'tag' && el.props.children === 'prModal.tagMerged')).toBe(true)
+    expect(nodes(tree).find(el => el.type === 'button' && el.props.variant === 'primary')!.props.disabled).toBe(false)
+
+    // Typing nonexistent PR #1999 immediately clears stale preview and disables submit while checking remote
+    ;(input().props.onChange as (e: { target: { value: string } }) => void)({ target: { value: '1999' } })
+    tree = await hooks.flush(() => CheckoutPrModal(props))
+    expect(nodes(tree).some(el => el.type === 'dl')).toBe(false)
+    expect(nodes(tree).find(el => el.type === 'button' && el.props.variant === 'primary')!.props.disabled).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(200)
+    await hooks.flush(() => CheckoutPrModal(props))
+    finishSecondResolve({
+      ok: false,
+      error: 'Could not find ref "refs/pull/1999/head" on remote "origin".',
+      code: 'pr_ref_not_found',
+      params: { ref: 'refs/pull/1999/head', remote: 'origin' },
+    })
+    tree = await hooks.flush(() => CheckoutPrModal(props))
+
+    expect(nodes(tree).some(el => el.props.role === 'alert' && String(el.props.children).includes('prModal.errPrRefNotFound'))).toBe(true)
+    expect(nodes(tree).find(el => el.type === 'button' && el.props.variant === 'primary')!.props.disabled).toBe(true)
   })
 
   it('degrades cleanly when forge is unavailable and hides auto-track checkbox', async () => {

@@ -236,6 +236,8 @@ export type GitWorktreeKey =
   | 'prModal.filterInvolved'
   | 'prModal.noCandidates'
   | 'prModal.tagDraft'
+  | 'prModal.tagMerged'
+  | 'prModal.tagClosed'
   | 'prModal.tagWorktree'
   | 'prModal.ciSuccess'
   | 'prModal.ciPending'
@@ -592,11 +594,13 @@ export const en: Record<GitWorktreeKey, string> = {
   'prModal.filterInvolved': 'Involved ({n})',
   'prModal.noCandidates': 'No matching PRs or MRs in this filter. You can still enter a number or URL above.',
   'prModal.tagDraft': 'Draft',
+  'prModal.tagMerged': 'Merged',
+  'prModal.tagClosed': 'Closed',
   'prModal.tagWorktree': 'Worktree exists',
   'prModal.ciSuccess': 'Checks passed',
   'prModal.ciPending': 'Checks running',
   'prModal.ciFailure': 'Checks failed',
-  'prModal.resolving': 'Resolving target…',
+  'prModal.resolving': 'Checking remote PR/MR…',
   'prModal.previewHeading': 'Isolated worktree preview',
   'prModal.previewRef': 'Fetch ref: {ref}',
   'prModal.previewBranch': 'Local branch: {branch}',
@@ -949,11 +953,13 @@ export const zh: Record<GitWorktreeKey, string> = {
   'prModal.filterInvolved': '与我有关 ({n})',
   'prModal.noCandidates': '当前筛选下没有匹配的 PR / MR，仍可直接在上方输入编号或链接检出。',
   'prModal.tagDraft': '草稿',
+  'prModal.tagMerged': '已合并',
+  'prModal.tagClosed': '已关闭',
   'prModal.tagWorktree': '已有工作树',
   'prModal.ciSuccess': '检查通过',
   'prModal.ciPending': '检查进行中',
   'prModal.ciFailure': '检查失败',
-  'prModal.resolving': '正在解析目标…',
+  'prModal.resolving': '正在校验远端 PR / MR…',
   'prModal.previewHeading': '隔离工作树落盘预览',
   'prModal.previewRef': '拉取引用：{ref}',
   'prModal.previewBranch': '本地分支：{branch}',

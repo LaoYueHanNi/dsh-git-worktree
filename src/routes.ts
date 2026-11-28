@@ -6,10 +6,10 @@
 import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
-import { addWorktree, addWorktreeAtCommit, addWorktreeCutout, appendWorktreeExclude, CancelledError, createBranch, cutoutBranchName, deleteBranch, fetchAll, fetchRefToTip, fsDirExists, fsExcludeSeams, GitError, inspectWorktree, isAbsoluteDir, listRemotes, probeRepo, probeWorkspaceGit, randomCutoutBranchName, readWorktreePrSha, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, updateCleanWorktreeToCommit, writeWorktreeBaseBranch, writeWorktreePrSha, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
+import { addWorktree, addWorktreeAtCommit, addWorktreeCutout, appendWorktreeExclude, CancelledError, createBranch, cutoutBranchName, deleteBranch, fetchAll, fetchRefToTip, fsDirExists, fsExcludeSeams, GitError, inspectWorktree, isAbsoluteDir, listRemotes, probeRemoteRef, probeRepo, probeWorkspaceGit, randomCutoutBranchName, readWorktreePrSha, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, updateCleanWorktreeToCommit, writeWorktreeBaseBranch, writeWorktreePrSha, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
 import { readCheckedOutBranch } from './head.js'
 import { invalidateAuthorCache, readAuthors, readHistory, readCommit } from './history.js'
-import { classifyRemotes, formatPrBaseLabel, loadPrContext, PrResolutionError, resolvePrTarget, type ForgeServiceLike } from './pr.js'
+import { classifyRemotes, fetchPrMeta, formatPrBaseLabel, loadPrContext, PrResolutionError, resolvePrTarget, type ForgeServiceLike } from './pr.js'
 import type { AuthorList, AuthorsBody, HistoryBody, CommitBody, CommitHistory, CommitDetail, PrCheckoutBody, PrCheckoutResult, PrContextBody, PrContextResult, PrErrorCode, PrResolveBody, PrResolveResult } from './wire.js'
 import { openPush, previewPush, pushBranch } from './push.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
@@ -1332,17 +1332,24 @@ export async function handlePrContext(deps: RouteDeps, body: unknown): Promise<R
 }
 
 /**
- * POST /pr-resolve — parse and validate a PR/MR ID or URL against repository remotes.
+ * POST /pr-resolve — parse and validate a PR/MR ID or URL against repository remotes,
+ * verifying remote ref existence via lightweight `git ls-remote` unless skipped for live
+ * candidates or an already-existing local worktree.
  * @param deps - host dependencies.
  * @param body - parsed request body.
+ * @param signal - optional cancellation signal aborted when the HTTP client disconnects.
  */
-export async function handlePrResolve(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
-  const parsed = readBody<PrResolveBody>(body, ['repoPath', 'input'], [], ['remote', 'provider'])
+export async function handlePrResolve(deps: RouteDeps, body: unknown, signal?: AbortSignal): Promise<RouteOutcome> {
+  const parsed = readBody<PrResolveBody>(body, ['repoPath', 'input'], ['verifyRemote'], ['remote', 'provider'])
   if (isOutcome(parsed)) return parsed
-  const { repoPath, input, remote, provider } = parsed
+  const { repoPath, input, remote, provider, verifyRemote } = parsed
   if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
   const fieldErr = validatePrOptionalFields(remote, provider)
   if (fieldErr !== undefined) return fieldErr
+  let resolvedContext: { readonly remote: string; readonly refSpec: string; readonly branch: string } | undefined
+  const metaController = new AbortController()
+  const onAbort = (): void => { metaController.abort() }
+  signal?.addEventListener('abort', onAbort, { once: true })
   try {
     const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
     if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
@@ -1360,11 +1367,40 @@ export async function handlePrResolve(deps: RouteDeps, body: unknown): Promise<R
       ...(provider === undefined ? {} : { requestedProvider: provider }),
       ...(forge === undefined ? {} : { forge }),
     })
+    resolvedContext = { remote: resolved.remote, refSpec: resolved.refSpec, branch: resolved.localBranch }
+
+    if (verifyRemote !== false && resolved.occupiedByMain !== true && resolved.existingWorktreePath === undefined) {
+      const matchedRemote = remotes.find(r => r.name === resolved.remote)
+      const metaPromise = resolved.meta === undefined
+        ? fetchPrMeta(forge, matchedRemote, resolved.provider, resolved.number, metaController.signal).catch(() => undefined)
+        : Promise.resolve(undefined)
+      const remoteSha = await probeRemoteRef(deps.exec, facts.repoRoot, resolved.remote, resolved.refSpec, signal)
+      if (remoteSha === undefined) {
+        metaController.abort()
+        return failCode(
+          400,
+          `Could not find ref "${resolved.refSpec}" on remote "${resolved.remote}".`,
+          'pr_ref_not_found',
+          { ref: resolved.refSpec, remote: resolved.remote },
+        )
+      }
+      const fetchedMeta = await metaPromise
+      if (fetchedMeta !== undefined) {
+        return { status: 200, body: { ...resolved, meta: fetchedMeta } }
+      }
+    }
+
     return { status: 200, body: resolved }
   } catch (error) {
+    metaController.abort()
+    if (error instanceof CancelledError) return fail(499, error.message)
     if (error instanceof PrResolutionError) return failCode(400, error.message, error.code, error.params)
-    if (error instanceof GitError) return gitFailure(error)
+    if (error instanceof GitError) {
+      return resolvedContext === undefined ? gitFailure(error) : prGitFailure(error, resolvedContext)
+    }
     return fail(500, error instanceof Error ? error.message : String(error))
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
 }
 

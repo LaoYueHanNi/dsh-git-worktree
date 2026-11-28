@@ -498,7 +498,21 @@ export function apply(ctx: Context, config: Config = {}): void {
     postRoute(ROUTE_DEFERRED_ARM, 'deferred-arm', handleArmDeferredWorktree)
     postRoute(ROUTE_DEFERRED_ACTION, 'deferred-action', handleDeferredWorktreeAction)
     postRoute(ROUTE_PR_CONTEXT, 'pr-context', handlePrContext)
-    postRoute(ROUTE_PR_RESOLVE, 'pr-resolve', handlePrResolve)
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path: ROUTE_PR_RESOLVE, handler: async (req: IncomingMessage, res: ServerResponse) => {
+      let body: unknown
+      try {
+        body = await readJson(req)
+      } catch (error) {
+        send(res, { status: 400, body: { error: error instanceof Error ? error.message : String(error) } })
+        return
+      }
+      const controller = new AbortController()
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort()
+      })
+      const outcome = await handlePrResolve(deps(), body, controller.signal)
+      if (!res.writableEnded) send(res, outcome)
+    } }), 'git-worktree: pr-resolve route')
     streamPostRoute(ROUTE_PR_CHECKOUT, 'pr-checkout', handlePrCheckout)
   })
 }

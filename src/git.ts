@@ -1150,6 +1150,45 @@ export async function listRemotes(exec: Exec, repoRoot: string): Promise<Array<{
   return [...byName.entries()].map(([name, url]) => ({ name, url }))
 }
 
+/** Timeout for lightweight `git ls-remote` PR/MR ref existence probes. */
+const REMOTE_REF_PROBE_TIMEOUT_MS = 12_000
+
+/**
+ * Probe whether a specific ref (e.g. `refs/pull/42/head` or `refs/merge-requests/17/head`)
+ * exists on `remote` via `git ls-remote` without transferring any Git objects.
+ * Returns the tip commit SHA when present, or `undefined` when the remote is reachable
+ * and does not advertise the ref.
+ * @param exec - executor seam.
+ * @param repoRoot - main worktree directory.
+ * @param remote - target remote name.
+ * @param refSpec - exact remote ref name to check.
+ * @param signal - optional cancellation signal that kills the child process tree on abort.
+ */
+export async function probeRemoteRef(
+  exec: Exec,
+  repoRoot: string,
+  remote: string,
+  refSpec: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (signal?.aborted) throw new CancelledError()
+  const res = await exec('git', ['ls-remote', '--', remote, refSpec], {
+    cwd: repoRoot,
+    nonInteractive: true,
+    timeoutMs: REMOTE_REF_PROBE_TIMEOUT_MS,
+    ...(signal === undefined ? {} : { signal }),
+  })
+  if (res.cancelled) throw new CancelledError()
+  if (res.code !== 0) throw new GitError(['ls-remote', remote, refSpec], res.code, res.stderr)
+  for (const line of res.stdout.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    const [sha, name] = trimmed.split(/\s+/)
+    if (sha !== undefined && sha !== '' && name === refSpec) return sha
+  }
+  return undefined
+}
+
 /**
  * Fetch an explicit remote ref (e.g. `refs/pull/42/head`) into a unique temporary ref
  * and return its commit SHA without touching `FETCH_HEAD`, any local branch, or the working tree.

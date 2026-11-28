@@ -226,6 +226,7 @@ export function CheckoutPrModal({
       return
     }
     const controller = new AbortController()
+    setResolved(null)
     setResolving(true)
     setResolveError(null)
     setDivergedPrompt(false)
@@ -235,6 +236,7 @@ export function CheckoutPrModal({
         input: effectiveInput,
         ...(effectiveRemote === '' ? {} : { remote: effectiveRemote }),
         ...(effectiveProvider === undefined ? {} : { provider: effectiveProvider }),
+        ...(selectedCandidate === null ? {} : { verifyRemote: false }),
       }, controller.signal).then((result) => {
         if (controller.signal.aborted) return
         setResolving(false)
@@ -493,6 +495,11 @@ export function CheckoutPrModal({
 
   const previewAuthor = resolved?.meta?.author ?? matchedCandidate?.author ?? null
   const previewDraft = resolved?.meta?.draft ?? matchedCandidate?.draft ?? false
+  const previewStateLabel = resolved?.meta?.state === 'merged'
+    ? t('prModal.tagMerged')
+    : resolved?.meta?.state === 'closed'
+      ? t('prModal.tagClosed')
+      : null
   const previewChecks = matchedCandidate === null ? null : matchedCandidate.checksRollup
   const previewCi = previewChecks === null ? null : ciText(previewChecks, t)
 
@@ -707,6 +714,7 @@ export function CheckoutPrModal({
                         {t('prModal.existingHeading', { branch: resolved.localBranch })}
                       </span>
                       {previewDraft && <Tag tone="neutral">{t('prModal.tagDraft')}</Tag>}
+                      {previewStateLabel !== null && <Tag tone="neutral">{previewStateLabel}</Tag>}
                     </div>
                     {previewTitleText !== null && previewTitleText !== t('prModal.previewHeading') && (
                       <div className={css.previewLine}>{previewTitleText}</div>
@@ -751,6 +759,7 @@ export function CheckoutPrModal({
                     <div className={css.previewHeader}>
                       <span className={css.previewTitle}>{previewTitleText}</span>
                       {previewDraft && <Tag tone="neutral">{t('prModal.tagDraft')}</Tag>}
+                      {previewStateLabel !== null && <Tag tone="neutral">{previewStateLabel}</Tag>}
                     </div>
                     {(previewAuthor !== null || previewCi !== null) && (
                       <div className={css.candidateMeta}>
