@@ -11,15 +11,17 @@ Status: implemented
 > [!NOTE]
 > 本决策中的 CI 发布认证方式已于 2026-10-26 由 [DR: npm 发布改用 Trusted Publishing（OIDC 免 token）](2026-10-26-npm-trusted-publishing-oidc.md) 部分取代：不再使用 granular access token，改为 OIDC 换取短期令牌，仓库 Secrets 保持为空。其余决策（tag 触发、版本校验、rc 挂 next、发布前质量门）继续有效。
 
-新增 `.github/workflows/publish.yml`：push `v*` / `[0-9]*` 形态的 tag 触发。流程为 checkout → `pnpm/action-setup@v4`（从 `packageManager` 字段读 pnpm 版本）→ `setup-node` 22 + pnpm 缓存 → 校验 tag 名与 package.json `version` 一致（错配即报错退出）→ `pnpm install --frozen-lockfile` → `npm publish --provenance --access public`（publish 前自动执行 `prepublishOnly`：typecheck → test → build:all）；版本号含预发布段（`-`）自动改挂 `next` dist-tag，不污染 `latest`。`permissions.id-token: write` 供 provenance 签发的 OIDC。认证原使用 npm granular token（限定本包 Read and write）存 GitHub 仓库 Secret `NPM_TOKEN`，现已改为 OIDC（见上方 NOTE）。发版流程固化为：bump version → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。本决策取代 [DR: 以 @laoyuehanni/dsh-git-worktree 发布到公共 NPM](2026-08-30-publish-to-npm.md) 中的"手动发版"方式；包名、`files` 白名单、`publishConfig`、`prepublishOnly` 等其余决策不变。
+新增 `.github/workflows/publish.yml`：push `v*` / `[0-9]*` 形态的 tag 触发。流程为 checkout → `pnpm/action-setup@v4`（从 `packageManager` 字段读 pnpm 版本）→ `setup-node` 22 + pnpm 缓存 → 校验 tag 名与 package.json `version` 一致（错配即报错退出）→ `pnpm install --frozen-lockfile` → `npm publish --provenance --access public`（publish 前自动执行 `prepublishOnly`：typecheck → test → build:all）；版本号含预发布段（`-`）自动改挂 `next` dist-tag，不污染 `latest`。`permissions.id-token: write` 供 provenance 签发的 OIDC。认证原使用 npm granular token（限定本包 Read and write）存 GitHub 仓库 Secret `NPM_TOKEN`，现已改为 OIDC（见上方 NOTE）。发版流程固化为：bump version → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。2026-11-28 起，发版流程在 bump version 的同一提交中同步更新根目录 `CHANGELOG.md`（Keep a Changelog 格式，面向用户的手写说明），`publish.yml` 在 `npm publish` 成功后用 `scripts/release-notes.mjs` 提取该版本段落，通过 `gh release create` 创建同名 GitHub Release（`permissions.contents: write`；预发布版加 `--prerelease`）；CHANGELOG 缺该版本段落时降级为 `--generate-notes`，不阻断已完成的 npm 发布；`CHANGELOG.md` 同时进入 npm 包 `files` 白名单。本决策取代 [DR: 以 @laoyuehanni/dsh-git-worktree 发布到公共 NPM](2026-08-30-publish-to-npm.md) 中的"手动发版"方式；包名、`files` 白名单、`publishConfig`、`prepublishOnly` 等其余决策不变。
 
 ## Alternatives considered
 
 - **workflow_dispatch 手动触发** —— 发布动作与版本号无强绑定，tag 一致性仍靠人眼；tag 触发让"推 tag"本身就是发布，且工作流内强制校验一致性。放弃。
 - **semantic-release / release-please 全自动发版** —— 从约定式提交自动推导版本与 changelog，机器接管版本号节奏；单人仓库版本由维护者手工控制，引入约定解析机器复杂度不划算。放弃。
+- **仅用 GitHub `--generate-notes` 自动生成 Release 说明** —— 输出是提交或 PR 标题的平铺列表，对终端用户可读性差，且本仓库部分版本是直接提交而非 PR。只保留为 CHANGELOG 缺段落时的降级路径。
 - **npm trusted publishing（OIDC 免 token）** —— 需在 npmjs.com 为包配置受信任发布者；granular token 已能把权限收敛到单包读写，provenance 照常签发，且与同账号其他插件的操作习惯一致。暂放弃，后续可迁移。
 
 ## Consequences
 
 - 得：发布环境固定在 CI（Node 22 + 官方 registry），typecheck/test/构建全绿才发布；tag 与版本一致性由机器校验；provenance 提供可验证的构建来源；rc 版自动挂 `next`，`latest` 只收正式版。
-- 代价：发版多"push tag"一步，tag 打错须删远端 tag 重打（一致性校验会先拦截错配）；`NPM_TOKEN` 是长期凭据，泄漏面在 GitHub Secret，生成与轮换由维护者自行负责，且 Secret 逐仓库单独配置。
+- 得（更新日志）：每个版本有一份面向用户的说明，同时出现在仓库 `CHANGELOG.md`、npm 包内与 GitHub Release；一处维护，发版时自动同步。
+- 代价：发版多"push tag"一步，每次升版须同时写 `CHANGELOG.md` 段落（漏写只会降级为自动生成说明，不会阻断发布）；tag 打错须删远端 tag 重打（一致性校验会先拦截错配）；`NPM_TOKEN` 是长期凭据，泄漏面在 GitHub Secret，生成与轮换由维护者自行负责，且 Secret 逐仓库单独配置。
