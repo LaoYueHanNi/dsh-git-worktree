@@ -771,6 +771,8 @@ export interface PrContextResult {
     readiness: 'ready' | 'unauthenticated' | 'unavailable' | 'unsupported'
     signInCommand?: string
     message?: string
+    /** True when the host `ctx.forge` service is ready but does not expose viewer PR list queries yet. */
+    listUnsupported?: boolean
   }
   candidates: PrCandidateItem[]
 }

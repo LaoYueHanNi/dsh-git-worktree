@@ -166,6 +166,7 @@ describe('filterPrCandidates', () => {
   ]
 
   it('filters by active tab when query is empty and searches across tabs when query is given', () => {
+    expect(filterPrCandidates(sample, 'all', '').map(i => i.number)).toEqual([412, 398])
     expect(filterPrCandidates(sample, 'review-requested', '').map(i => i.number)).toEqual([412])
     expect(filterPrCandidates(sample, 'authored', '').map(i => i.number)).toEqual([398])
     expect(filterPrCandidates(sample, 'review-requested', '#398').map(i => i.number)).toEqual([398])
@@ -514,6 +515,61 @@ describe('CheckoutPrModal', () => {
 
     expect(nodes(tree).some(el => el.props.role === 'alert' && String(el.props.children).includes('prModal.errPrRefNotFound'))).toBe(true)
     expect(nodes(tree).find(el => el.type === 'button' && el.props.variant === 'primary')!.props.disabled).toBe(true)
+  })
+
+  it('shows empty candidate section when forge is ready with 0 open PRs, and shows banner when forge is unavailable', async () => {
+    vi.mocked(requestPrContext).mockResolvedValueOnce({
+      ok: true,
+      repoRoot: '/repo',
+      repoName: 'repo',
+      remotes: [{ name: 'origin', url: 'https://github.com/org/app.git', provider: 'github', host: 'github.com', owner: 'org', repo: 'app' }],
+      defaultRemote: 'origin',
+      forge: { available: true, readiness: 'ready' },
+      candidates: [],
+    })
+    const props: CheckoutPrModalProps = {
+      repoPath: '/repo',
+      repoName: 'repo',
+      forgeTrackAvailable: true,
+      adoptWorktree: vi.fn().mockResolvedValue(undefined),
+      onCreated: vi.fn(),
+      onClose: vi.fn(),
+      t,
+    }
+    const readyTree = await hooks.flush(() => CheckoutPrModal(props))
+    const readyNodes = nodes(readyTree)
+    expect(readyNodes.some(el => el.props.role === 'tablist')).toBe(true)
+    expect(readyNodes.some(el => el.props.role === 'tab' && String(el.props.children).includes('prModal.filterAll'))).toBe(true)
+    expect(readyNodes.some(el => el.props.children === 'prModal.emptyRepoCandidates')).toBe(true)
+
+    hooks.unmount()
+    vi.mocked(requestPrContext).mockResolvedValueOnce({
+      ok: true,
+      repoRoot: '/repo',
+      repoName: 'repo',
+      remotes: [{ name: 'origin', url: 'https://github.com/org/app.git', provider: 'github', host: 'github.com', owner: 'org', repo: 'app' }],
+      defaultRemote: 'origin',
+      forge: { available: true, readiness: 'unavailable', message: 'offline' },
+      candidates: [],
+    })
+    const unavailTree = await hooks.flush(() => CheckoutPrModal(props))
+    const unavailNodes = nodes(unavailTree)
+    expect(unavailNodes.some(el => el.props.role === 'tablist')).toBe(false)
+    expect(unavailNodes.some(el => String(el.props.children).includes('prModal.forgeUnavailableWithReason'))).toBe(true)
+
+    hooks.unmount()
+    vi.mocked(requestPrContext).mockResolvedValueOnce({
+      ok: true,
+      repoRoot: '/repo',
+      repoName: 'repo',
+      remotes: [{ name: 'origin', url: 'https://github.com/org/app.git', provider: 'github', host: 'github.com', owner: 'org', repo: 'app' }],
+      defaultRemote: 'origin',
+      forge: { available: true, readiness: 'unavailable', listUnsupported: true },
+      candidates: [],
+    })
+    const unsupportedTree = await hooks.flush(() => CheckoutPrModal(props))
+    const unsupportedNodes = nodes(unsupportedTree)
+    expect(unsupportedNodes.some(el => el.props.children === 'prModal.forgeListUnsupported')).toBe(true)
   })
 
   it('degrades cleanly when forge is unavailable and hides auto-track checkbox', async () => {

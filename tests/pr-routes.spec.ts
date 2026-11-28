@@ -129,6 +129,34 @@ describe('handlePrContext and handlePrResolve', () => {
     expect(body.candidates).toEqual([])
   })
 
+  it('surfaces listForViewer failures or missing viewer-list support instead of faking an empty ready list', async () => {
+    const noListForge: ForgeServiceLike = {
+      repositoryFromRemote: () => ({ forge: 'github', host: 'github.com', owner: 'org', name: 'app' }),
+      changeRequestFromUrl: () => undefined,
+      changeRequestUrl: () => '',
+      readiness: async () => ({ state: 'ready', message: null, signIn: null }),
+    }
+    const noListOutcome = await handlePrContext(makeDeps({ forge: () => noListForge }), { repoPath: '/repo' })
+    expect(noListOutcome.status).toBe(200)
+    expect((noListOutcome.body as PrContextResult).forge).toEqual({
+      available: true,
+      readiness: 'unavailable',
+      listUnsupported: true,
+    })
+
+    const failingListForge: ForgeServiceLike = {
+      ...noListForge,
+      listForViewer: async () => ({ code: 'rate-limited', message: 'API rate limit exceeded' }),
+    }
+    const failOutcome = await handlePrContext(makeDeps({ forge: () => failingListForge }), { repoPath: '/repo' })
+    expect(failOutcome.status).toBe(200)
+    expect((failOutcome.body as PrContextResult).forge).toEqual({
+      available: true,
+      readiness: 'unavailable',
+      message: 'API rate limit exceeded',
+    })
+  })
+
   it('resolves numeric PR and reports existing worktree without touching git', async () => {
     const wtPath = join('/repo', '.dsh', 'gitworktree', 'github-pr-42')
     const deps = makeDeps({

@@ -231,9 +231,15 @@ export type GitWorktreeKey =
   | 'prModal.providerGithub'
   | 'prModal.providerGitlab'
   | 'prModal.forgeUnauth'
+  | 'prModal.forgeListUnsupported'
+  | 'prModal.forgeUnavailable'
+  | 'prModal.forgeUnavailableWithReason'
+  | 'prModal.filterAll'
   | 'prModal.filterReviewRequested'
   | 'prModal.filterAuthored'
   | 'prModal.filterInvolved'
+  | 'prModal.refreshCandidates'
+  | 'prModal.emptyRepoCandidates'
   | 'prModal.noCandidates'
   | 'prModal.tagDraft'
   | 'prModal.tagMerged'
@@ -589,9 +595,15 @@ export const en: Record<GitWorktreeKey, string> = {
   'prModal.providerGithub': 'GitHub PR',
   'prModal.providerGitlab': 'GitLab MR',
   'prModal.forgeUnauth': 'Code host sign-in needed for the PR list — you can still checkout by number or URL',
+  'prModal.forgeListUnsupported': 'Current DSH Forge version does not support PR lists yet — you can still checkout by number or URL',
+  'prModal.forgeUnavailable': 'Code host PR list is currently unavailable — you can still checkout by number or URL',
+  'prModal.forgeUnavailableWithReason': 'Code host PR list unavailable ({message}) — you can still checkout by number or URL',
+  'prModal.filterAll': 'All ({n})',
   'prModal.filterReviewRequested': 'Review requested ({n})',
   'prModal.filterAuthored': 'Created by me ({n})',
   'prModal.filterInvolved': 'Involved ({n})',
+  'prModal.refreshCandidates': 'Refresh',
+  'prModal.emptyRepoCandidates': 'No open PRs or MRs involving you in this repository. Enter a number or paste a URL above to checkout.',
   'prModal.noCandidates': 'No matching PRs or MRs in this filter. You can still enter a number or URL above.',
   'prModal.tagDraft': 'Draft',
   'prModal.tagMerged': 'Merged',
@@ -948,9 +960,15 @@ export const zh: Record<GitWorktreeKey, string> = {
   'prModal.providerGithub': 'GitHub PR',
   'prModal.providerGitlab': 'GitLab MR',
   'prModal.forgeUnauth': '代码托管平台未登录（暂不展示候选列表）— 仍可直接输入编号或链接检出',
+  'prModal.forgeListUnsupported': '当前 DSH 版本的官方 Forge 暂不支持拉取 PR 列表 — 仍可直接输入编号或链接检出',
+  'prModal.forgeUnavailable': '代码托管平台暂不可用（无法加载候选列表）— 仍可直接输入编号或链接检出',
+  'prModal.forgeUnavailableWithReason': '无法加载候选列表（{message}）— 仍可直接输入编号或链接检出',
+  'prModal.filterAll': '全部 ({n})',
   'prModal.filterReviewRequested': '待我评审 ({n})',
   'prModal.filterAuthored': '我创建的 ({n})',
   'prModal.filterInvolved': '与我有关 ({n})',
+  'prModal.refreshCandidates': '刷新',
+  'prModal.emptyRepoCandidates': '当前仓库暂无与你相关的开放 PR / MR，可直接输入编号或粘贴链接检出。',
   'prModal.noCandidates': '当前筛选下没有匹配的 PR / MR，仍可直接在上方输入编号或链接检出。',
   'prModal.tagDraft': '草稿',
   'prModal.tagMerged': '已合并',

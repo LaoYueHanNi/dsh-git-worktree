@@ -18,8 +18,11 @@ import type {
 /** Project-internal layout directory relative to repoRoot. */
 const PROJECT_LAYOUT_DIR = join('.dsh', 'gitworktree')
 
-/** Timeout for optional `ctx.forge` readiness & candidate queries so the modal never stalls. */
-const FORGE_QUERY_TIMEOUT_MS = 8_000
+/** Timeout for optional `ctx.forge` readiness probes so the modal never stalls. */
+const FORGE_READINESS_TIMEOUT_MS = 8_000
+
+/** Separate timeout budget for optional `ctx.forge.listForViewer` queries after readiness passes. */
+const FORGE_LIST_TIMEOUT_MS = 15_000
 
 /** Minimal repository identity returned by `ctx.forge`. */
 export interface ForgeRepositoryLike {
@@ -76,6 +79,12 @@ export interface ForgeServiceLike {
   changeRequestFromUrl(url: string): ChangeRequestRefLike | undefined
   changeRequestUrl(ref: ChangeRequestRefLike): string
   readiness(repository: ForgeRepositoryLike, signal: AbortSignal): Promise<ForgeReadinessLike>
+  viewerSources?(): readonly {
+    readonly forge: string
+    readonly hosts: readonly string[]
+    readonly filters: ReadonlySet<string>
+    readonly maxItems: number
+  }[]
   listForViewer?(
     forge: string,
     query: {
@@ -631,11 +640,11 @@ export async function loadPrContext(args: {
     owner: primaryRemote.owner,
     name: primaryRemote.repo,
   }
-  const signal = AbortSignal.timeout(FORGE_QUERY_TIMEOUT_MS)
+  const readinessSignal = AbortSignal.timeout(FORGE_READINESS_TIMEOUT_MS)
 
   let readiness: ForgeReadinessLike
   try {
-    readiness = await forge.readiness(repository, signal)
+    readiness = await forge.readiness(repository, readinessSignal)
   } catch (error) {
     return {
       repoRoot,
@@ -667,21 +676,46 @@ export async function loadPrContext(args: {
     }
   }
 
-  if (forge.listForViewer === undefined) {
+  if (typeof forge.listForViewer !== 'function') {
     return {
       repoRoot,
       repoName,
       remotes,
       defaultRemote,
-      forge: { available: true, readiness: 'ready' },
+      forge: {
+        available: true,
+        readiness: 'unavailable',
+        listUnsupported: true,
+      },
       candidates: [],
     }
   }
 
+  const viewerSource = forge.viewerSources?.().find(s => s.forge.toLowerCase() === primaryRemote.provider)
+  const activeFilters = viewerSource === undefined
+    ? FILTER_ORDER
+    : FILTER_ORDER.filter(filter => viewerSource.filters.has(filter))
+  if (activeFilters.length === 0) {
+    return {
+      repoRoot,
+      repoName,
+      remotes,
+      defaultRemote,
+      forge: {
+        available: true,
+        readiness: 'unavailable',
+        listUnsupported: true,
+      },
+      candidates: [],
+    }
+  }
+  const limit = Math.max(1, Math.min(20, viewerSource?.maxItems ?? 20))
+  const listSignal = AbortSignal.timeout(FORGE_LIST_TIMEOUT_MS)
+
   const seen = new Set<string>()
   const candidates: PrCandidateItem[] = []
   const lists = await Promise.allSettled(
-    FILTER_ORDER.map(async (filter) => ({
+    activeFilters.map(async (filter) => ({
       filter,
       res: await forge.listForViewer!(
         primaryRemote.provider!,
@@ -689,17 +723,30 @@ export async function loadPrContext(args: {
           host: primaryRemote.host!,
           filter,
           repository: { owner: primaryRemote.owner!, name: primaryRemote.repo! },
-          limit: 20,
+          limit,
         },
-        signal,
+        listSignal,
       ),
     })),
   )
 
+  let succeededLists = 0
+  let firstFailure: { readonly code: string; readonly message: string } | undefined
+
   for (const settled of lists) {
-    if (settled.status !== 'fulfilled') continue
+    if (settled.status !== 'fulfilled') {
+      firstFailure ??= {
+        code: 'unavailable',
+        message: settled.reason instanceof Error ? settled.reason.message : String(settled.reason),
+      }
+      continue
+    }
     const { filter, res } = settled.value
-    if (!('items' in res)) continue
+    if (!('items' in res)) {
+      firstFailure ??= { code: res.code, message: res.message }
+      continue
+    }
+    succeededLists += 1
     for (const item of res.items) {
       const provider = toProviderKind(item.ref.repository.forge) ?? primaryRemote.provider
       const key = `${provider}:${item.ref.repository.host.toLowerCase()}:${item.ref.repository.owner.toLowerCase()}/${item.ref.repository.name.toLowerCase()}#${item.ref.number}`
@@ -725,6 +772,21 @@ export async function loadPrContext(args: {
         localBranch,
         ...(existingWt === undefined ? {} : { existingWorktreePath: existingWt }),
       })
+    }
+  }
+
+  if (succeededLists === 0 && firstFailure !== undefined) {
+    return {
+      repoRoot,
+      repoName,
+      remotes,
+      defaultRemote,
+      forge: {
+        available: true,
+        readiness: firstFailure.code === 'unauthenticated' ? 'unauthenticated' : 'unavailable',
+        message: firstFailure.message,
+      },
+      candidates: [],
     }
   }
 

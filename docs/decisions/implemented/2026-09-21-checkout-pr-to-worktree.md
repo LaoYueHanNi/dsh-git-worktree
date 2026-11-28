@@ -17,7 +17,7 @@ Status: implemented
    - 检出及每次更新后在 `<worktreeGitDir>/dsh-worktree-base` 写入 PR 来源标签（如 `PR #42` / `PR #42 → main`）供侧边栏悬停展示，并在 `<worktreeGitDir>/dsh-worktree-pr-sha` 记录上次同步的 PR SHA。
    - 当对应工作树已存在时支持「直接打开（`reuse`）」与「同步更新（`update`，仅干净工作树）」：能快进时走 `--ff-only`；若 PR 作者 rebase / force-push 且当前 `HEAD === 上次 PR SHA`（确认无本地提交），自动执行 `git reset --hard <newSha>` 安全同步并提示；若本地存在独有提交（或无历史 SHA 记录），返回 `409 worktree_diverged` 由弹窗提供「保留本地直接打开」或二次确认「重置到 PR 最新（`reset`）」。当本地已有同名分支但无工作树且含未合并提交时保留原分支不丢弃提交。
 2. **Host 侧可选增强 `ctx.forge` 与多 Remote 联动**：
-   - 在 `src/index.ts` 通过可选 `ctx.inject(['forge'], ...)` 探测宿主 Forge 服务（最小鸭子类型守卫 `isForgeServiceLike`），在 `POST /pr-context`（支持按指定 `remote` 切换查询）与 `POST /pr-resolve` 中复用其主机识别（支持 GitHub Enterprise 与自建 GitLab）、仓库归属校验与当前仓库「待我评审 / 我创建的 / 与我有关」候选列表。
+   - 在 `src/index.ts` 通过可选 `ctx.inject(['forge'], ...)` 探测宿主 Forge 服务（最小鸭子类型守卫 `isForgeServiceLike`），在 `POST /pr-context`（支持按指定 `remote` 切换查询，将 `readiness` 与 `listForViewer` 拆分为独立超时预算并在宿主不支持或全部查询失败时显式上报 `listUnsupported` / `unavailable` 而非伪装为空列表）与 `POST /pr-resolve` 中复用其主机识别（支持 GitHub Enterprise 与自建 GitLab）、仓库归属校验与当前仓库「全部 / 待我评审 / 我创建的 / 与我有关」候选列表。
    - `POST /pr-resolve` 在本地规则校验通过后，针对非主仓库占用且尚未存在本地工作树的输入，默认通过原生轻量 `git ls-remote -- <remote> <refSpec>`（带 12 秒硬超时与 HTTP 断连 `AbortSignal` 级联中止）实时核验远端 PR/MR 引用是否存在，避免用户输入不存在的编号后仍亮起检出按钮或挂载无效的延迟工作树任务；当点选当前实时候选列表项时传 `verifyRemote: false` 跳过冗余往返；远端确认存在且宿主 `ctx.forge.fetchChecks` 可用时，并行补拉标题、作者与合并/关闭状态（3.5 秒软超时静默降级）。
    - 宿主未启用 `forge-bundle` 或未登录时自动降级至 `src/pr.ts` 内置 URL/Remote 解析与纯 Git 拉取；所有 PR 解析与 Git 失败均输出结构化 `PrErrorCode` 供前端中英文精准提示。
 3. **多入口触发、双工作区模式衔接与自动回绑**：

@@ -55,7 +55,7 @@ export interface CheckoutPrModalProps {
   readonly t: Translate
 }
 
-type FilterKind = 'review-requested' | 'authored' | 'involved'
+type FilterKind = 'all' | 'review-requested' | 'authored' | 'involved'
 
 /** Pure filter helper exported for unit testing. */
 export function filterPrCandidates(
@@ -65,7 +65,7 @@ export function filterPrCandidates(
 ): PrCandidateItem[] {
   const trimmed = query.trim().toLowerCase()
   if (trimmed === '') {
-    return candidates.filter(item => item.filter === filter)
+    return filter === 'all' ? [...candidates] : candidates.filter(item => item.filter === filter)
   }
   const needle = trimmed.replace(/^[#!]/, '')
   return candidates.filter(item =>
@@ -121,7 +121,7 @@ export function CheckoutPrModal({
   const [selectedCandidate, setSelectedCandidate] = useState<PrCandidateItem | null>(null)
   const [remote, setRemote] = useState<string>('')
   const [providerOverride, setProviderOverride] = useState<PrProviderKind | ''>('')
-  const [filter, setFilter] = useState<FilterKind>('review-requested')
+  const [filter, setFilter] = useState<FilterKind>('all')
   const [resolved, setResolved] = useState<PrResolveResult | null>(null)
   const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
@@ -165,11 +165,7 @@ export function CheckoutPrModal({
       }
       setContext(result)
       setRemote(result.defaultRemote ?? result.remotes[0]?.name ?? '')
-      if (result.candidates.length > 0) {
-        const hasReviewRequested = result.candidates.some(c => c.filter === 'review-requested')
-        const firstTab = hasReviewRequested ? 'review-requested' : result.candidates[0]!.filter
-        setFilter(firstTab)
-      }
+      setFilter('all')
     })
     return () => {
       controller.abort()
@@ -261,7 +257,12 @@ export function CheckoutPrModal({
   }, [context, repoPath, effectiveInput, effectiveRemote, effectiveProvider, selectedCandidate, hasCandidateList, initialIfExists])
 
   const counts = useMemo(() => {
-    const map: Record<FilterKind, number> = { 'review-requested': 0, authored: 0, involved: 0 }
+    const map: Record<FilterKind, number> = {
+      all: context?.candidates.length ?? 0,
+      'review-requested': 0,
+      authored: 0,
+      involved: 0,
+    }
     for (const item of context?.candidates ?? []) map[item.filter] += 1
     return map
   }, [context])
@@ -306,12 +307,8 @@ export function CheckoutPrModal({
         return
       }
       setContext(result)
-      if (result.candidates.length > 0) {
-        const hasCurrentTab = result.candidates.some(c => c.filter === filter)
-        if (!hasCurrentTab) {
-          const hasReviewRequested = result.candidates.some(c => c.filter === 'review-requested')
-          setFilter(hasReviewRequested ? 'review-requested' : result.candidates[0]!.filter)
-        }
+      if (filter !== 'all' && !result.candidates.some(c => c.filter === filter)) {
+        setFilter('all')
       }
     })
   }
@@ -571,6 +568,18 @@ export function CheckoutPrModal({
               </div>
             )}
 
+            {context.forge.available && context.forge.readiness === 'unavailable' && (
+              <div className={css.banner}>
+                <span>
+                  {context.forge.listUnsupported === true
+                    ? t('prModal.forgeListUnsupported')
+                    : context.forge.message !== undefined && context.forge.message.trim() !== ''
+                      ? t('prModal.forgeUnavailableWithReason', { message: context.forge.message })
+                      : t('prModal.forgeUnavailable')}
+                </span>
+              </div>
+            )}
+
             <div className={css.controlsRow}>
               <input
                 ref={inputRef}
@@ -626,31 +635,44 @@ export function CheckoutPrModal({
               <div className={css.status} role="status">{t('prModal.loadingRemote', { remote })}</div>
             )}
 
-            {hasCandidateList && (
+            {forgeReady && (
               <>
-                <div className={css.filterTabs} role="tablist">
-                  {([
-                    ['review-requested', 'prModal.filterReviewRequested'],
-                    ['authored', 'prModal.filterAuthored'],
-                    ['involved', 'prModal.filterInvolved'],
-                  ] as const).map(([key, labelKey]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="tab"
-                      aria-selected={filter === key}
-                      className={filter === key ? `${css.filterTab} ${css.filterTabActive}` : css.filterTab}
-                      disabled={busy}
-                      onClick={() => { setFilter(key) }}
-                    >
-                      {t(labelKey, { n: counts[key] })}
-                    </button>
-                  ))}
+                <div className={css.filterRow}>
+                  <div className={css.filterTabs} role="tablist">
+                    {([
+                      ['all', 'prModal.filterAll'],
+                      ['review-requested', 'prModal.filterReviewRequested'],
+                      ['authored', 'prModal.filterAuthored'],
+                      ['involved', 'prModal.filterInvolved'],
+                    ] as const).map(([key, labelKey]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        aria-selected={filter === key}
+                        className={filter === key ? `${css.filterTab} ${css.filterTabActive}` : css.filterTab}
+                        disabled={busy}
+                        onClick={() => { setFilter(key) }}
+                      >
+                        {t(labelKey, { n: counts[key] })}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className={css.refreshTab}
+                    disabled={busy || switchingRemote}
+                    onClick={() => { handleRemoteChange(remote) }}
+                  >
+                    {t('prModal.refreshCandidates')}
+                  </button>
                 </div>
 
                 <div className={css.candidateList} role="listbox">
                   {visibleCandidates.length === 0 ? (
-                    <div className={css.status}>{t('prModal.noCandidates')}</div>
+                    <div className={css.emptyList}>
+                      {counts.all === 0 ? t('prModal.emptyRepoCandidates') : t('prModal.noCandidates')}
+                    </div>
                   ) : visibleCandidates.map((item) => {
                     const selected = (selectedCandidate !== null && selectedCandidate.provider === item.provider && selectedCandidate.number === item.number && selectedCandidate.remote === item.remote)
                       || (selectedCandidate === null && (query.trim() === item.url || query.trim() === String(item.number)))
