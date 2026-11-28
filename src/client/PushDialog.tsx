@@ -8,6 +8,7 @@ import {
   IconRefreshOutlineRegular,
   Menu,
   Modal,
+  Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BranchEntry, PushBody, PushPlan, PushPreview } from '../wire.ts'
@@ -293,7 +294,7 @@ export function PushDialog({ repoPath, repoName, branch, branchInfo, busy, resum
             </div>}
           </div>
         </div>}
-        {preview?.targetOid === null && <span className={css.badge}>{t('pushNew')}</span>}
+        {preview?.targetOid === null && <Tag tone="neutral">{t('pushNew')}</Tag>}
       </div>
       <div className={css.commits} aria-busy={displayPreview === undefined && error === null}>
         {displayPreview === undefined && knownTotal !== undefined && <div className={css.count}>
@@ -343,7 +344,7 @@ export function PushDialog({ repoPath, repoName, branch, branchInfo, busy, resum
           aria-label={t('pushRefresh')} onClick={refresh}><IconRefreshOutlineRegular size={14} /></button>}
         <Button size="sm" variant="ghost" disabled={disabled} onClick={close}>{t('actionCancel')}</Button>
         <Menu open={menu === 'push'} dense portal autoFocus side="top" align="end" onClose={() => { setMenu(null) }}
-          items={[{ id: 'force', label: <span title={t('pushForceHint')}>{t('pushForce')}</span>, disabled: !canPush }]}
+          items={[{ id: 'force', label: <span title={t('pushForceHint')}>{t('pushForce')}</span>, danger: true, disabled: !canPush }]}
           onSelect={() => { void submit(true) }} anchor={<div className={css.split}>
             <button type="button" className={css.push} data-modal-autofocus disabled={!canPush || nothingToPush}
               {...pushTitle === undefined ? {} : { title: pushTitle }}

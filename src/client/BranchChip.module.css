@@ -60,9 +60,9 @@
   position: fixed;
   z-index: 1000;
   width: max-content;
-  min-width: 248px;
-  max-width: min(300px, 80vw);
-  padding: 10px 12px 8px;
+  min-width: 256px;
+  max-width: min(340px, 84vw);
+  padding: 12px 12px 10px;
   border: 0;
   border-radius: var(--dsw-radius-lg, 14px);
   background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2));
@@ -71,7 +71,7 @@
   box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
@@ -81,7 +81,7 @@
   padding: 0 2px;
   font-size: 13px;
   line-height: 19px;
-  color: inherit;
+  color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -95,15 +95,100 @@
   overflow-wrap: anywhere;
 }
 
+.popTargetCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.popSubjectRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+}
+
+.popSubjectRow > svg {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.popSubjectName {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.popTargetPath {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
 .popDetails {
-  padding: 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0;
 }
 
 .popDetail {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin: 0;
+  padding: 0 2px;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 17px;
   color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.popDotSafe,
+.popDotNeutral,
+.popDotWarn {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.popDotSafe {
+  background: var(--dsw-alias-state-success-primary, #30a46c);
+}
+
+.popDotNeutral {
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.popDotWarn {
+  margin-top: 5px;
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.popDetailBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 9px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--dsw-alias-state-error-primary);
   overflow-wrap: anywhere;
 }
 
@@ -120,12 +205,13 @@
 .popActions button {
   flex: 1 1 0;
   height: 30px;
-  border: none;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: var(--dsw-radius-sm, 8px);
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -142,18 +228,30 @@
 }
 
 .popActions button:last-child {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 42%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
   color: var(--dsw-alias-link);
   font-weight: 500;
 }
 
+@media (hover: hover) {
+  .popActions button:last-child:hover:not(:disabled) {
+    border-color: var(--dsw-alias-state-business-primary);
+    background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+  }
+}
+
 .popActions button.popConfirmDanger {
   color: var(--dsw-alias-state-error-primary);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 42%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
   font-weight: 500;
 }
 
 @media (hover: hover) {
   .popActions button.popConfirmDanger:hover:not(:disabled) {
-    background: var(--dsw-alias-interactive-bg-hover-danger, var(--dsw-alias-interactive-bg-hover));
+    border-color: var(--dsw-alias-state-error-primary);
+    background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent);
   }
 }
 
@@ -470,7 +568,10 @@
 
 .menuCreateHintBad {
   margin: 0;
-  padding: 0 2px;
+  padding: 6px 8px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 42%, transparent);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
   font-size: 12px;
   line-height: 16px;
   color: var(--dsw-alias-state-error-primary);

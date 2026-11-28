@@ -266,6 +266,10 @@ describe('CheckoutPrModal', () => {
     optionButtons = nodes(tree).filter(el => el.props.role === 'option')
     expect(optionButtons).toHaveLength(2)
 
+    // Preview shows structured key-value labels (fetch ref, local branch, folder)
+    const dts = nodes(tree).filter(el => el.type === 'dt').map(el => el.props.children)
+    expect(dts).toEqual(['prModal.labelRef', 'prModal.labelBranch', 'prModal.labelPath'])
+
     const all = nodes(tree)
     const submitBtn = all.find(el => el.type === 'button' && el.props.variant === 'primary')
     expect(submitBtn).toBeDefined()
@@ -384,9 +388,10 @@ describe('CheckoutPrModal', () => {
     await vi.advanceTimersByTimeAsync(0)
     tree = await hooks.flush(() => CheckoutPrModal(props))
 
-    // Diverged confirmation offers reset button
+    // Diverged confirmation offers soft danger outline reset button
     const resetBtn = nodes(tree).find(el => el.type === 'button' && el.props.children === 'prModal.divergedReset')
     expect(resetBtn).toBeDefined()
+    expect(resetBtn!.props.variant).toBe('outline')
     ;(resetBtn!.props.onClick as () => void)()
     await vi.advanceTimersByTimeAsync(0)
     await hooks.flush(() => CheckoutPrModal(props))

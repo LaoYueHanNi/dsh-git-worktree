@@ -23,6 +23,7 @@ import type { WorktreeScanEntry } from '../wire.ts'
 import { timeLabel } from './relative-time.ts'
 import { mapLimit } from './concurrency.ts'
 import { filterScanEntriesByRepo, groupScanEntries, type RepoScopeFilter } from './scan-groups.ts'
+import { RemoveConfirmModal } from './RemoveConfirmModal.tsx'
 import { emitToast } from './toast-bus.ts'
 import { removeWorktreeFully } from './worktree-remove-flow.ts'
 import { freshestUpdatedAt, pathKey } from './worktree-prune.ts'
@@ -410,9 +411,13 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
                             {bindingMode === 'session' && (
                               <Tag tone="neutral">{t('manager.modeSession')}</Tag>
                             )}
+                            {running && (
+                              <Tag tone="info">{t('manager.runningBadge')}</Tag>
+                            )}
                             {!unknown && dirty > 0 && (
                               <span className={css.rowDirty} role="status">
-                                {t(dirty === 1 ? 'manager.dirty.one' : 'manager.dirty.other', { n: dirty })}
+                                <span className={css.rowDirtyDot} aria-hidden="true" />
+                                <span>{t(dirty === 1 ? 'manager.dirty.one' : 'manager.dirty.other', { n: dirty })}</span>
                               </span>
                             )}
                             {!unknown && (
@@ -484,55 +489,26 @@ export function WorktreeManagerModal({ open, onClose, face, t, initialRepoFilter
           </div>
         )}
       </Modal>
-      <Modal
+      <RemoveConfirmModal
         open={removeTarget !== null}
+        kind={removeTarget?.kind === 'orphan' ? 'orphan' : 'git'}
+        path={removeTarget?.path ?? ''}
+        branch={removeTarget?.kind === 'git' ? removeTarget.branch : null}
+        inspect={removeTarget?.kind === 'git' ? inspects[removeTarget.path] : undefined}
+        archiveCount={removeTarget === null ? 0 : (
+          face.describeWorktreeOwnership !== undefined
+            ? face.describeWorktreeOwnership(removeTarget.path).archiveIds.length
+            : (() => {
+                const workspace = workspaceAt(removeTarget.path)
+                return workspace === undefined ? 0 : archiveIdsFor(face, workspace.sessionIds).length
+              })()
+        )}
+        removing={removing}
+        removeError={removeError}
+        onConfirm={confirmRemove}
         onClose={closeRemove}
-        closeLabel={t('close')}
-        title={removeTarget?.kind === 'orphan' ? t('worktreePurge.title') : t('worktreeRemove.title')}
-        {...removeTarget === null ? {} : { description: t(removeTarget.kind === 'orphan' ? 'worktreePurge.desc' : 'worktreeRemove.desc', { path: removeTarget.path }) }}
-        footer={(
-          <>
-            <Button variant="outline" disabled={removing} onClick={closeRemove}>{t('cancel')}</Button>
-            <Button
-              variant="outline"
-              className={css.removeConfirm}
-              disabled={removing}
-              onClick={confirmRemove}
-            >
-              {removeTarget?.kind === 'orphan' ? t('manager.purgeMenu') : t('worktreeRemove.menu')}
-            </Button>
-          </>
-        )}
-      >
-        {removeTarget?.kind === 'git' && removeTarget.branch !== null && (
-          <div className={css.removeFact}>{t('worktreeRemove.descBranch', { branch: removeTarget.branch })}</div>
-        )}
-        {removeTarget?.kind === 'git' && inspects[removeTarget.path] === undefined && <div className={css.status} role="status">{t('worktreeRemove.inspecting')}</div>}
-        {removeTarget?.kind === 'git' && inspects[removeTarget.path] !== undefined && (
-          <div className={css.removeFacts}>
-            <div className={(inspects[removeTarget.path]?.dirty ?? 0) > 0 ? `${css.removeFact} ${css.removeFactWarn}` : css.removeFact}>
-              {(inspects[removeTarget.path]?.dirty ?? 0) > 0
-                ? t((inspects[removeTarget.path]?.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: inspects[removeTarget.path]?.dirty ?? 0 })
-                : t('worktreeRemove.clean')}
-            </div>
-            {removeTarget !== null && inspects[removeTarget.path]?.ahead !== undefined && (inspects[removeTarget.path]?.ahead ?? 0) > 0 && (
-              <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: inspects[removeTarget.path]?.ahead ?? 0 })}</div>
-            )}
-            {removeTarget !== null && (() => {
-              const ids = face.describeWorktreeOwnership !== undefined
-                ? face.describeWorktreeOwnership(removeTarget.path).archiveIds
-                : (() => {
-                    const workspace = workspaceAt(removeTarget.path)
-                    return workspace === undefined ? [] : archiveIdsFor(face, workspace.sessionIds)
-                  })()
-              if (ids.length === 0) return null
-              return <div className={css.removeFact}>{t(ids.length === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: ids.length })}</div>
-            })()}
-          </div>
-        )}
-        {removing && <div className={css.status} role="status">{removeTarget?.kind === 'orphan' ? t('worktreePurge.busy') : t('worktreeRemove.busy')}</div>}
-        {removeError !== null && <div className={css.error} role="alert">{removeError}</div>}
-      </Modal>
+        t={t}
+      />
     </>
   )
 }

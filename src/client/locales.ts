@@ -179,6 +179,8 @@ export type GitWorktreeKey =
   | 'cardPruneHistoryFailed'
   | 'cardPruneHistoryMore'
   | 'cardPruneHistoryLess'
+  | 'cardSectionEntry'
+  | 'cardSectionAutomation'
   | 'manager.title'
   | 'manager.loading'
   | 'manager.loadFailed'
@@ -196,6 +198,7 @@ export type GitWorktreeKey =
   | 'manager.dirty.one'
   | 'manager.dirty.other'
   | 'manager.running'
+  | 'manager.runningBadge'
   | 'manager.purgeMenu'
   | 'manager.purgeAria'
   | 'worktreePurge.title'
@@ -242,6 +245,10 @@ export type GitWorktreeKey =
   | 'prModal.previewRef'
   | 'prModal.previewBranch'
   | 'prModal.previewPath'
+  | 'prModal.labelRef'
+  | 'prModal.labelBranch'
+  | 'prModal.labelPath'
+  | 'prModal.labelExistingPath'
   | 'prModal.existingHeading'
   | 'prModal.existingReuse'
   | 'prModal.existingUpdate'
@@ -298,6 +305,8 @@ export type GitWorktreeKey =
   | 'createModal.tagWorktree'
   | 'createModal.tagRemote'
   | 'createModal.creating'
+  | 'createModal.baseBranchLabel'
+  | 'createModal.cutoutHint'
   | 'deferred.armedTitle'
   | 'deferred.armedRandom'
   | 'deferred.armedCutout'
@@ -330,6 +339,7 @@ export type GitWorktreeKey =
   | 'worktreeRemove.menu'
   | 'worktreeRemove.title'
   | 'worktreeRemove.desc'
+  | 'worktreeRemove.branchKeptBadge'
   | 'worktreeRemove.descBranch'
   | 'worktreeRemove.inspecting'
   | 'worktreeRemove.dirty.one'
@@ -525,6 +535,8 @@ export const en: Record<GitWorktreeKey, string> = {
   cardPruneHistoryFailed: '{n} failed',
   cardPruneHistoryMore: 'Show all {n}',
   cardPruneHistoryLess: 'Show less',
+  cardSectionEntry: 'Workspace & entry',
+  cardSectionAutomation: 'Sync & automation',
   'manager.title': 'Manage worktrees',
   'manager.loading': 'Scanning worktrees…',
   'manager.loadFailed': 'Scan failed: {message}',
@@ -542,6 +554,7 @@ export const en: Record<GitWorktreeKey, string> = {
   'manager.dirty.one': '{n} uncommitted file',
   'manager.dirty.other': '{n} uncommitted files',
   'manager.running': 'A session is running here; removal is unavailable',
+  'manager.runningBadge': 'Active session',
   'manager.purgeMenu': 'Delete folder',
   'manager.purgeAria': 'Delete the leftover folder “{path}”',
   'worktreePurge.title': 'Delete leftover folder',
@@ -588,6 +601,10 @@ export const en: Record<GitWorktreeKey, string> = {
   'prModal.previewRef': 'Fetch ref: {ref}',
   'prModal.previewBranch': 'Local branch: {branch}',
   'prModal.previewPath': 'Worktree folder: {path}',
+  'prModal.labelRef': 'Fetch ref',
+  'prModal.labelBranch': 'Local branch',
+  'prModal.labelPath': 'Worktree folder',
+  'prModal.labelExistingPath': 'Existing folder',
   'prModal.existingHeading': 'Existing worktree found for {branch}',
   'prModal.existingReuse': 'Open existing worktree (no Git writes)',
   'prModal.existingUpdate': 'Fetch latest commits and sync (clean worktree; auto-syncs remote force-push)',
@@ -644,6 +661,8 @@ export const en: Record<GitWorktreeKey, string> = {
   'createModal.tagWorktree': 'worktree',
   'createModal.tagRemote': 'remote',
   'createModal.creating': 'Creating worktree…',
+  'createModal.baseBranchLabel': 'Base branch',
+  'createModal.cutoutHint': 'Leave the name blank to generate a random branch name automatically.',
   'deferred.armedTitle': 'Will create a worktree when you send the first message',
   'deferred.armedRandom': 'Random branch from {base}',
   'deferred.armedCutout': 'New branch {name} from {base}',
@@ -675,7 +694,8 @@ export const en: Record<GitWorktreeKey, string> = {
   pruneFailed: '{n} worktree(s) could not be auto-removed',
   'worktreeRemove.menu': 'Remove worktree',
   'worktreeRemove.title': 'Remove worktree',
-  'worktreeRemove.desc': 'This removes the worktree from git and deletes the folder “{path}”.',
+  'worktreeRemove.desc': 'Removes this worktree from git and deletes its directory on disk.',
+  'worktreeRemove.branchKeptBadge': 'Branch kept',
   'worktreeRemove.descBranch': 'The branch {branch} is kept.',
   'worktreeRemove.inspecting': 'Inspecting worktree…',
   'worktreeRemove.dirty.one': '{n} uncommitted file will be deleted with the folder.',
@@ -872,6 +892,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   cardPruneHistoryFailed: '{n} 个失败',
   cardPruneHistoryMore: '展开全部 {n} 条',
   cardPruneHistoryLess: '收起',
+  cardSectionEntry: '工作区与入口',
+  cardSectionAutomation: '同步与自动维护',
   'manager.title': '管理工作树',
   'manager.loading': '正在扫描工作树…',
   'manager.loadFailed': '扫描失败：{message}',
@@ -889,6 +911,7 @@ export const zh: Record<GitWorktreeKey, string> = {
   'manager.dirty.one': '{n} 个未提交文件',
   'manager.dirty.other': '{n} 个未提交文件',
   'manager.running': '有进行中的会话，暂不能删除',
+  'manager.runningBadge': '会话运行中',
   'manager.purgeMenu': '删除文件夹',
   'manager.purgeAria': '删除残留文件夹“{path}”',
   'worktreePurge.title': '删除残留文件夹',
@@ -935,6 +958,10 @@ export const zh: Record<GitWorktreeKey, string> = {
   'prModal.previewRef': '拉取引用：{ref}',
   'prModal.previewBranch': '本地分支：{branch}',
   'prModal.previewPath': '工作树目录：{path}',
+  'prModal.labelRef': '拉取引用',
+  'prModal.labelBranch': '本地分支',
+  'prModal.labelPath': '工作树目录',
+  'prModal.labelExistingPath': '工作树目录',
   'prModal.existingHeading': '检测到 {branch} 已有本地工作树',
   'prModal.existingReuse': '直接打开已有工作树（零 Git 写入）',
   'prModal.existingUpdate': '拉取最新提交并同步更新（仅干净工作树；远端强制推送时自动同步）',
@@ -991,6 +1018,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   'createModal.tagWorktree': '已有工作树',
   'createModal.tagRemote': '远程',
   'createModal.creating': '正在创建工作树…',
+  'createModal.baseBranchLabel': '基准分支',
+  'createModal.cutoutHint': '留空将自动随机生成一个新分支名。',
   'deferred.armedTitle': '将在发送首条消息时创建工作树',
   'deferred.armedRandom': '基于 {base} 随机生成分支',
   'deferred.armedCutout': '基于 {base} 新建分支 {name}',
@@ -1022,7 +1051,8 @@ export const zh: Record<GitWorktreeKey, string> = {
   pruneFailed: '{n} 个工作树自动清理失败',
   'worktreeRemove.menu': '删除工作树',
   'worktreeRemove.title': '删除工作树',
-  'worktreeRemove.desc': '将从 git 移除该工作树并删除目录“{path}”。',
+  'worktreeRemove.desc': '将从 Git 移除该工作树登记并删除其本地目录。',
+  'worktreeRemove.branchKeptBadge': '分支将保留',
   'worktreeRemove.descBranch': '分支 {branch} 将保留。',
   'worktreeRemove.inspecting': '正在检查工作树…',
   'worktreeRemove.dirty.one': '{n} 个未提交文件将随目录一并删除。',

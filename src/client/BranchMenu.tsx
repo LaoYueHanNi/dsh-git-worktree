@@ -106,6 +106,7 @@ import {
   IconProjectAddOutlineRegular,
   IconRightUpOutlineRegular,
   IconTrashOutlineRegular,
+  Tag,
   Toast,
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -132,8 +133,13 @@ export type { BranchRow }
 export interface BranchConfirmFly {
   /** Ask line (already localized). */
   ask: string
-  /** The branch the ask refers to, on its own weight-500 line (remote
-   * picks only — the ask line says "该远程分支" and this names it). */
+  /** Target branch rendered inside a structured capsule card. */
+  targetBranch?: string
+  /** Optional status badge paired with `targetBranch` (e.g. "branch kept"). */
+  targetBadge?: string
+  /** Optional directory path shown below the target branch inside the card. */
+  targetPath?: string
+  /** Legacy subject line fallback when `targetBranch` is omitted. */
   subject?: string
   /** Consequence lines under the ask (the worktree removal's dirty/ahead/
    * archived-sessions facts), each on its own subdued row — the ask states
@@ -165,6 +171,90 @@ export interface BranchConfirmFly {
   onConfirm: () => void
   /** Dismiss the flyout without acting (stays on the open menu). */
   onCancel: () => void
+}
+
+/** Props for the shared confirm flyout body used by both BranchMenu and ChipConfirm. */
+export interface PopConfirmBodyProps {
+  ask: string
+  targetBranch?: string
+  targetBadge?: string
+  targetPath?: string
+  subject?: string
+  details?: React.ReactNode
+  busy: boolean
+  draft?: string
+  onDraftChange?: (value: string) => void
+  draftPlaceholder?: string
+  draftInvalid?: boolean
+  draftHint?: string
+  draftInputRef?: React.Ref<HTMLInputElement>
+  onConfirm: () => void
+}
+
+/** Shared body for confirm flyouts across BranchMenu and BranchChipDock. */
+export function PopConfirmBody({
+  ask,
+  targetBranch,
+  targetBadge,
+  targetPath,
+  subject,
+  details,
+  busy,
+  draft,
+  onDraftChange,
+  draftPlaceholder,
+  draftInvalid,
+  draftHint,
+  draftInputRef,
+  onConfirm,
+}: PopConfirmBodyProps) {
+  const displayBranch = targetBranch ?? subject
+  const showTargetCard = displayBranch !== undefined || targetPath !== undefined
+  return (
+    <>
+      <p className={css.popAsk}>{ask}</p>
+      {showTargetCard && (
+        <div className={css.popTargetCard}>
+          {displayBranch !== undefined && (
+            <div className={css.popSubjectRow}>
+              <IconBranchOutlineRegular size={13} />
+              <span className={css.popSubjectName} title={displayBranch}>{displayBranch}</span>
+              {targetBadge !== undefined && <Tag tone="neutral">{targetBadge}</Tag>}
+            </div>
+          )}
+          {targetPath !== undefined && (
+            <div className={css.popTargetPath} title={targetPath}>{targetPath}</div>
+          )}
+        </div>
+      )}
+      {details !== undefined && <div className={css.popDetails}>{details}</div>}
+      {onDraftChange !== undefined && (
+        <>
+          <input
+            ref={draftInputRef}
+            className={css.menuCreate}
+            type="text"
+            value={draft ?? ''}
+            placeholder={draftPlaceholder}
+            aria-label={draftPlaceholder}
+            aria-invalid={draftInvalid === true}
+            spellCheck={false}
+            disabled={busy}
+            onChange={event => { onDraftChange(event.target.value) }}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && draftInvalid !== true && !busy) {
+                event.preventDefault()
+                onConfirm()
+              }
+            }}
+          />
+          {draftInvalid === true && draftHint !== undefined && (
+            <p className={css.menuCreateHintBad} role="status">{draftHint}</p>
+          )}
+        </>
+      )}
+    </>
+  )
 }
 
 /** Full props: anchor + data + confirm bundle + callbacks + locale seat. */
@@ -2035,34 +2125,7 @@ export function BranchMenu({
           role="dialog"
           aria-label={confirm.ask}
         >
-          <p className={css.popAsk}>{confirm.ask}</p>
-          {confirm.subject !== undefined && <p className={css.popSubject}>{confirm.subject}</p>}
-          {confirm.details !== undefined && <div className={css.popDetails}>{confirm.details}</div>}
-          {confirm.onDraftChange !== undefined && (
-            <>
-              <input
-                ref={flyInputRef}
-                className={css.menuCreate}
-                type="text"
-                value={confirm.draft ?? ''}
-                placeholder={confirm.draftPlaceholder}
-                aria-label={confirm.draftPlaceholder}
-                aria-invalid={confirm.draftInvalid === true}
-                spellCheck={false}
-                disabled={confirm.busy}
-                onChange={event => { confirm.onDraftChange?.(event.target.value) }}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    if (confirm.draftInvalid !== true && !confirm.busy) confirm.onConfirm()
-                  }
-                }}
-              />
-              {confirm.draftInvalid === true && confirm.draftHint !== undefined && (
-                <p className={css.menuCreateHintBad} role="status">{confirm.draftHint}</p>
-              )}
-            </>
-          )}
+          <PopConfirmBody {...confirm} draftInputRef={flyInputRef} />
           <div className={css.popActions}>
             <button type="button" disabled={confirm.busy} onClick={confirm.onCancel}>
               {confirm.cancelLabel}

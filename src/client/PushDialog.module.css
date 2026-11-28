@@ -69,10 +69,11 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 34px;
-  padding: 3px 10px;
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: var(--dsw-radius-md, 12px);
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .mapping > svg {
@@ -83,6 +84,8 @@
 .source {
   min-width: 0;
   max-width: min(200px, 50%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -101,6 +104,8 @@
 }
 
 .remote {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
   color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
 }
@@ -132,18 +137,11 @@
 }
 
 .targetName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.badge {
-  font-size: 11px;
-  line-height: 18px;
-  padding: 0 5px;
-  border-radius: var(--dsw-radius-xs, 4px);
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
 }
 
 /* Floating target editor: elevation shadow carries the hairline stroke (border: 0). */
@@ -276,10 +274,15 @@
 }
 
 .error {
-  max-height: 120px;
+  max-height: 128px;
   margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
   overflow: auto;
   font-size: 12px;
+  line-height: 17px;
   color: var(--dsw-alias-state-error-primary);
   overflow-wrap: anywhere;
 }

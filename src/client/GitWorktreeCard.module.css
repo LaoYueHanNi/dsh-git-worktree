@@ -17,9 +17,23 @@
 
 .note {
   margin: 0;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-layer-2);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sectionTitle {
+  margin-top: 6px;
+  padding-bottom: 4px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .field {
@@ -43,7 +57,12 @@
 }
 
 .rootValue {
-  font-size: 13px;
+  padding: 5px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-layer-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-label-primary);
   overflow-wrap: anywhere;
@@ -69,6 +88,10 @@
   flex: 1;
   min-width: 0;
   margin: 0;
+  padding: 6px 10px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-state-error-primary);
@@ -214,10 +237,11 @@
 .historyRun {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
+  gap: 4px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .historyTime {
@@ -231,6 +255,35 @@
   line-height: 16px;
   color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
+}
+
+.historyChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.historyChip {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.03));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.historySkipped {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.historyFailed {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .historyMore {

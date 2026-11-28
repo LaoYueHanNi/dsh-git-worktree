@@ -26,7 +26,7 @@ const WATCHED = [
   // ctxItems array) and WorktreeManagerModal builds its rows the same way
   // — precisely the shape this gate exists for.
   'BranchMenu.tsx', 'WorktreeManagerModal.tsx', 'CommitGraph.tsx',
-  'WorktreeActionHost.tsx', 'SidebarWorktreeBadge.tsx', 'LegacySessionMenuItem.tsx',
+  'WorktreeActionHost.tsx', 'RemoveConfirmModal.tsx', 'SidebarWorktreeBadge.tsx', 'LegacySessionMenuItem.tsx',
   'DeferredWorktreeDock.tsx', 'CheckoutPrModal.tsx', 'ForgeIntegration.tsx',
 ] as const
 

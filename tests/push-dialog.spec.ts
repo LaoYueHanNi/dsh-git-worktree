@@ -83,6 +83,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Checkbox: 'checkbox',
   Modal: 'modal',
   Menu: 'menu',
+  Tag: 'tag',
   IconBranchOutlineRegular: 'svg',
   IconChevronDownOutlineRegular: 'svg',
   IconCloseOutlineRegular: 'svg',
@@ -140,6 +141,7 @@ describe('push review dialog', () => {
     expect(push(output).disabled).toBe(true)
     expect(push(output).title).toBe('pushCheckingRemote:')
     expect(forceMenu(output).items[0].disabled).toBe(true)
+    expect(forceMenu(output).items[0].danger).toBe(true)
     push(output).onClick()
     forceMenu(output).onSelect('force')
     expect(props.onPush).not.toHaveBeenCalled()
@@ -211,6 +213,7 @@ describe('push review dialog', () => {
     expect(nodes(output).some(node => node.props.children === 'pushNew')).toBe(false)
     expect(push(output).disabled).toBe(true)
     expect(forceMenu(output).items[0].disabled).toBe(true)
+    expect(forceMenu(output).items[0].danger).toBe(true)
     // Even an already-queued event cannot send the display-only snapshot.
     push(output).onClick()
     forceMenu(output).onSelect('force')

@@ -90,6 +90,13 @@ function ciText(checksRollup: PrCandidateItem['checksRollup'], t: Translate): st
   return null
 }
 
+function ciDotClass(checksRollup: PrCandidateItem['checksRollup']): string {
+  if (checksRollup === 'success') return css.dotSafe ?? ''
+  if (checksRollup === 'pending') return css.dotPending ?? ''
+  if (checksRollup === 'failure') return css.dotWarn ?? ''
+  return css.dotNeutral ?? ''
+}
+
 /** Modal for resolving and checking out a PR/MR into a dedicated worktree. */
 export function CheckoutPrModal({
   repoPath,
@@ -486,7 +493,8 @@ export function CheckoutPrModal({
 
   const previewAuthor = resolved?.meta?.author ?? matchedCandidate?.author ?? null
   const previewDraft = resolved?.meta?.draft ?? matchedCandidate?.draft ?? false
-  const previewCi = matchedCandidate === null ? null : ciText(matchedCandidate.checksRollup, t)
+  const previewChecks = matchedCandidate === null ? null : matchedCandidate.checksRollup
+  const previewCi = previewChecks === null ? null : ciText(previewChecks, t)
 
   return (
     <Modal
@@ -669,7 +677,12 @@ export function CheckoutPrModal({
                         </div>
                         <div className={css.candidateMeta}>
                           <span>{item.author ?? item.owner}</span>
-                          {checks !== null && <span>{checks}</span>}
+                          {checks !== null && (
+                            <span className={css.ciBadge}>
+                              <span className={ciDotClass(item.checksRollup)} aria-hidden="true" />
+                              <span>{checks}</span>
+                            </span>
+                          )}
                         </div>
                       </button>
                     )
@@ -689,15 +702,21 @@ export function CheckoutPrModal({
                   </div>
                 ) : resolved.existingWorktreePath !== undefined ? (
                   <>
-                    <div className={css.previewTitle}>
-                      {t('prModal.existingHeading', { branch: resolved.localBranch })}
+                    <div className={css.previewHeader}>
+                      <span className={css.previewTitle}>
+                        {t('prModal.existingHeading', { branch: resolved.localBranch })}
+                      </span>
+                      {previewDraft && <Tag tone="neutral">{t('prModal.tagDraft')}</Tag>}
                     </div>
                     {previewTitleText !== null && previewTitleText !== t('prModal.previewHeading') && (
                       <div className={css.previewLine}>{previewTitleText}</div>
                     )}
-                    <div className={css.previewLine}>{resolved.existingWorktreePath}</div>
+                    <dl className={css.previewDl}>
+                      <dt>{t('prModal.labelExistingPath')}</dt>
+                      <dd title={resolved.existingWorktreePath}>{resolved.existingWorktreePath}</dd>
+                    </dl>
                     <div className={css.existingOptions}>
-                      <label className={css.radioLabel}>
+                      <label className={ifExists === 'reuse' ? `${css.radioCard} ${css.radioCardSelected}` : css.radioCard}>
                         <input
                           type="radio"
                           name="pr-if-exists"
@@ -711,7 +730,7 @@ export function CheckoutPrModal({
                         />
                         <span>{t('prModal.existingReuse')}</span>
                       </label>
-                      <label className={css.radioLabel}>
+                      <label className={ifExists === 'update' ? `${css.radioCard} ${css.radioCardSelected}` : css.radioCard}>
                         <input
                           type="radio"
                           name="pr-if-exists"
@@ -729,26 +748,33 @@ export function CheckoutPrModal({
                   </>
                 ) : (
                   <>
-                    <div className={css.candidateTop}>
+                    <div className={css.previewHeader}>
                       <span className={css.previewTitle}>{previewTitleText}</span>
                       {previewDraft && <Tag tone="neutral">{t('prModal.tagDraft')}</Tag>}
                     </div>
                     {(previewAuthor !== null || previewCi !== null) && (
                       <div className={css.candidateMeta}>
                         <span>{previewAuthor ?? ''}</span>
-                        {previewCi !== null && <span>{previewCi}</span>}
+                        {previewCi !== null && previewChecks !== null && (
+                          <span className={css.ciBadge}>
+                            <span className={ciDotClass(previewChecks)} aria-hidden="true" />
+                            <span>{previewCi}</span>
+                          </span>
+                        )}
                       </div>
                     )}
-                    <div className={css.previewLine}>
-                      {t('prModal.previewRef', { ref: `${resolved.remote} ${resolved.refSpec}` })}
+                    <dl className={css.previewDl}>
+                      <dt>{t('prModal.labelRef')}</dt>
+                      <dd>{`${resolved.remote} ${resolved.refSpec}`}</dd>
+                      <dt>{t('prModal.labelBranch')}</dt>
+                      <dd>{resolved.localBranch}</dd>
+                      <dt>{t('prModal.labelPath')}</dt>
+                      <dd title={resolved.targetPath}>{resolved.targetPath}</dd>
+                    </dl>
+                    <div className={css.infoNote}>
+                      <span className={css.dotNeutral} aria-hidden="true" />
+                      <span>{t('prModal.forkPushNote')}</span>
                     </div>
-                    <div className={css.previewLine}>
-                      {t('prModal.previewBranch', { branch: resolved.localBranch })}
-                    </div>
-                    <div className={css.previewLine}>
-                      {t('prModal.previewPath', { path: resolved.targetPath })}
-                    </div>
-                    <div className={css.status}>{t('prModal.forkPushNote')}</div>
                   </>
                 )}
               </div>
@@ -756,8 +782,11 @@ export function CheckoutPrModal({
 
             {divergedPrompt && resolved !== null && (
               <div className={css.divergedCard} role="alert">
-                <div className={css.previewTitle}>{t('prModal.divergedTitle', { branch: resolved.localBranch })}</div>
-                <div className={css.previewLine}>{t('prModal.divergedDesc')}</div>
+                <div className={css.divergedHead}>
+                  <span className={css.dotWarn} aria-hidden="true" />
+                  <span className={css.divergedTitle}>{t('prModal.divergedTitle', { branch: resolved.localBranch })}</span>
+                </div>
+                <div className={css.divergedDesc}>{t('prModal.divergedDesc')}</div>
                 <div className={css.divergedActions}>
                   <Button
                     size="sm"
@@ -769,7 +798,8 @@ export function CheckoutPrModal({
                   </Button>
                   <Button
                     size="sm"
-                    variant="primary"
+                    variant="outline"
+                    className={css.dangerButton ?? ''}
                     disabled={busy}
                     onClick={() => { executeCheckout('reset') }}
                   >

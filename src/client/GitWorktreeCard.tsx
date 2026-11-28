@@ -100,19 +100,20 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
   return (
     <div className={css.page}>
       {!state.writable ? <p className={css.note} role="status">{t('cardReadOnly')}</p> : null}
+      <div className={css.sectionTitle}>{t('cardSectionEntry')}</div>
       <div className={css.field}>
         <span className={css.fieldLabel}>{t('cardRootDirLabel')}</span>
         <span className={css.rootRow}>
           <span className={css.rootValue} title={legacyRootText}>{legacyRootText}</span>
+          {state.overridden && (
+            <Tag tone="info">{t('cardOverridden').replace(/^[（(]|[）)]$/g, '')}</Tag>
+          )}
           {storage !== null && !storage.legacyRootExists && (
             <Tag tone="neutral">{t('cardLegacyUnused')}</Tag>
           )}
         </span>
       </div>
-      <p className={css.hint}>
-        {t('cardRootDirHint')}
-        {state.overridden ? ` ${t('cardOverridden')}` : ''}
-      </p>
+      <p className={css.hint}>{t('cardRootDirHint')}</p>
       <div className={`${css.field} ${css.toggleRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardOpenGraphLabel')}</span>
@@ -186,6 +187,7 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
           {t('cardManageWorktrees')}
         </Button>
       </div>
+      <div className={css.sectionTitle}>{t('cardSectionAutomation')}</div>
       <div className={`${css.field} ${css.toggleRow}`}>
         <span className={css.toggleText}>
           <span className={css.toggleLabel}>{t('cardFetchBeforeCreateLabel')}</span>
@@ -257,17 +259,19 @@ export function GitWorktreeCard(props: GitWorktreeCardProps) {
                 <span className={css.historyTime}>{timeLabel(run.at, historyNow, t)}</span>
                 {run.removed.length > 0
                   ? (
-                    <span className={css.historyLine}>
-                      {t('cardPruneHistoryRun', { n: run.removed.length })}
-                      {run.removed.map(item => ` ${labelOfRemoved(item)}`).join(' ·')}
-                    </span>
+                    <div className={css.historyChips}>
+                      <span>{t('cardPruneHistoryRun', { n: run.removed.length })}</span>
+                      {run.removed.map((item, idx) => (
+                        <span key={`${labelOfRemoved(item)}:${idx}`} className={css.historyChip}>{labelOfRemoved(item)}</span>
+                      ))}
+                    </div>
                   )
                   : <span className={css.historyLine}>{t('cardPruneHistoryNone')}</span>}
                 {run.skippedDirty.length > 0 && (
-                  <span className={css.historyLine}>{t('cardPruneHistorySkipped', { n: run.skippedDirty.length })}</span>
+                  <span className={`${css.historyLine} ${css.historySkipped}`}>{t('cardPruneHistorySkipped', { n: run.skippedDirty.length })}</span>
                 )}
                 {run.failed.length > 0 && (
-                  <span className={css.historyLine}>{t('cardPruneHistoryFailed', { n: run.failed.length })}</span>
+                  <span className={`${css.historyLine} ${css.historyFailed}`}>{t('cardPruneHistoryFailed', { n: run.failed.length })}</span>
                 )}
               </li>
             ))}

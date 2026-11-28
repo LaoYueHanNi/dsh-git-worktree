@@ -22,6 +22,7 @@ import { closeWorktreeAction, getWorktreeAction, subscribeWorktreeAction } from 
 import { fetchStatus, requestInspectWorktree, requestWorktree, requestWorktreeCutout } from './api.ts'
 import { CheckoutPrModal } from './CheckoutPrModal.tsx'
 import { explainGitOpFailure } from './git-error.ts'
+import { RemoveConfirmModal } from './RemoveConfirmModal.tsx'
 import type { AdoptWorktreeOptions } from './slots.ts'
 import { emitToast } from './toast-bus.ts'
 import { WorktreeManagerModal, type WorktreeManagerFace } from './WorktreeManagerModal.tsx'
@@ -123,58 +124,21 @@ function RemoveWorktreeModal({
   }
 
   return (
-    <Modal
+    <RemoveConfirmModal
       open
+      kind="git"
+      path={path}
+      branch={branch}
+      running={facts.running}
+      inspect={inspectError === null ? (inspect ?? undefined) : null}
+      inspectError={inspectError}
+      archiveCount={facts.archiveCount}
+      removing={removing}
+      removeError={removeError}
+      onConfirm={handleConfirm}
       onClose={handleClose}
-      closeLabel={t('close')}
-      title={t('worktreeRemove.title')}
-      description={t('worktreeRemove.desc', { path })}
-      footer={(
-        <>
-          <Button variant="outline" disabled={removing} onClick={handleClose}>{t('cancel')}</Button>
-          <Button
-            variant="outline"
-            className={css.removeConfirm}
-            disabled={removing || facts.running}
-            onClick={handleConfirm}
-          >
-            {t('worktreeRemove.menu')}
-          </Button>
-        </>
-      )}
-    >
-      <div className={css.removeFacts}>
-        {branch !== null && (
-          <div className={css.removeFact}>{t('worktreeRemove.descBranch', { branch })}</div>
-        )}
-        {facts.running && (
-          <div className={`${css.removeFact} ${css.removeFactWarn}`} role="alert">{t('manager.running')}</div>
-        )}
-        {inspect === null && inspectError === null && (
-          <div className={css.status} role="status">{t('worktreeRemove.inspecting')}</div>
-        )}
-        {inspect !== null && (
-          <>
-            <div className={inspect.dirty > 0 ? `${css.removeFact} ${css.removeFactWarn}` : css.removeFact}>
-              {inspect.dirty > 0
-                ? t(inspect.dirty === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: inspect.dirty })
-                : t('worktreeRemove.clean')}
-            </div>
-            {inspect.ahead !== undefined && inspect.ahead > 0 && (
-              <div className={css.removeFact}>{t('worktreeRemove.ahead', { n: inspect.ahead })}</div>
-            )}
-          </>
-        )}
-        {inspectError !== null && <div className={css.error} role="alert">{inspectError}</div>}
-        {facts.archiveCount > 0 && (
-          <div className={css.removeFact}>
-            {t(facts.archiveCount === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: facts.archiveCount })}
-          </div>
-        )}
-        {removing && <div className={css.status} role="status">{t('worktreeRemove.busy')}</div>}
-        {removeError !== null && <div className={css.error} role="alert">{removeError}</div>}
-      </div>
-    </Modal>
+      t={t}
+    />
   )
 }
 
@@ -519,6 +483,11 @@ function CreateWorktreeModal({
           )}
         >
           <div className={css.body}>
+            <div className={css.targetCard}>
+              <IconBranchOutlineRegular size={14} />
+              <span className={css.targetLabel}>{t('createModal.baseBranchLabel')}</span>
+              <span className={css.targetBranch} title={cutoutBase}>{cutoutBase}</span>
+            </div>
             <input
               ref={cutoutInputRef}
               type="text"
@@ -538,6 +507,7 @@ function CreateWorktreeModal({
                 }
               }}
             />
+            <p className={css.hint}>{t('createModal.cutoutHint')}</p>
             {cutoutDraftHint !== undefined && (
               <div className={css.error} role="status">{cutoutDraftHint}</div>
             )}

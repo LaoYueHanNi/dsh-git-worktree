@@ -78,7 +78,7 @@ import { selectSessionDirectory } from './session-directory.ts'
 import { subscribeCheckedOutBranch } from './head-poll.ts'
 import { PushDialog } from './PushDialog.tsx'
 import { forgetAuthors } from './author-cache.ts'
-import { BranchMenu, type BranchRow } from './BranchMenu.tsx'
+import { BranchMenu, PopConfirmBody, type BranchConfirmFly, type BranchRow } from './BranchMenu.tsx'
 import { branchFactsStamp, repoHasRemotes } from './branch-tree.ts'
 import type { BranchChipInjected } from './slots.ts'
 import { cancelSyncJob, findSyncJob, recordPushFailure, runSyncJob, subscribeSyncJobs, takePushFailure, type PushFailure, type SyncJob } from './sync-job.ts'
@@ -346,40 +346,9 @@ export function buildLinkedWorktreeRows(
 }
 
 /** The standalone confirm dialog shown while the branch menu is closed. */
-interface ChipConfirmProps {
+interface ChipConfirmProps extends BranchConfirmFly {
   /** The chip element — the dialog's bottom edge pins just above its top. */
   anchorRef: React.RefObject<HTMLElement | null>
-  /** Ask line (already localized). */
-  ask: string
-  /** The branch the ask refers to, on its own weight-500 line (remote picks
-   * only — the ask line says "该远程分支" and this names it). */
-  subject?: string
-  /** Consequence lines under the ask (see BranchConfirmFly.details). */
-  details?: React.ReactNode
-  /** Confirm-button label (progress text while busy). */
-  confirmLabel: string
-  /** Cancel-button label. */
-  cancelLabel: string
-  /** True when confirming destroys a branch or worktree (renders in danger tone). */
-  danger?: boolean
-  /** True while the action runs: both buttons disable. */
-  busy: boolean
-  /** Editable new-branch name (cutout flow): present, the dialog renders a
-   * naming input under the ask line and focuses IT instead of the confirm
-   * button; Enter commits a valid draft. */
-  draft?: string
-  onDraftChange?: (value: string) => void
-  draftPlaceholder?: string
-  /** True while the draft is NOT an acceptable new branch name — the
-   * confirm button disables in lockstep. */
-  draftInvalid?: boolean
-  /** Why the draft is invalid (rendered under the input; absent while the
-   * draft is acceptable or merely empty). */
-  draftHint?: string
-  /** Run the confirmed action. */
-  onConfirm: () => void
-  /** Dismiss the dialog without acting. */
-  onCancel: () => void
 }
 
 /**
@@ -391,9 +360,12 @@ interface ChipConfirmProps {
  * confirm button does so Enter commits.
  */
 function ChipConfirm({
-  anchorRef, ask, subject, details, confirmLabel, cancelLabel, danger, busy,
-  draft, onDraftChange, draftPlaceholder, draftInvalid, draftHint,
-  onConfirm, onCancel,
+  anchorRef,
+  confirmLabel,
+  cancelLabel,
+  danger,
+  onCancel,
+  ...body
 }: ChipConfirmProps) {
   const popRef = useRef<HTMLDivElement>(null)
   const confirmRef = useRef<HTMLButtonElement | null>(null)
@@ -451,45 +423,18 @@ function ChipConfirm({
   }, [onCancel, anchorRef])
 
   return createPortal(
-    <div ref={popRef} className={css.popCard} style={pos ?? POP_MEASURE} role="dialog" aria-label={ask}>
-      <p className={css.popAsk}>{ask}</p>
-      {subject !== undefined && <p className={css.popSubject}>{subject}</p>}
-      {details !== undefined && <div className={css.popDetails}>{details}</div>}
-      {onDraftChange !== undefined && (
-        <>
-          <input
-            ref={draftInputRef}
-            className={css.menuCreate}
-            type="text"
-            value={draft}
-            placeholder={draftPlaceholder}
-            aria-label={draftPlaceholder}
-            aria-invalid={draftInvalid}
-            spellCheck={false}
-            disabled={busy}
-            onChange={event => { onDraftChange(event.target.value) }}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && draftInvalid !== true && !busy) {
-                event.preventDefault()
-                onConfirm()
-              }
-            }}
-          />
-          {draftInvalid === true && draftHint !== undefined && (
-            <p className={css.menuCreateHintBad} role="status">{draftHint}</p>
-          )}
-        </>
-      )}
+    <div ref={popRef} className={css.popCard} style={pos ?? POP_MEASURE} role="dialog" aria-label={body.ask}>
+      <PopConfirmBody {...body} draftInputRef={draftInputRef} />
       <div className={css.popActions}>
-        <button type="button" disabled={busy} onClick={onCancel}>
+        <button type="button" disabled={body.busy} onClick={onCancel}>
           {cancelLabel}
         </button>
         <button
           ref={confirmRef}
           type="button"
           className={danger === true ? css.popConfirmDanger : undefined}
-          disabled={busy || draftInvalid === true}
-          onClick={onConfirm}
+          disabled={body.busy || body.draftInvalid === true}
+          onClick={body.onConfirm}
         >
           {confirmLabel}
         </button>
@@ -1019,22 +964,41 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
     : undefined
   const removalDetails = confirm?.kind === 'remove-worktree' && confirm.path !== undefined ? (
     <>
-      {removalFactsNow === undefined && <p className={css.popDetail}>{t('worktreeRemove.inspecting')}</p>}
+      {removalFactsNow === undefined && (
+        <p className={css.popDetail}>
+          <span className={css.popDotNeutral} aria-hidden="true" />
+          <span>{t('worktreeRemove.inspecting')}</span>
+        </p>
+      )}
       {removalFactsNow != null && (
         <>
-          <p className={(removalFactsNow.dirty ?? 0) > 0 ? `${css.popDetail} ${css.popDetailWarn}` : css.popDetail}>
-            {(removalFactsNow.dirty ?? 0) > 0
-              ? t((removalFactsNow.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: removalFactsNow.dirty ?? 0 })
-              : t('worktreeRemove.clean')}
-          </p>
+          {(removalFactsNow.dirty ?? 0) > 0 ? (
+            <div className={css.popDetailBanner} role="status">
+              <span className={css.popDotWarn} aria-hidden="true" />
+              <span>
+                {t((removalFactsNow.dirty ?? 0) === 1 ? 'worktreeRemove.dirty.one' : 'worktreeRemove.dirty.other', { n: removalFactsNow.dirty ?? 0 })}
+              </span>
+            </div>
+          ) : (
+            <p className={css.popDetail}>
+              <span className={css.popDotSafe} aria-hidden="true" />
+              <span>{t('worktreeRemove.clean')}</span>
+            </p>
+          )}
           {(removalFactsNow.ahead ?? 0) > 0 && (
-            <p className={css.popDetail}>{t('worktreeRemove.ahead', { n: removalFactsNow.ahead ?? 0 })}</p>
+            <p className={css.popDetail}>
+              <span className={css.popDotNeutral} aria-hidden="true" />
+              <span>{t('worktreeRemove.ahead', { n: removalFactsNow.ahead ?? 0 })}</span>
+            </p>
           )}
           {(() => {
             const count = describeWorktreeRemoval(confirm.path).archiveCount
-            return count > 0
-              ? <p className={css.popDetail}>{t(count === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: count })}</p>
-              : null
+            return count > 0 ? (
+              <p className={css.popDetail}>
+                <span className={css.popDotNeutral} aria-hidden="true" />
+                <span>{t(count === 1 ? 'worktreeRemove.sessions.one' : 'worktreeRemove.sessions.other', { n: count })}</span>
+              </p>
+            ) : null
           })()}
         </>
       )}
@@ -1058,13 +1022,20 @@ export function BranchChipDock({ sessionId, useSessions, useSession, adoptWorktr
       : confirm.kind === 'delete'
         ? t('deleteBranchAsk', { branch: confirm.branch })
         : confirm.kind === 'remove-worktree'
-          ? t('worktreeRemove.desc', { path: confirm.path ?? confirm.branch })
+          ? t('worktreeRemove.desc')
           : confirm.remote === true
             ? t('worktreeAskRemote')
             : t(existingWorktree !== undefined ? 'worktreeAskReuse' : 'worktreeAskNew', { branch: confirmLocalName }),
     ...confirm.kind === 'remove-worktree'
-      ? { subject: t('worktreeRemove.descBranch', { branch: confirm.branch }), details: removalDetails }
-      : confirm.remote === true ? { subject: confirm.branch } : {},
+      ? {
+          targetBranch: confirm.branch,
+          targetBadge: t('worktreeRemove.branchKeptBadge'),
+          ...(confirm.path === undefined ? {} : { targetPath: confirm.path }),
+          details: removalDetails,
+        }
+      : {
+          targetBranch: confirm.remote === true ? confirm.branch : confirm.kind === 'worktree' ? confirmLocalName : confirm.branch,
+        },
     confirmLabel: busy
       ? (confirm.kind === 'delete' ? t('deleteBranchBusy') : confirm.kind === 'remove-worktree' ? t('worktreeRemove.busy') : t('worktreeBusy'))
       : t(confirm.kind === 'remove-worktree' ? 'worktreeRemove.menu' : 'actionConfirm'),
