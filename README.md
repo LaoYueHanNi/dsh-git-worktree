@@ -32,7 +32,7 @@
 | --- | --- |
 | **IDEA-Style Branch Picker** | `/` folder hierarchy, local & remote groups, instant search, locate-current-branch, and colored `↗N` / `↙N` / `↗` / `!` tracking marks. |
 | **In-Place Commit Graph** | Expand the popup to browse real commit history & merge graphs across any branch without switching checkouts. |
-| **One-Click Worktree Isolation** | Isolate sessions into `<repo>/.dsh/gitworktree/<branch>/` as real DSH workspaces while keeping the main repo's `git status` clean. |
+| **One-Click Worktree Isolation** | Isolate sessions (and GitHub PRs / GitLab MRs, including fork PRs) into `<repo>/.dsh/gitworktree/<branch>/` while keeping the main repo's `git status` clean. |
 | **Safe Push, Update & Sync** | Compact push review dialog with tag options and explicit `force-with-lease`, fast-forward-only updates, and non-blocking floating progress cards. |
 | **Cross-Repo Worktree Manager** | Manage per-repo and legacy central worktrees from **Settings → Plugins**, with uncommitted-file warnings and safe session archival on removal. |
 
@@ -134,6 +134,7 @@ Existing worktree folders and plugin settings carry over untouched.
 - **Blank name = random branch**: when cutting a new branch into a worktree, leave the name empty to get `<base>-<4 hex>`, avoiding existing branches and folders.
 - **Official entry takeover** (setting "Take over official new-worktree entry", on by default): hides DSH's own new-worktree control in the top-right of blank sessions so worktrees are created from the branch menu, and withdraws any leftover official worktree request on that session to prevent nested creation. The changes and review panels are unaffected.
 - **Session directory mode** (setting "Switch worktree directory in current workspace", off by default): worktrees are no longer registered as standalone workspaces; the session's working directory moves inside its repository workspace, as DSH's own worktrees do. A new worktree is created only when the first message is sent: a pending bar above the composer can be cancelled until then, creation reports each phase, and a failure offers Retry or Continue without worktree. Opening an existing worktree that already has a standalone workspace enters that workspace.
+- **Checkout PR / MR to isolated worktree**: open from the branch menu toolbar, a repository workspace's context menu, or DSH's optional Forge change-request card / diff toolbar. Fetches `refs/pull/<id>/head` (GitHub) or `refs/merge-requests/<id>/head` (GitLab) directly into `github-pr-<id>` / `gitlab-mr-<id>` without touching the main checkout — works with zero external CLI dependencies, and enhances with candidate lists, auto-tracking in the Forge panel, and one-click sync (including safe sync after remote force-push, with confirmation before discarding local commits) when `forge-bundle` is active.
 - **Official worktree management** (setting "Manage official worktrees", off by default): the manager also lists `<repo>/.agents/worktrees` under a "DSH official" group, which can be opened and removed manually but is never auto-pruned.
 
 > [!NOTE]

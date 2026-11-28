@@ -6,10 +6,11 @@
 import { basename, dirname, join, resolve } from 'node:path'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { runPostCreateCopy, type CopyFilesSeams } from './copy-files.js'
-import { appendWorktreeExclude, fsExcludeSeams, CancelledError, GitError, addWorktree, addWorktreeCutout, createBranch, cutoutBranchName, deleteBranch, fetchAll, fsDirExists, inspectWorktree, isAbsoluteDir, probeRepo, probeWorkspaceGit, randomCutoutBranchName, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, writeWorktreeBaseBranch, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
+import { addWorktree, addWorktreeAtCommit, addWorktreeCutout, appendWorktreeExclude, CancelledError, createBranch, cutoutBranchName, deleteBranch, fetchAll, fetchRefToTip, fsDirExists, fsExcludeSeams, GitError, inspectWorktree, isAbsoluteDir, listRemotes, probeRepo, probeWorkspaceGit, randomCutoutBranchName, readWorktreePrSha, removeWorktree, renameBranch, resolveBranch, switchBranch, updateBranch, updateCleanWorktreeToCommit, writeWorktreeBaseBranch, writeWorktreePrSha, type DirExists, type ExcludeSeams, type Exec, type LiveRun } from './git.js'
 import { readCheckedOutBranch } from './head.js'
 import { invalidateAuthorCache, readAuthors, readHistory, readCommit } from './history.js'
-import type { AuthorList, AuthorsBody, HistoryBody, CommitBody, CommitHistory, CommitDetail } from './wire.js'
+import { classifyRemotes, formatPrBaseLabel, loadPrContext, PrResolutionError, resolvePrTarget, type ForgeServiceLike } from './pr.js'
+import type { AuthorList, AuthorsBody, HistoryBody, CommitBody, CommitHistory, CommitDetail, PrCheckoutBody, PrCheckoutResult, PrContextBody, PrContextResult, PrErrorCode, PrResolveBody, PrResolveResult } from './wire.js'
 import { openPush, previewPush, pushBranch } from './push.js'
 import { isAbsoluteConfigPath, sanitizeBranchDir } from './normalize.js'
 import { createProgressReader } from './progress.js'
@@ -30,6 +31,8 @@ export interface RouteDeps {
   sectionPostCreateCopyFiles?: () => string[] | undefined
   /** Whether `/worktrees-all` and `/purge` also cover official `<repo>/.agents/worktrees`. */
   sectionManageOfficialWorktrees?: () => boolean | undefined
+  /** Optional host `ctx.forge` service bridge when forge-bundle is enabled. */
+  forge?: () => ForgeServiceLike | undefined
   /** User home directory seam. */
   home: () => string
   /** `$DSH_HOME` environment value seam. */
@@ -88,7 +91,7 @@ export async function fsMkdirRecursive(path: string): Promise<void> {
 /** One route outcome: HTTP status plus the JSON body. */
 export interface RouteOutcome {
   status: number
-  body: AuthorList | CommitHistory | CommitDetail | PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | SetSessionDirectoryResult | DeferredWorktreeSnapshot | { ok: true } | RouteError
+  body: AuthorList | CommitHistory | CommitDetail | PushPlan | PushPreview | PushResult | RepoStatus | HeadStatus | CreateWorktreeResult | SwitchResult | CreateBranchResult | FetchResult | UpdateResult | GroupWorkspacesResult | InspectWorktreeResult | RemoveWorktreeResult | PathExistsResult | EnsureDirectoryResult | WorktreesAllResult | PurgeDirectoryResult | SetSessionDirectoryResult | DeferredWorktreeSnapshot | PrContextResult | PrResolveResult | PrCheckoutResult | { ok: true } | RouteError
 }
 
 /** Uniform failure envelope. */
@@ -371,6 +374,8 @@ function gitFailure(error: GitError): RouteOutcome {
     // (a stale sidebar row racing a terminal-side removal).
     || error.stderr.includes('cannot remove the main worktree')
     || error.stderr.includes('is not a registered worktree')
+    || error.stderr.includes('worktree has uncommitted changes')
+    || error.stderr.includes("couldn't find remote ref")
   return fail(usage ? 400 : 500, error.message)
 }
 
@@ -1151,4 +1156,279 @@ export async function handleDeferredWorktreeAction(deps: RouteDeps, body: unknow
   else if (action === 'retry') deps.deferredWorktrees.retry(sessionId)
   else deps.deferredWorktrees.withdraw(sessionId)
   return { status: 200, body: { state: deps.deferredWorktrees.get(sessionId) } }
+}
+
+function failCode(
+  status: number,
+  error: string,
+  code: PrErrorCode,
+  params?: Record<string, string | number>,
+): RouteOutcome {
+  return {
+    status,
+    body: {
+      error,
+      code,
+      ...(params === undefined ? {} : { params }),
+    },
+  }
+}
+
+function prGitFailure(
+  error: GitError,
+  context: { readonly remote: string; readonly refSpec: string; readonly branch: string },
+): RouteOutcome {
+  const stderr = error.stderr
+  if (stderr.includes('worktree has uncommitted changes')) {
+    return failCode(400, error.message, 'worktree_dirty')
+  }
+  const lowerStderr = stderr.toLowerCase()
+  if (lowerStderr.includes('untracked working tree file') && lowerStderr.includes('would be overwritten')) {
+    return fail(400, error.message)
+  }
+  if (stderr.includes('PR worktree has diverged local commits')) {
+    return failCode(409, error.message, 'worktree_diverged', { branch: context.branch })
+  }
+  if (stderr.includes('already checked out in the main worktree')) {
+    return failCode(400, error.message, 'occupied_by_main', { branch: context.branch })
+  }
+  if (stderr.includes("couldn't find remote ref")) {
+    return failCode(400, error.message, 'pr_ref_not_found', { ref: context.refSpec, remote: context.remote })
+  }
+  if (
+    stderr.includes('Authentication failed')
+    || stderr.includes('HTTP Basic: Access denied')
+    || stderr.includes('Invalid username or token')
+    || stderr.includes('returned error: 403')
+    || stderr.includes('could not read Username')
+    || stderr.includes('terminal prompts disabled')
+    || stderr.includes('Permission denied (publickey)')
+  ) {
+    return failCode(400, error.message, 'pr_auth_failed', { remote: context.remote })
+  }
+  return gitFailure(error)
+}
+
+function validatePrOptionalFields(
+  remote: string | undefined,
+  provider: string | undefined,
+): RouteOutcome | undefined {
+  if (remote !== undefined && remote.trim() === '') return fail(400, '"remote" must be non-empty when present')
+  if (provider !== undefined && provider !== 'github' && provider !== 'gitlab') {
+    return fail(400, '"provider" must be "github" or "gitlab"')
+  }
+  return undefined
+}
+
+/**
+ * POST /pr-context — remotes, optional `ctx.forge` readiness, and open PR/MR candidates.
+ * @param deps - host dependencies.
+ * @param body - parsed request body: `{ repoPath, remote? }`.
+ */
+export async function handlePrContext(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<PrContextBody>(body, ['repoPath'], [], ['remote'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath, remote } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  if (remote !== undefined && remote.trim() === '') return fail(400, '"remote" must be non-empty when present')
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const rawRemotes = await listRemotes(deps.exec, facts.repoRoot)
+    const forge = deps.forge?.()
+    const result = await loadPrContext({
+      repoRoot: facts.repoRoot,
+      repoName: facts.repoName,
+      rawRemotes,
+      worktrees: facts.worktrees,
+      ...(remote === undefined ? {} : { requestedRemote: remote }),
+      ...(forge === undefined ? {} : { forge }),
+    })
+    return { status: 200, body: result }
+  } catch (error) {
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /pr-resolve — parse and validate a PR/MR ID or URL against repository remotes.
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ */
+export async function handlePrResolve(deps: RouteDeps, body: unknown): Promise<RouteOutcome> {
+  const parsed = readBody<PrResolveBody>(body, ['repoPath', 'input'], [], ['remote', 'provider'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath, input, remote, provider } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  const fieldErr = validatePrOptionalFields(remote, provider)
+  if (fieldErr !== undefined) return fieldErr
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const rawRemotes = await listRemotes(deps.exec, facts.repoRoot)
+    const forge = deps.forge?.()
+    const remotes = classifyRemotes(rawRemotes, forge)
+    const localBranches = facts.branches.filter(b => b.kind === 'local').map(b => b.name)
+    const resolved = resolvePrTarget({
+      repoRoot: facts.repoRoot,
+      input,
+      remotes,
+      worktrees: facts.worktrees,
+      localBranches,
+      ...(remote === undefined ? {} : { requestedRemote: remote }),
+      ...(provider === undefined ? {} : { requestedProvider: provider }),
+      ...(forge === undefined ? {} : { forge }),
+    })
+    return { status: 200, body: resolved }
+  } catch (error) {
+    if (error instanceof PrResolutionError) return failCode(400, error.message, error.code, error.params)
+    if (error instanceof GitError) return gitFailure(error)
+    return fail(500, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * POST /pr-checkout — stream native `git fetch refs/pull|merge-requests` + isolated worktree
+ * creation (or safe reuse/update/reset when the worktree already exists).
+ * @param deps - host dependencies.
+ * @param body - parsed request body.
+ * @param live - optional streaming channel for NDJSON progress events.
+ */
+export async function handlePrCheckout(deps: RouteDeps, body: unknown, live?: RouteLive): Promise<RouteOutcome> {
+  const parsed = readBody<PrCheckoutBody>(body, ['repoPath', 'input'], [], ['remote', 'provider', 'ifExists'])
+  if (isOutcome(parsed)) return parsed
+  const { repoPath, input, remote, provider, ifExists } = parsed
+  if (!isAbsoluteDir(repoPath)) return fail(400, '"repoPath" must be an absolute directory')
+  const fieldErr = validatePrOptionalFields(remote, provider)
+  if (fieldErr !== undefined) return fieldErr
+  if (ifExists !== undefined && ifExists !== 'reuse' && ifExists !== 'update' && ifExists !== 'reset') {
+    return fail(400, '"ifExists" must be "reuse", "update", or "reset"')
+  }
+  const { run, end } = startLive(live)
+  let resolvedContext: { readonly remote: string; readonly refSpec: string; readonly branch: string } | undefined
+  try {
+    const facts = await probeRepo(deps.exec, repoPath, deps.dirExists)
+    if (facts === undefined) return fail(400, `"${repoPath}" is not inside a git repository`)
+    const rawRemotes = await listRemotes(deps.exec, facts.repoRoot)
+    const forge = deps.forge?.()
+    const remotes = classifyRemotes(rawRemotes, forge)
+    const localBranches = facts.branches.filter(b => b.kind === 'local').map(b => b.name)
+    const resolved = resolvePrTarget({
+      repoRoot: facts.repoRoot,
+      input,
+      remotes,
+      worktrees: facts.worktrees,
+      localBranches,
+      ...(remote === undefined ? {} : { requestedRemote: remote }),
+      ...(provider === undefined ? {} : { requestedProvider: provider }),
+      ...(forge === undefined ? {} : { forge }),
+    })
+    resolvedContext = { remote: resolved.remote, refSpec: resolved.refSpec, branch: resolved.localBranch }
+
+    if (resolved.occupiedByMain === true) {
+      return failCode(
+        400,
+        `Branch "${resolved.localBranch}" is already checked out in the main worktree.`,
+        'occupied_by_main',
+        { branch: resolved.localBranch },
+      )
+    }
+
+    if (resolved.existingWorktreePath !== undefined && ifExists !== 'update' && ifExists !== 'reset') {
+      return {
+        status: 200,
+        body: {
+          path: resolved.existingWorktreePath,
+          created: false,
+          branch: resolved.localBranch,
+          provider: resolved.provider,
+          number: resolved.number,
+          canonicalUrl: resolved.canonicalUrl,
+        },
+      }
+    }
+
+    live?.emit({ type: 'stage', stage: 'fetch' })
+    const commitSha = await fetchRefToTip(deps.exec, facts.repoRoot, resolved.remote, resolved.refSpec, run)
+    if (live?.signal.aborted) throw new CancelledError()
+
+    if (resolved.existingWorktreePath !== undefined) {
+      live?.emit({ type: 'stage', stage: 'worktree' })
+      const lastKnownPrSha = await readWorktreePrSha(resolved.existingWorktreePath)
+      const updated = await updateCleanWorktreeToCommit(
+        deps.exec,
+        resolved.existingWorktreePath,
+        commitSha,
+        { forceReset: ifExists === 'reset', lastKnownPrSha },
+      )
+      await writeWorktreePrSha(resolved.existingWorktreePath, commitSha)
+      await writeWorktreeBaseBranch(
+        resolved.existingWorktreePath,
+        formatPrBaseLabel(resolved.provider, resolved.number, resolved.meta?.baseBranch),
+      )
+      return {
+        status: 200,
+        body: {
+          path: resolved.existingWorktreePath,
+          created: false,
+          updated: updated.updated,
+          ...(updated.mode === 'force-updated' ? { forceUpdated: true } : {}),
+          ...(updated.mode === 'reset' ? { reset: true } : {}),
+          branch: resolved.localBranch,
+          provider: resolved.provider,
+          number: resolved.number,
+          canonicalUrl: resolved.canonicalUrl,
+        },
+      }
+    }
+
+    const excludeWarning = await appendWorktreeExclude(deps.excludeSeams ?? fsExcludeSeams, facts.repoRoot)
+    const layoutRoot = join(facts.repoRoot, PROJECT_LAYOUT_DIR)
+    live?.emit({ type: 'stage', stage: 'worktree' })
+    await mkdirSlot(deps, layoutRoot)
+    const added = await addWorktreeAtCommit(
+      deps.exec,
+      facts.repoRoot,
+      resolved.localBranch,
+      commitSha,
+      resolved.targetPath,
+      deps.dirExists,
+    )
+    let copyWarning: string | undefined
+    if (added.created) {
+      if (added.preservedLocalBranch !== true) {
+        await writeWorktreePrSha(added.path, commitSha)
+      }
+      await writeWorktreeBaseBranch(
+        added.path,
+        formatPrBaseLabel(resolved.provider, resolved.number, resolved.meta?.baseBranch),
+      )
+      live?.emit({ type: 'stage', stage: 'copy' })
+      copyWarning = await runPostCreateCopy(deps, facts.repoRoot, added.path)
+    }
+    return {
+      status: 200,
+      body: {
+        path: added.path,
+        created: added.created,
+        branch: resolved.localBranch,
+        provider: resolved.provider,
+        number: resolved.number,
+        canonicalUrl: resolved.canonicalUrl,
+        ...(added.preservedLocalBranch === true ? { preservedLocalBranch: true } : {}),
+        ...(excludeWarning === undefined ? {} : { excludeWarning }),
+        ...(copyWarning === undefined ? {} : { copyWarning }),
+      },
+    }
+  } catch (error) {
+    if (error instanceof CancelledError) return fail(499, error.message)
+    if (error instanceof PrResolutionError) return failCode(400, error.message, error.code, error.params)
+    if (error instanceof GitError) {
+      return resolvedContext === undefined ? gitFailure(error) : prGitFailure(error, resolvedContext)
+    }
+    return fail(500, error instanceof Error ? error.message : String(error))
+  } finally {
+    end()
+  }
 }

@@ -16,15 +16,16 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import { DeferredWorktreeCoordinator, type DeferredAgentLike } from './deferred-worktree.js'
 import { childProcessExec } from './git.js'
+import { isForgeServiceLike, type ForgeServiceLike } from './pr.js'
 import {
-  executeCreateWorktree, handleArmDeferredWorktree, handleCreateBranch, handleCreateWorktree, handleDeferredWorktreeAction, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGetDeferredWorktree, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePush, handlePushPlan, handlePushPreview, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleSetSessionDirectory, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
+  executeCreateWorktree, handleArmDeferredWorktree, handleCreateBranch, handleCreateWorktree, handleDeferredWorktreeAction, handleDeleteBranch, handleEnsureDirectory, handleFetch, handleGetDeferredWorktree, handleGroupWorktrees, handleHead, handleInspectWorktree, handlePathExists, handlePrCheckout, handlePrContext, handlePrResolve, handlePush, handlePushPlan, handlePushPreview, handlePurgeDirectory, handleRemoveWorktree, handleRenameBranch, handleSetSessionDirectory, handleStatus, handleSwitch, handleUpdate, handleWorktreesAll,
   type RouteDeps, type RouteLive, type RouteOutcome,
 } from './routes.js'
 import { validateRootDir } from './settings.js'
 import { handleAuthors, handleHistory, handleCommit } from './routes.js'
 import { ROUTE_AUTHORS, ROUTE_HISTORY, ROUTE_COMMIT } from './wire.js'
 import { streamRoute } from './stream.js'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_DEFERRED, ROUTE_DEFERRED_ACTION, ROUTE_DEFERRED_ARM, ROUTE_DEFERRED_EVENTS, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_SESSION_CWD, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_DEFERRED, ROUTE_DEFERRED_ACTION, ROUTE_DEFERRED_ARM, ROUTE_DEFERRED_EVENTS, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PR_CHECKOUT, ROUTE_PR_CONTEXT, ROUTE_PR_RESOLVE, ROUTE_PUSH, ROUTE_PUSH_PLAN, ROUTE_PUSH_PREVIEW, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_SESSION_CWD, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from './wire.js'
 
 export const name = 'dsh-git-worktree'
 
@@ -242,6 +243,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   let sessionDirectorySetter: ((sessionId: string, path: string) => Promise<string>) | undefined
   let deferredWorktrees: DeferredWorktreeCoordinator | undefined
+  let forgeService: ForgeServiceLike | undefined
 
   const baseDeps = (): RouteDeps => ({
     exec: childProcessExec,
@@ -249,6 +251,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     sectionFetchBeforeCreate: () => readVolatile(currentConfig().fetchBeforeCreate),
     sectionPostCreateCopyFiles: () => readVolatile(currentConfig().postCreateCopyFiles),
     sectionManageOfficialWorktrees: () => readVolatile(currentConfig().manageOfficialWorktrees),
+    forge: () => forgeService,
     ...(sessionDirectorySetter === undefined ? {} : { setSessionDirectory: sessionDirectorySetter }),
     ...(deferredWorktrees === undefined ? {} : { deferredWorktrees }),
     home: () => homedir(),
@@ -260,6 +263,15 @@ export function apply(ctx: Context, config: Config = {}): void {
       deps: readonly string[],
       callback: (scope: Context) => void,
     ) => unknown
+    injectOptional(['forge'], (forgeCtx) => {
+      const candidate = (forgeCtx as unknown as { forge?: unknown }).forge
+      if (isForgeServiceLike(candidate)) {
+        forgeService = candidate
+        forgeCtx.effect(() => () => {
+          if (forgeService === candidate) forgeService = undefined
+        }, 'git-worktree: optional forge bridge')
+      }
+    })
     injectOptional(['agents', 'workingDirectory'], (hostCtx) => {
       const agentsCandidate = (hostCtx as unknown as { agents?: unknown }).agents
       const workingDirCandidate = (hostCtx as unknown as { workingDirectory?: unknown }).workingDirectory
@@ -485,5 +497,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 
     postRoute(ROUTE_DEFERRED_ARM, 'deferred-arm', handleArmDeferredWorktree)
     postRoute(ROUTE_DEFERRED_ACTION, 'deferred-action', handleDeferredWorktreeAction)
+    postRoute(ROUTE_PR_CONTEXT, 'pr-context', handlePrContext)
+    postRoute(ROUTE_PR_RESOLVE, 'pr-resolve', handlePrResolve)
+    streamPostRoute(ROUTE_PR_CHECKOUT, 'pr-checkout', handlePrCheckout)
   })
 }

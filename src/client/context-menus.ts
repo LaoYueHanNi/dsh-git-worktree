@@ -8,7 +8,7 @@
  */
 
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { openCreateWorktree, openManageWorktrees, openRemoveWorktree } from './action-bus.ts'
+import { openCheckoutPr, openCreateWorktree, openManageWorktrees, openRemoveWorktree } from './action-bus.ts'
 import { isLinkedWorktreeFacts, type SnapshotObservable, type WorkspaceGitCache } from './workspace-git-cache.ts'
 
 /** Minimal action face matching `@deepseek-ai/dsh-client-ui-context-menu/client`. */
@@ -49,6 +49,7 @@ export interface ContextMenusLike {
 /** Icon keys dispatched through `contextMenu.icon`. */
 export const CONTEXT_MENU_ICON_KEYS = {
   create: 'git-worktree.create',
+  checkoutPr: 'git-worktree.checkoutPr',
   manage: 'git-worktree.manage',
   remove: 'git-worktree.remove',
 } as const
@@ -132,6 +133,12 @@ export function registerNativeContextMenus(deps: NativeContextMenusDeps): () => 
             icon: { key: CONTEXT_MENU_ICON_KEYS.create },
             separatorBefore: true,
             run: () => { openCreateWorktree(path, facts.repoName) },
+          },
+          {
+            id: 'checkout-pr',
+            label: t('contextMenu.checkoutPr'),
+            icon: { key: CONTEXT_MENU_ICON_KEYS.checkoutPr },
+            run: () => { openCheckoutPr(path, facts.repoName) },
           },
           {
             id: 'manage',

@@ -19,12 +19,19 @@ export const fetchHistory = (body: HistoryBody, signal: AbortSignal): Promise<Ca
 export const fetchAuthors = (body: AuthorsBody, signal: AbortSignal): Promise<Call<AuthorList>> => graphRead(ROUTE_AUTHORS, body, signal)
 export const fetchCommit = (repoPath: string, oid: string, signal: AbortSignal): Promise<Call<CommitDetail>> => graphRead(ROUTE_COMMIT, { repoPath, oid }, signal)
 import type {
-  ArmDeferredWorktreeBody, CreateBranchResult, CreateWorktreeResult, DeferredWorktreeActionBody, DeferredWorktreeSnapshot, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SetSessionDirectoryResult, SwitchResult, UpdateResult, WorktreesAllResult,
+  ArmDeferredWorktreeBody, CreateBranchResult, CreateWorktreeResult, DeferredWorktreeActionBody, DeferredWorktreeSnapshot, DeleteBranchResult, EnsureDirectoryResult, FetchResult, GroupWorkspacesResult, HeadStatus, InspectWorktreeResult, PathExistsResult, PrCheckoutBody, PrCheckoutResult, PrContextResult, PrResolveBody, PrResolveResult, PurgeDirectoryResult, RemoveWorktreeResult, RenameBranchResult, RepoStatus, RouteError, SetSessionDirectoryResult, SwitchResult, UpdateResult, WorktreesAllResult,
 } from '../wire.ts'
-import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_DEFERRED, ROUTE_DEFERRED_ACTION, ROUTE_DEFERRED_ARM, ROUTE_DEFERRED_EVENTS, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_SESSION_CWD, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
+import { ROUTE_BRANCH, ROUTE_BRANCH_DELETE, ROUTE_BRANCH_RENAME, ROUTE_DEFERRED, ROUTE_DEFERRED_ACTION, ROUTE_DEFERRED_ARM, ROUTE_DEFERRED_EVENTS, ROUTE_ENSURE_DIRECTORY, ROUTE_EXISTS, ROUTE_FETCH, ROUTE_GROUP, ROUTE_HEAD, ROUTE_INSPECT, ROUTE_PR_CHECKOUT, ROUTE_PR_CONTEXT, ROUTE_PR_RESOLVE, ROUTE_PURGE, ROUTE_REMOVE, ROUTE_SESSION_CWD, ROUTE_STATUS, ROUTE_SWITCH, ROUTE_UPDATE, ROUTE_WORKTREE, ROUTE_WORKTREES_ALL } from '../wire.ts'
 
-/** One route call outcome: the parsed body, or the error envelope text. */
-type Call<T> = (T & { ok: true }) | { ok: false; error: string }
+/** One route call outcome: the parsed body, or the error envelope text (+ optional structured code). */
+type Call<T> =
+  | (T & { ok: true })
+  | {
+      ok: false
+      error: string
+      code?: string
+      params?: Record<string, string | number>
+    }
 
 /** POST one JSON body and parse the uniform envelope. */
 async function post<T>(url: string, body: unknown): Promise<Call<T>> {
@@ -57,7 +64,12 @@ async function readEnvelope<T>(response: Response): Promise<Call<T>> {
   }
   if (!response.ok) {
     const error = payload as RouteError
-    return { ok: false, error: error.error ?? `HTTP ${String(response.status)}` }
+    return {
+      ok: false,
+      error: error.error ?? `HTTP ${String(response.status)}`,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      ...(error.params === undefined ? {} : { params: error.params }),
+    }
   }
   return { ...(payload as T), ok: true }
 }
@@ -122,7 +134,13 @@ async function postStream<T>(url: string, body: unknown, live: LiveCall = {}): P
     const done = closing.frame
     if (done === undefined) return { ok: false, error: STREAM_CUT }
     if (done.status < 200 || done.status >= 300) {
-      return { ok: false, error: (done.body as Partial<RouteError> | undefined)?.error ?? `HTTP ${String(done.status)}` }
+      const error = done.body as Partial<RouteError> | undefined
+      return {
+        ok: false,
+        error: error?.error ?? `HTTP ${String(done.status)}`,
+        ...(error?.code === undefined ? {} : { code: error.code }),
+        ...(error?.params === undefined ? {} : { params: error.params }),
+      }
     }
     return { ...(done.body as T), ok: true }
   } catch (cause) {
@@ -385,4 +403,58 @@ export function requestWorktreesAll(workspaces?: readonly string[]): Promise<Cal
  */
 export function requestPurgeDirectory(path: string): Promise<Call<PurgeDirectoryResult>> {
   return post<PurgeDirectoryResult>(ROUTE_PURGE, { path })
+}
+
+/**
+ * Probe remotes, optional host `ctx.forge` readiness, and open PR/MR candidates for a repository.
+ * @param repoPath - absolute directory inside the repository.
+ * @param signalOrOptions - optional cancellation signal or `{ remote, signal }`.
+ */
+export async function requestPrContext(
+  repoPath: string,
+  signalOrOptions?: AbortSignal | { readonly remote?: string; readonly signal?: AbortSignal },
+): Promise<Call<PrContextResult>> {
+  const signal = signalOrOptions instanceof AbortSignal ? signalOrOptions : signalOrOptions?.signal
+  const remote = signalOrOptions instanceof AbortSignal ? undefined : signalOrOptions?.remote
+  try {
+    const response = await fetch(ROUTE_PR_CONTEXT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath, ...(remote === undefined || remote === '' ? {} : { remote }) }),
+      cache: 'no-store',
+      ...(signal === undefined ? {} : { signal }),
+    })
+    return await readEnvelope<PrContextResult>(response)
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/**
+ * Resolve and validate a PR/MR ID or URL against repository remotes.
+ * @param body - repoPath, input, and optional remote/provider overrides.
+ * @param signal - optional cancellation signal.
+ */
+export async function requestPrResolve(body: PrResolveBody, signal?: AbortSignal): Promise<Call<PrResolveResult>> {
+  try {
+    const response = await fetch(ROUTE_PR_RESOLVE, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      ...(signal === undefined ? {} : { signal }),
+    })
+    return await readEnvelope<PrResolveResult>(response)
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+  }
+}
+
+/**
+ * Stream PR/MR fetch + isolated worktree creation (or safe reuse/update).
+ * @param body - checkout request payload.
+ * @param live - progress listener and cancellation signal.
+ */
+export function requestPrCheckout(body: PrCheckoutBody, live?: LiveCall): Promise<Call<PrCheckoutResult>> {
+  return postStream<PrCheckoutResult>(ROUTE_PR_CHECKOUT, body, live)
 }

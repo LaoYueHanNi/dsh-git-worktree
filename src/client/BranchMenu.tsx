@@ -116,6 +116,7 @@ import {
   type BranchRow, type TreeNode,
 } from './branch-tree.ts'
 import { dispatchBranchMenuKeyDown } from './branch-keyboard.ts'
+import { PrCheckoutGlyph } from './CheckoutPrModal.tsx'
 import { CommitGraph } from './CommitGraph.tsx'
 import { hostFrameTop } from './frame-top.ts'
 import { graphOpenAfter } from './graph-open.ts'
@@ -259,6 +260,8 @@ export interface BranchMenuProps {
   onUpdate: () => void
   /** Push the selected LOCAL branch, including branches held by worktrees. */
   onPush: (branch: string) => void
+  /** Open the checkout-PR/MR-to-worktree modal. */
+  onCheckoutPr?: () => void
   /** Whether the repository has any remote. Without one, "not pushed" is
    * the permanent state of every branch and the mark is withheld. */
   hasRemotes: boolean
@@ -444,7 +447,7 @@ const clearTooltip = (button: HTMLButtonElement): void => {
  * @returns null while closed or unplaced; otherwise the portaled card (+flyout).
  */
 export function BranchMenu({
-  open, repoPath, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, hasRemotes, updateBusy, onClose, defaultGraph = false, branchEpoch = 0, t,
+  open, repoPath, anchorRef, rows, currentBranch, confirm, onSelect, canCreate, canAdopt, canWorktree, onWorktree, onCutWorktree, onRemoveWorktree, worktreeRemovalBlocked, onCreate, onRename, onDelete, busy, onFetch, fetchBusy, onUpdate, onPush, onCheckoutPr, hasRemotes, updateBusy, onClose, defaultGraph = false, branchEpoch = 0, t,
 }: BranchMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const [graphOpen, setGraphOpen] = useState(false)
@@ -1897,6 +1900,24 @@ export function BranchMenu({
             >
               <FetchGlyph />
             </button>
+            {onCheckoutPr !== undefined && (
+              <button
+                type="button"
+                className={css.menuToolButton}
+                title={t('menuCheckoutPr')}
+                aria-label={t('menuCheckoutPr')}
+                disabled={busy}
+                onClick={() => {
+                  confirmRef.current?.onCancel()
+                  setCreating(false)
+                  setRenaming(null)
+                  setCtx(null)
+                  onCheckoutPr()
+                }}
+              >
+                <PrCheckoutGlyph size={15} />
+              </button>
+            )}
             <button
               type="button"
               className={css.menuToolButton}
